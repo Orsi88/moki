@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Orsi88/quality-agents/releases/latest"><b>⬇️ Download Moki for Windows</b></a>
-  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/quality-agents/releases/download/v0.1.0/Quality.Agents.Setup.0.1.0.exe">direct link (v0.1.0, .exe)</a>
+  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/quality-agents/releases/download/v0.2.0/Moki.Setup.0.2.0.exe">direct link (v0.2.0, .exe)</a>
   &nbsp;·&nbsp; <a href="#30-the-quickest-way-the-windows-installer">how to install</a>
 </p>
 
@@ -116,7 +116,7 @@ flowchart TD
 
 ### 3.0 The quickest way: the Windows installer
 
-1. Download the Windows installer from the [Releases page](https://github.com/Orsi88/quality-agents/releases). The v0.1.0 file is named `Quality.Agents.Setup.0.1.0.exe`. Installers built from this repository are named `Moki Setup <version>.exe`.
+1. Download **Moki.Setup.0.2.0.exe** from the [Releases page](https://github.com/Orsi88/quality-agents/releases), or use the direct link above.
 2. Run it. Windows may show *"Windows protected your PC"* because the installer is not digitally signed yet: click **More info → Run anyway**.
 3. Choose the installation folder and finish. A **Moki** shortcut is created on the desktop and in the Start menu.
 
