@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Orsi88/quality-agents/releases/latest"><b>⬇️ Baixar o Moki para Windows</b></a>
-  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/quality-agents/releases/download/v0.2.0/Moki.Setup.0.2.0.exe">Moki.Setup.0.2.0.exe</a>
+  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/quality-agents/releases/download/v0.2.1/Moki.Setup.0.2.1.exe">Moki.Setup.0.2.1.exe</a>
   &nbsp;·&nbsp; <a href="#instalar">como instalar</a>
 </p>
 
@@ -22,7 +22,7 @@ Começou como trabalho de qualidade de software: revisar uma história, projetar
 
 ### Windows
 
-1. Baixe o [Moki.Setup.0.2.0.exe](https://github.com/Orsi88/quality-agents/releases/download/v0.2.0/Moki.Setup.0.2.0.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/quality-agents/releases)).
+1. Baixe o [Moki.Setup.0.2.1.exe](https://github.com/Orsi88/quality-agents/releases/download/v0.2.1/Moki.Setup.0.2.1.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/quality-agents/releases)).
 2. Se o Windows disser que protegeu o computador, escolha **Mais informações → Executar assim mesmo**. O instalador ainda não tem assinatura digital.
 3. Conclua. Um atalho **Moki** aparece na área de trabalho e no menu Iniciar.
 

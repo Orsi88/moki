@@ -1,6 +1,6 @@
 {
   "name": "quality-agents",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Portable, vendor-neutral Agent Skills for software quality engineering.",
   "license": "MIT",
