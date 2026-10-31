@@ -1,5 +1,5 @@
 // Opens the built Moki window and checks the settings we use by hand:
-// the Models screen scrolls and accepts a logo and a watermark, and
+// the Templates screen scrolls and accepts a logo and a watermark, and
 // Create skill lives only under Add a skill.
 
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
@@ -82,7 +82,7 @@ test.describe.serial('Moki settings', () => {
     ({ app, page } = await openApp(root, userData));
     await expect(page.getByRole('button', { name: 'Configurações' })).toBeVisible();
     await page.getByRole('button', { name: 'Configurações' }).click();
-    await expect(page.getByRole('tab', { name: 'Modelos' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Templates' })).toBeVisible();
   });
 
   test.afterAll(async () => {
@@ -95,9 +95,9 @@ test.describe.serial('Moki settings', () => {
     } catch { /* the window may have exited before the paths were written */ }
   });
 
-  test('Models scrolls and its controls share one size', async () => {
-    await page.getByRole('tab', { name: 'Modelos' }).click();
-    await expect(page.getByRole('heading', { name: 'Modelos' })).toBeVisible();
+  test('Templates scrolls and its controls share one size', async () => {
+    await page.getByRole('tab', { name: 'Templates' }).click();
+    await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
     const form = page.locator('.ds-form');
     const room = await form.evaluate((el) => el.scrollHeight - el.clientHeight);
     expect(room).toBeGreaterThan(40);

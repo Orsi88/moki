@@ -133,10 +133,15 @@ textarea { width: 100%; resize: vertical; }
 .settings-bar .settings-tabs { flex: 1; border-bottom: 0; }
 .settings-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .settings-body .library { flex: 1; height: auto; min-height: 0; }
-.settings-project { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.settings-project select { max-width: 220px; padding: 5px 34px 5px 12px; font-size: 0.85rem; }
+/* The project a Settings tab works on, chosen inside the tab (components/ProjectPicker.tsx). */
+.project-picker { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.project-picker select { max-width: 240px; padding: 5px 34px 5px 12px; font-size: 0.85rem; }
+.library-group-head .project-picker { margin: 0; }
+.library-group-head .project-picker select { max-width: 100%; flex: 1; min-width: 0; }
+.library-group-empty { padding: 4px 12px; }
 .skills-embedded { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .skills-embedded .skills-intro { padding: 14px 20px 0; flex-shrink: 0; }
+.skills-embedded > .project-picker { padding: 0 20px; flex-shrink: 0; }
 .skills-embedded .dialog-tabs { flex-shrink: 0; }
 .skills-embedded .modal-body { flex: 1; min-height: 0; overflow: auto; }
 .settings-skills { max-width: 860px; margin: 0 auto; padding: 28px 28px 48px; overflow: auto; height: 100%; }

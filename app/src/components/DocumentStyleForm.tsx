@@ -1,4 +1,4 @@
-// Settings › Documents: the look of the PDF, Word and Excel files the activities and
+// Settings › Templates: the look of the PDF, Word and Excel files the activities and
 // agents generate (scripts/lib/doc-style.mjs applies it): font, colours, page colour,
 // header and footer (with a logo and page numbers) and a watermark. One style for all
 // projects; a project can have its own. A live page preview shows the result.
@@ -7,7 +7,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, DOCUMENT_FONTS, type DocumentStyle, type ProjectSummary } from '../api';
 import { t } from '../i18n';
 
-interface Props { project: ProjectSummary | null }
+// picker: chooses the project whose own style is edited (Settings); startOnProject: open on it, not on "all projects".
+interface Props { project: ProjectSummary | null; picker?: ReactNode; startOnProject?: boolean }
 
 const DEFAULT: DocumentStyle = {
   font: { family: 'Calibri', size: 10.5, color: '#1A1A1A' },
@@ -47,8 +48,8 @@ function readLogo(file: File): Promise<string> {
   });
 }
 
-export function DocumentStyleForm({ project }: Props) {
-  const [scope, setScope] = useState<'global' | 'project'>(project ? 'project' : 'global');
+export function DocumentStyleForm({ project, picker, startOnProject = true }: Props) {
+  const [scope, setScope] = useState<'global' | 'project'>(project && startOnProject ? 'project' : 'global');
   const [global, setGlobal] = useState<DocumentStyle>(DEFAULT);
   const [own, setOwn] = useState<DocumentStyle | null>(null); // the project's own style, if any
   const [style, setStyle] = useState<DocumentStyle>(DEFAULT); // what is being edited
@@ -126,15 +127,16 @@ export function DocumentStyleForm({ project }: Props) {
   return (
     <div className="ds">
       <div className="ds-form">
-        <h1>{t('Documents')}</h1>
+        <h1>{t('Templates')}</h1>
         <p className="muted">{t('How the PDF, Word and Excel files that your activities and agents generate look. Every AI tool gets the same result.')}</p>
 
         {project && (
           <div className="dialog-tabs ds-scope" role="tablist">
             <button type="button" role="tab" aria-selected={scope === 'global'} className={`dialog-tab${scope === 'global' ? ' on' : ''}`} onClick={() => setScope('global')}>{t('All projects')}</button>
-            <button type="button" role="tab" aria-selected={scope === 'project'} className={`dialog-tab${scope === 'project' ? ' on' : ''}`} onClick={() => setScope('project')}>{project.name}</button>
+            <button type="button" role="tab" aria-selected={scope === 'project'} className={`dialog-tab${scope === 'project' ? ' on' : ''}`} onClick={() => setScope('project')}>{t('One project')}</button>
           </div>
         )}
+        {onProject && picker}
         {onProject && (
           <label className="field inline ds-own">
             <input type="checkbox" checked={!inherits} onChange={(e) => toggleOwn(e.target.checked)} />

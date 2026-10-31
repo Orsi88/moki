@@ -25,6 +25,8 @@ interface Props {
   create?: ReactNode;
   /** Project whose installed agents are listed beside the library. */
   project?: ProjectSummary | null;
+  /** Chooses that project (Settings): shown as the heading of its agents. */
+  projectPicker?: ReactNode;
   /** Bumped after an agent is created, so that list reloads. */
   installedTick?: number;
 }
@@ -37,7 +39,7 @@ export const accessLabel = (access: string): string => ({
 
 const statusText = (status: string): string => ({ stable: t('Stable'), draft: t('Draft'), 'pending-migration': t('Pending migration'), planned: t('Planned') } as Record<string, string>)[status] ?? status;
 
-export function Library({ onBack, backLabel, embedded = false, onCreate, creating = false, onBrowse, create, project = null, installedTick = 0 }: Props) {
+export function Library({ onBack, backLabel, embedded = false, onCreate, creating = false, onBrowse, create, project = null, projectPicker, installedTick = 0 }: Props) {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sel, setSel] = useState<Sel | null>(null);
@@ -179,9 +181,10 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
         {([
           ['project', project?.name ?? t('This project'), projectAgents],
           ['global', t('All projects'), globalAgents],
-        ] as const).map(([kind, label, group]) => group.length > 0 && (
+        ] as const).map(([kind, label, group]) => (group.length > 0 || (kind === 'project' && projectPicker)) && (
           <section key={kind} className="library-group">
-            <div className="library-group-head">{label}</div>
+            <div className="library-group-head">{kind === 'project' && projectPicker ? projectPicker : label}</div>
+            {kind === 'project' && !group.length && <p className="muted small library-group-empty">{t('No agents installed only for this project.')}</p>}
             <ul>
               {group.map((a) => (
                 <li key={a.name}>

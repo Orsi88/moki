@@ -3,7 +3,7 @@
 // or asks the AI tool to draft a proposal. "Plugins" turns caveman or superpowers on for this
 // project only (ponytail and rtk are always on). Agents are not created here.
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type InstallResult, type ProjectSummary, type RegistrySkill, type SkillScope, type SkillSearchPage, type TerminalRef, type ToolInfo } from '../api';
 import { recall, remember } from '../prefs';
 import { t } from '../i18n';
@@ -26,6 +26,8 @@ interface Props {
   /** Renders inside Settings, without the modal frame. */
   embedded?: boolean;
   initialTab?: Tab;
+  /** Chooses the project (Settings): the skills installed for it, and where "this project" installs. */
+  projectPicker?: ReactNode;
 }
 
 const tabList = (): { id: Tab; label: string; intro: string }[] => [
@@ -92,7 +94,7 @@ const audit = (v: string | null): { label: string; cls: string } => ({
 // The skill's public page (description, files, audit); slugs are validated owner/name pairs.
 const skillPage = (slug: string) => `https://skillmd.com/skills/${slug}`;
 
-export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTerminal, embedded = false, initialTab = 'installed' }: Props) {
+export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTerminal, embedded = false, initialTab = 'installed', projectPicker }: Props) {
   const tabs = tabList();
   const canCreate = Boolean(tools && onTerminal);
   const [tab, setTab] = useState<Tab>(initialQuery ? 'add' : initialTab);
@@ -159,6 +161,7 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
         </header>
         )}
         {embedded && <p className="muted small skills-intro">{current.intro}</p>}
+        {embedded && projectPicker}
 
         <div className="dialog-tabs" role="tablist" aria-label={t('Skills')}>
           {tabs.map((tb) => (

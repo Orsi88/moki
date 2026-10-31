@@ -1088,5 +1088,7 @@
   "This project has no context yet.": "Este projeto ainda não tem contexto.",
   "It was created blank, or its context was never prepared. The AI writes it from the project's description and the documents in its inbox; then the files show up here.": "Ele foi criado em branco, ou o contexto nunca foi preparado. A IA escreve o contexto a partir da descrição do projeto e dos documentos do inbox; depois os arquivos aparecem aqui.",
   "Prepare the context with the AI": "Preparar o contexto com a IA",
-  "No project": "Sem projeto"
+  "No project": "Sem projeto",
+  "Templates": "Templates",
+  "One project": "Um projeto"
 }
