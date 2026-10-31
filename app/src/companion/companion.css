@@ -4,22 +4,23 @@
 body { font-size: 13px; background: var(--bg); }
 .mk { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
 
-.mk-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; flex-shrink: 0; }
-.mk-logo { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; }
+.mk-head { display: flex; align-items: flex-end; gap: 10px; padding: 12px 12px 10px; flex-shrink: 0; }
 .mk-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mk-brand { font-weight: 700; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
 .mk-head select { width: 100%; padding: 3px 28px 3px 8px; font-size: 0.92rem; font-weight: 600; }
-.mk-status { margin: 0; flex-shrink: 0; font-size: 0.72rem; }
+.mk-status { margin: 0 0 5px; flex-shrink: 0; font-size: 0.72rem; }
 
-.mk-tabs { padding: 0 8px; flex-shrink: 0; overflow-x: auto; }
-.mk-tabs .dialog-tab { padding: 7px 9px; font-size: 0.85rem; white-space: nowrap; }
+.mk-tabs { display: flex; flex-wrap: wrap; column-gap: 14px; padding: 0 12px; flex-shrink: 0; overflow: hidden; }
+.mk-tabs .dialog-tab { padding: 7px 0; font-size: 0.85rem; white-space: nowrap; }
+.mk-tabs .dialog-tab:focus-visible { outline: none; color: var(--text); }
 .mk-count { display: inline-block; margin-left: 5px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 0.7rem; font-weight: 700; line-height: 16px; text-align: center; }
 
-.mk-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 10px 16px; }
+.mk-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 12px 16px; scrollbar-gutter: stable; }
 .mk-body .result { margin: 0 0 10px; }
 .mk-list { display: flex; flex-direction: column; gap: 8px; }
 .mk-section { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin: 10px 2px 2px; }
 .mk-summary { margin: 0; }
+.mk-empty-inline { padding: 24px 8px; }
 .mk-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 24px 18px; }
 
 .mk-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); overflow: hidden; }
@@ -61,5 +62,15 @@ body { font-size: 13px; background: var(--bg); }
 .mk-switch input:checked + .mk-switch-track::after { transform: translateX(12px); background: var(--accent-text); }
 .mk-switch input:focus-visible + .mk-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.mk-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--ribbon); }
+.mk-foot { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--ribbon); }
 .mk-mcp { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Scroll bars: thin, no arrows, and only seen while the pointer is over what scrolls. VS Code gives
+   webviews a scrollbar-color, and while it is set Chromium ignores ::-webkit-scrollbar and draws the
+   system bar (with arrows): it goes back to auto here. */
+html, html * { scrollbar-color: auto; scrollbar-width: auto; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 40%, transparent); }

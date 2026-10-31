@@ -15,7 +15,7 @@
   "contributes": {
     "mcpServerDefinitionProviders": [{ "id": "moki", "label": "Moki" }],
     "viewsContainers": {
-      "activitybar": [{ "id": "moki", "title": "Moki", "icon": "$(beaker)" }]
+      "activitybar": [{ "id": "moki", "title": "Moki", "icon": "resources/moki-activitybar.svg" }]
     },
     "views": {
       "moki": [{ "type": "webview", "id": "moki.panel", "name": "Moki" }]

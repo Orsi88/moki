@@ -1068,7 +1068,6 @@
   "Copy for the chat": "Copiar para o chat",
   "Choose at least one file.": "Escolha pelo menos um arquivo.",
   "Shared by tags": "Compartilhado por tags",
-  "This project has no context files yet.": "Este projeto ainda não tem arquivos de contexto.",
   "{n} of {total} files go to the AI": "{n} de {total} arquivos vão para a IA",
   "Switched off, a file stays out of the requests and of what the AI can read. The star gives it to the AI first.": "Desligado, o arquivo fica fora dos pedidos e do que a IA pode ler. A estrela entrega o arquivo à IA primeiro.",
   "Goes to the AI": "Vai para a IA",
@@ -1085,5 +1084,8 @@
   "On: click to switch it off": "Ligado: clique para desligar",
   "Off: click to switch it on": "Desligado: clique para ligar",
   "(off: kept here, given to no project)": "(desligado: fica guardado aqui e não vai para nenhum projeto)",
-  "Choose at least one project, or make it global.": "Escolha pelo menos um projeto, ou deixe global."
+  "Choose at least one project, or make it global.": "Escolha pelo menos um projeto, ou deixe global.",
+  "This project has no context yet.": "Este projeto ainda não tem contexto.",
+  "It was created blank, or its context was never prepared. The AI writes it from the project's description and the documents in its inbox; then the files show up here.": "Ele foi criado em branco, ou o contexto nunca foi preparado. A IA escreve o contexto a partir da descrição do projeto e dos documentos do inbox; depois os arquivos aparecem aqui.",
+  "Prepare the context with the AI": "Preparar o contexto com a IA"
 }

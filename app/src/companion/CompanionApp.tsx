@@ -59,7 +59,6 @@ export function CompanionApp() {
 
   const header = (
     <header className="mk-head">
-      <img className="mk-logo" src="./favicon.svg" alt="" />
       <div className="mk-head-text">
         <span className="mk-brand">Moki</span>
         <select value={state.project?.id ?? ''} onChange={(e) => choose(e.target.value)} aria-label={t('Project')}>
@@ -131,7 +130,12 @@ export function CompanionApp() {
         )}
 
         {tab === 'context' && (
-          <ContextTab files={files} included={included} onChange={setFiles} onError={fail} />
+          <ContextTab files={files} included={included} onChange={setFiles} onError={fail}
+            onPrepare={() => {
+              // The activity that writes the context: planning with the AI for a blank project, else preparing or updating it.
+              const id = ['plan', 'setup', 'context'].find((a) => activities.some((x) => x.id === a && x.available));
+              setTab('activities'); setOpen(id ?? '');
+            }} />
         )}
 
         {tab === 'runs' && (
@@ -241,12 +245,21 @@ function LaunchBox({ launch, inbox, languages, agents, onDone }: { launch: Launc
   );
 }
 
-function ContextTab({ files, included, onChange, onError }: { files: ContextFile[]; included: number; onChange: (f: ContextFile[]) => void; onError: (e: unknown) => void }) {
+function ContextTab({ files, included, onChange, onError, onPrepare }: { files: ContextFile[]; included: number; onChange: (f: ContextFile[]) => void; onError: (e: unknown) => void; onPrepare: () => void }) {
   const groups = useMemo(() => ([
     ['context', t('Project context')], ['note', t('Notes')], ['shared', t('Shared by tags')],
   ] as const).map(([kind, label]) => ({ kind, label, items: files.filter((f) => f.kind === kind) })).filter((g) => g.items.length), [files]);
   const set = (method: string, id: string, on: boolean) => call<ContextFile[]>(method, id, on).then(onChange).catch(onError);
-  if (!files.length) return <p className="muted small">{t('This project has no context files yet.')}</p>;
+  if (!files.length) {
+    return (
+      <div className="mk-empty mk-empty-inline">
+        <CatIcon id="reading" size={64} />
+        <p><strong>{t('This project has no context yet.')}</strong></p>
+        <p className="muted small">{t('It was created blank, or its context was never prepared. The AI writes it from the project\'s description and the documents in its inbox; then the files show up here.')}</p>
+        <button type="button" className="btn" onClick={onPrepare}>{t('Prepare the context with the AI')}</button>
+      </div>
+    );
+  }
   return (
     <div className="mk-list">
       <p className="mk-summary"><strong>{t('{n} of {total} files go to the AI', { n: included, total: files.length })}</strong></p>
