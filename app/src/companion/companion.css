@@ -73,3 +73,6 @@ html, html * { scrollbar-color: auto; scrollbar-width: auto; }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
 :hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 40%, transparent); }
+
+/* The list keeps 6px for its scroll bar (scrollbar-gutter): the rows above and below end where its cards end. */
+.mk-head, .mk-tabs, .mk-foot { padding-right: 18px; }
