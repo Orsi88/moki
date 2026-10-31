@@ -5,10 +5,10 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { createProject } from '../scripts/lib/core.ts';
+import { createProject, TOOLS } from '../scripts/lib/core.ts';
 import {
-  clean, effectiveServers, enabledServers, generatedEntries, importConfig, listServers, mergeManaged, mokiServer, projectChoices, removeServer,
-  resolveServer, saveServer, serversForAgent, setProjectEnabled, syncCursorFolder, toolConfig, type McpServer,
+  appliesTo, clean, enabledServers, generatedEntries, importConfig, listServers, mergeManaged, mokiServer, removeServer,
+  resolveServer, saveServer, serversForAgent, syncCursorFolder, toolConfig, type McpServer,
 } from '../scripts/lib/mcp.ts';
 import { createOperationRun } from '../scripts/lib/operation-runs.ts';
 import { probeServer } from '../desktop/mcp-probe.ts';
@@ -51,17 +51,16 @@ const FAKE_GITHUB = ['ghp', 'abcdefghijklmnopqrstuvwxyz0123456789AB'].join('_');
 const FAKE_ANTHROPIC = ['sk', 'ant', 'abcdefghijklmnopqrstuvwxyz'].join('-');
 const FAKE_URL = ['https://user', 'secretpass@example.com'].join(':');
 
-test('ids are stable and unique in the workspace; names may repeat', () => {
-  const w = saveServer('workspace', null, playwright, root);
+test('one catalog: ids are stable and unique, names may repeat', () => {
+  const w = saveServer(playwright, root);
   assert.equal(w.id, 'playwright-mcp');
-  const renamed = saveServer('workspace', null, { ...w, name: 'Playwright' }, root);
+  const renamed = saveServer({ ...w, name: 'Playwright' }, root);
   assert.equal(renamed.id, 'playwright-mcp', 'a rename keeps the id');
-  const p = saveServer('project', 'acme', { ...playwright, name: 'Playwright MCP' }, root);
-  assert.equal(p.id, 'playwright-mcp-project', 'no implicit override of the workspace server');
-  const again = saveServer('workspace', null, { ...playwright, name: 'Playwright MCP Project' }, root);
-  assert.equal(again.id, 'playwright-mcp-project-2', 'a workspace server never takes an id a project uses');
-  removeServer('workspace', null, again.id, root);
-  assert.throws(() => saveServer('project', 'nope', playwright, root), /Unknown project/);
+  const twin = saveServer({ ...playwright, name: 'Playwright MCP' }, root);
+  assert.equal(twin.id, 'playwright-mcp-2', 'the same name never overrides another server');
+  removeServer(twin.id, root);
+  assert.throws(() => removeServer('ghost', root), /Unknown MCP server/);
+  assert.deepEqual(listServers(root).map((s) => s.id), ['playwright-mcp']);
 });
 
 test('credentials are never stored: ${VARIABLE} only', () => {
@@ -77,28 +76,19 @@ test('credentials are never stored: ${VARIABLE} only', () => {
   assert.throws(() => clean({ name: '', command: 'x' }), /name/);
 });
 
-test('inheritance: defaults, a choice only in one project, execute starts off, removal clears choices', () => {
-  const exec = saveServer('workspace', null, { name: 'Azure DevOps', command: 'npx', args: ['azure-devops-mcp'], access: 'execute' }, root);
-  assert.equal(exec.enabledByDefault, false, 'a server that executes is off in projects until turned on');
+test('where a server applies: global, or only the projects chosen; off reaches no project', () => {
   const on = (p: string) => enabledServers(p, root).map((s) => s.id);
-  assert.ok(on('acme').includes('playwright-mcp') && on('beta').includes('playwright-mcp'));
-  assert.ok(!on('acme').includes('azure-devops'));
-  setProjectEnabled('acme', 'azure-devops', true, root);
-  setProjectEnabled('beta', 'playwright-mcp', false, root);
-  assert.ok(on('acme').includes('azure-devops') && !on('beta').includes('azure-devops'));
-  assert.ok(on('acme').includes('playwright-mcp') && !on('beta').includes('playwright-mcp'));
-  assert.deepEqual(projectChoices('beta', root), { 'playwright-mcp': false });
-  setProjectEnabled('beta', 'playwright-mcp', true, root);
-  assert.deepEqual(projectChoices('beta', root), {}, 'back to the default: nothing stored');
-  assert.ok(on('acme').includes('playwright-mcp-project'), 'project servers are on in their project');
-  assert.ok(!on('beta').includes('playwright-mcp-project'), 'and nowhere else');
-  const e = effectiveServers('acme', root).find((x) => x.server.id === 'azure-devops');
-  assert.deepEqual([e?.origin, e?.enabled, e?.changed], ['workspace', true, true]);
-  const temp = saveServer('workspace', null, { name: 'Temp', command: 'npx' }, root);
-  setProjectEnabled('acme', temp.id, false, root);
-  removeServer('workspace', null, temp.id, root);
-  assert.ok(!(temp.id in projectChoices('acme', root)));
-  assert.throws(() => setProjectEnabled('acme', 'nothing', true, root), /Unknown MCP server/);
+  assert.deepEqual([on('acme'), on('beta')], [['playwright-mcp'], ['playwright-mcp']], 'global: every project of the workspace');
+  saveServer({ name: 'Azure DevOps', command: 'npx', args: ['azure-devops-mcp'], access: 'execute', projects: ['acme'] }, root);
+  saveServer({ name: 'Local tools', command: 'node', args: ['tools.js'], projects: ['acme', 'gone'] }, root);
+  assert.deepEqual(on('acme'), ['playwright-mcp', 'azure-devops', 'local-tools']);
+  assert.deepEqual(on('beta'), ['playwright-mcp'], 'a project not chosen never gets it');
+  assert.deepEqual(listServers(root).find((s) => s.id === 'local-tools')?.projects, ['acme'], 'projects that do not exist are left out');
+  assert.throws(() => saveServer({ name: 'Nowhere', command: 'npx', projects: ['gone'] }, root), /at least one project/);
+  const temp = saveServer({ name: 'Temp', command: 'npx', enabled: false }, root);
+  assert.ok(!on('acme').includes(temp.id) && !on('beta').includes(temp.id), 'switched off: no project gets it');
+  assert.ok(appliesTo(temp, 'beta'));
+  removeServer(temp.id, root);
 });
 
 test('an agent gets only the servers its contract names and the project has on', () => {
@@ -148,6 +138,9 @@ test('Claude Code started by Moki gets --mcp-config with the project servers and
   assert.deepEqual(Object.keys(config.mcpServers).sort(), ['moki', 'moki-playwright-mcp']);
   assert.deepEqual(config.mcpServers.moki.args?.slice(-2), ['--project', 'beta']);
   assert.equal(config.mcpServers.moki.env?.QA_ROOT, root);
+  // --mcp-config takes several files: without "--" Claude Code read the request as one more and quit at once.
+  const args = [...extra, ...(TOOLS.claude.args?.('Revise a US-1') ?? [])];
+  assert.deepEqual(args.slice(-2), ['--', 'Revise a US-1']);
 });
 
 test('Cursor started by Moki: the moki entries of <root>/.cursor/mcp.json, the person\'s kept', () => {
@@ -155,7 +148,7 @@ test('Cursor started by Moki: the moki entries of <root>/.cursor/mcp.json, the p
   writeFileSync(join(root, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { mine: { command: 'mine' } } }));
   service.launch({ project: 'acme', activity: 'open', tool: 'cursor-agent', files: [], note: '', language: 'English' } as never);
   const keys = Object.keys((JSON.parse(readFileSync(join(root, '.cursor', 'mcp.json'), 'utf8')) as { mcpServers: object }).mcpServers).sort();
-  assert.deepEqual(keys, ['mine', 'moki', 'moki-azure-devops', 'moki-playwright-mcp', 'moki-playwright-mcp-project']);
+  assert.deepEqual(keys, ['mine', 'moki', 'moki-azure-devops', 'moki-local-tools', 'moki-playwright-mcp']);
 });
 
 test('sync with Cursor in the linked folder: asks first, honours writeAllowed, backs up', () => {
@@ -173,21 +166,23 @@ test('sync with Cursor in the linked folder: asks first, honours writeAllowed, b
   setRepo('acme', { name: 'app', localPath: linked, purpose: 'system', writeAllowed: true, linkedFolder: true });
 });
 
-test('service: catalog views, test results kept without values, agent ids offered', async () => {
-  const ws = service.mcpCatalog();
-  assert.equal(ws.scope, 'workspace');
-  assert.ok(ws.servers.find((s) => s.id === 'azure-devops')?.usedBy.includes('acme'));
-  const proj = service.mcpCatalog('beta');
-  assert.deepEqual(proj.servers.map((s) => [s.id, s.origin, s.enabled]), [['playwright-mcp', 'workspace', true], ['azure-devops', 'workspace', false]]);
-  const r = await service.testMcpServer('workspace', null, 'playwright-mcp');
+test('service: one catalog with where each server applies, test results kept without values', async () => {
+  const c = service.mcpCatalog();
+  assert.deepEqual(c.projects.map((p) => p.id), ['acme', 'beta']);
+  assert.deepEqual(c.servers.find((s) => s.id === 'playwright-mcp')?.usedBy, ['acme', 'beta']);
+  assert.deepEqual(c.servers.find((s) => s.id === 'azure-devops')?.usedBy, ['acme']);
+  const r = await service.testMcpServer('playwright-mcp');
   assert.equal(r.tools[0].name, 'playwright-mcp_tool');
   assert.equal(service.mcpCatalog().servers.find((s) => s.id === 'playwright-mcp')?.status?.ok, true);
   assert.ok(readFileSync(join(root, 'workspace', 'logs', 'mcp.log'), 'utf8').includes('"action":"test"'));
-  assert.ok(service.knownMcps('acme').includes('playwright-mcp-project'));
-  const imported = service.importMcpServers('project', 'beta', JSON.stringify({ mcpServers: { local: { command: 'node', args: ['tools.js'] } } }));
-  assert.deepEqual(imported.saved.map((s) => s.id), ['local']);
-  assert.throws(() => service.saveMcpServer('somewhere', null, playwright), /Choose where/);
-  assert.ok(service.tree('beta').at(-1)?.children?.some((n) => n.mcp === 'Moki (project)' && n.name === 'local'));
+  assert.ok(service.knownMcps('acme').includes('local-tools'));
+  assert.ok(!service.knownMcps('beta').includes('local-tools'));
+  const imported = service.importMcpServers(JSON.stringify({ mcpServers: { local: { command: 'node', args: ['tools.js'] } } }), ['beta']);
+  assert.deepEqual(imported.saved.map((s) => [s.id, s.projects]), [['local', ['beta']]]);
+  assert.ok(service.tree('beta').at(-1)?.children?.some((n) => n.mcp === 'Moki (this project)' && n.name === 'local'));
+  assert.ok(service.tree('beta').at(-1)?.children?.some((n) => n.mcp === 'Moki (global)' && n.name === 'Playwright'));
+  service.removeMcpServer('local');
+  assert.ok(!service.mcpCatalog().servers.some((s) => s.id === 'local'));
 });
 
 test('an operation run keeps the servers it started with', () => {
@@ -196,7 +191,7 @@ test('an operation run keeps the servers it started with', () => {
   const op = { id: 'op', name: 'Op', steps: [{ id: 's1', agent: 'library:test-designer', x: 0, y: 0 }], links: [], lanes: [], maxRounds: 3 };
   const agent = { key: 'library:test-designer', name: 'test-designer', source: 'library', description: '', access: 'project-write', inputs: [], outputs: [], outcomes: [], mcps: [{ name: 'playwright-mcp', mode: 'read' }], ai: 'claude', file: 'agents/quality/test-designer.md', servers };
   const run = createOperationRun(dir, 'acme', op as never, [agent as never], ['s1'], { tools: { s1: 'claude' }, answers: [], context: '' });
-  saveServer('workspace', null, { ...listServers('workspace', null, root).find((s) => s.id === 'playwright-mcp'), args: ['@playwright/mcp@2'] }, root);
+  saveServer({ ...listServers(root).find((s) => s.id === 'playwright-mcp'), args: ['@playwright/mcp@2'] }, root);
   const saved = JSON.parse(readFileSync(join(dir, 'runs', run.id, 'state.json'), 'utf8')) as { steps: { servers: McpServer[] }[] };
   assert.deepEqual(saved.steps[0].servers[0].args, ['@playwright/mcp@latest'], 'the run still has the definition it started with');
 });

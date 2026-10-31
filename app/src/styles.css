@@ -1175,3 +1175,9 @@ span.mcp-row-main { cursor: default; }
 .mcp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .mcp-tool-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
 @media (max-width: 900px) { .mcp { flex-direction: column; overflow: auto; } .mcp-panel { width: auto; border-left: 0; border-top: 1px solid var(--border); } }
+.mcp-row.off .mcp-name { color: var(--faint); }
+.mcp-where-chip { flex-shrink: 1; min-width: 0; max-width: 40%; padding: 2px 9px; border-radius: 999px; background: var(--bg-3); color: var(--muted); font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcp-where-chip.global { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.mcp-where { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mcp-projects { list-style: none; margin: 6px 0 0; padding: 6px 8px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 4px; }
+.mcp-projects label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; }

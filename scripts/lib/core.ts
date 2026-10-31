@@ -44,7 +44,8 @@ export const ACTIVITIES: Record<ActivityKey, Activity> = {
 };
 
 export const TOOLS: Record<ToolKey, Tool> = {
-  claude: { label: 'Claude Code', command: 'claude', args: (p) => [p] },
+  // "--": the prompt is never taken by an option before it (--mcp-config and --plugin-dir take several values).
+  claude: { label: 'Claude Code', command: 'claude', args: (p) => ['--', p] },
   codex: { label: 'OpenAI Codex CLI', command: 'codex', args: (p) => [p] },
   'cursor-agent': { label: 'Cursor Agent CLI', command: 'cursor-agent', args: (p) => [p] },
   gemini: { label: 'Gemini CLI', command: 'gemini', args: (p) => ['-i', p] },

@@ -1,19 +1,18 @@
-// MCP Manager: the MCP servers Moki knows, in two scopes. The workspace catalog
-// (<workspace>/mcp-servers.json) is offered to every project of the workspace; a
-// project turns each one on or off (project.json "mcp": {"<id>": true|false}) but
-// never edits it. A project's own servers (<project>/mcp-servers.json) exist only
-// there. Ids are stable (a rename keeps them) and unique in the whole workspace, so
-// an agent's contract (mcps: {<id>: read|execute}) never points at two servers.
-// Credentials are never stored: environment and header values are ${VARIABLE}
-// references, read from the environment only when a server starts or is tested.
+// MCP Manager: the MCP servers Moki knows, in one catalog per workspace
+// (<workspace>/mcp-servers.json). Each server says where it applies: every project
+// of the workspace (projects: [], "Global") or only the projects listed. A server
+// can be switched off without deleting it. Ids are stable (a rename keeps them) and
+// unique in the catalog, so an agent's contract (mcps: {<id>: read|execute}) never
+// points at two servers. Credentials are never stored: environment and header values
+// are ${VARIABLE} references, read from the environment only when a server starts or
+// is tested.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { readJson, workspaceDir } from './repo.mjs';
 import { PATTERNS } from './secret-patterns.mjs';
-import { listProjects, projectsDir, slugify } from './core.ts';
+import { listProjects, slugify } from './core.ts';
 
-export type McpScope = 'workspace' | 'project';
 export type McpTransport = 'stdio' | 'http';
 export type McpAccess = 'read' | 'execute'; // read: queries data; execute: changes something outside Moki
 
@@ -28,10 +27,9 @@ export interface McpServer {
   env: Record<string, string>; // stdio
   headers: Record<string, string>; // http
   access: McpAccess;
-  enabledByDefault: boolean; // workspace: on in projects that did not choose; project: on or off
+  enabled: boolean; // off: kept in the catalog, given to no project
+  projects: string[]; // where it applies: [] = every project of the workspace (global)
 }
-
-export interface EffectiveServer { server: McpServer; origin: McpScope; enabled: boolean; changed: boolean } // changed: the project chose, not the default
 
 export class McpError extends Error {}
 
@@ -42,31 +40,16 @@ const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const VAR = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 const SECRET_KEY = /(token|secret|password|passwd|pwd|api[-_]?key|private[-_]?key|auth|credential|cookie)/i;
-const LIMIT = { name: 60, description: 300, command: 500, arg: 2000, args: 50, url: 2000, pairs: 50, value: 2000 };
+const LIMIT = { name: 60, description: 300, command: 500, arg: 2000, args: 50, url: 2000, pairs: 50, value: 2000, projects: 500 };
 
-const workspaceFile = (root: string) => join(workspaceDir(root), MCP_FILE);
-const projectFile = (project: string, root: string) => join(projectsDir(root), project, MCP_FILE);
-const fileOf = (scope: McpScope, project: string | null, root: string): string => {
-  if (scope === 'workspace') return workspaceFile(root);
-  if (!project || !listProjects(root).includes(project)) throw new McpError('Unknown project.');
-  return projectFile(project, root);
-};
+const catalogFile = (root: string) => join(workspaceDir(root), MCP_FILE);
 const writeJson = (file: string, data: unknown) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`); };
 
-function read(file: string): McpServer[] {
+export function listServers(root: string): McpServer[] {
   let data: { servers?: unknown } = {};
-  try { data = readJson(file) as { servers?: unknown }; } catch { /* none yet */ }
+  try { data = readJson(catalogFile(root)) as { servers?: unknown }; } catch { /* none yet */ }
   const list = Array.isArray(data.servers) ? data.servers : [];
   return list.flatMap((raw) => { try { return [clean(raw)]; } catch { return []; } }); // a broken entry is skipped, never half-used
-}
-
-export const listServers = (scope: McpScope, project: string | null, root: string): McpServer[] => read(fileOf(scope, project, root));
-
-// Every id in use in the workspace (its catalog and every project's own servers).
-export function workspaceIds(root: string): Set<string> {
-  const ids = new Set(read(workspaceFile(root)).map((s) => s.id));
-  for (const p of listProjects(root)) for (const s of read(projectFile(p, root))) ids.add(s.id);
-  return ids;
 }
 
 const strings = (v: unknown, max: number): string[] => (Array.isArray(v) ? v.map((x) => String(x ?? '')).slice(0, max) : []);
@@ -119,75 +102,44 @@ export function clean(raw: unknown): McpServer {
     id: ID.test(id) ? id : '', name, description: String(r.description ?? '').trim().slice(0, LIMIT.description), transport,
     command: transport === 'stdio' ? command : '', args, url: transport === 'http' ? url : '', env, headers,
     access: r.access === 'execute' ? 'execute' : 'read',
-    // A server that can change things is off in projects until someone turns it on.
-    enabledByDefault: typeof r.enabledByDefault === 'boolean' ? r.enabledByDefault : r.access !== 'execute',
+    enabled: r.enabled !== false,
+    projects: [...new Set(strings(r.projects, LIMIT.projects).filter((p) => ID.test(p)))],
   };
 }
 
-// Creates (no id, or an id not in this scope) or updates a server. New ids come from the name and never clash in the workspace.
-export function saveServer(scope: McpScope, project: string | null, raw: unknown, root: string): McpServer {
-  const file = fileOf(scope, project, root);
-  const list = read(file);
+// Creates (no id, or an unknown id) or updates a server. New ids come from the name and never clash;
+// projects that do not exist in the workspace are left out, and a "specific projects" server needs at least one.
+export function saveServer(raw: unknown, root: string): McpServer {
+  const list = listServers(root);
   const server = clean(raw);
+  const known = new Set(listProjects(root));
+  const specific = (raw as { projects?: unknown } | null)?.projects;
+  server.projects = server.projects.filter((p) => known.has(p));
+  if (Array.isArray(specific) && specific.length && !server.projects.length) throw new McpError(`${server.name}: choose at least one project of this workspace, or make it global.`);
   const old = list.find((s) => s.id === server.id);
   if (!old) {
-    const taken = workspaceIds(root);
+    const taken = new Set(list.map((s) => s.id));
     const base = slugify(server.name) || 'server';
-    let id = scope === 'project' && taken.has(base) ? `${base}-project` : base;
+    let id = base;
     for (let i = 2; taken.has(id); i++) id = `${base}-${i}`;
     server.id = id;
   }
-  writeJson(file, { servers: old ? list.map((s) => (s.id === server.id ? server : s)) : [...list, server] });
+  writeJson(catalogFile(root), { servers: old ? list.map((s) => (s.id === server.id ? server : s)) : [...list, server] });
   return server;
 }
 
-// Removing a workspace server also removes the projects' choices about it.
-export function removeServer(scope: McpScope, project: string | null, id: string, root: string): void {
-  const file = fileOf(scope, project, root);
-  const list = read(file);
+export function removeServer(id: string, root: string): void {
+  const list = listServers(root);
   if (!list.some((s) => s.id === id)) throw new McpError('Unknown MCP server.');
-  writeJson(file, { servers: list.filter((s) => s.id !== id) });
-  if (scope === 'workspace') for (const p of listProjects(root)) if (id in projectChoices(p, root)) setChoice(p, id, null, root);
+  writeJson(catalogFile(root), { servers: list.filter((s) => s.id !== id) });
 }
 
-export function projectChoices(project: string, root: string): Record<string, boolean> {
-  try {
-    const mcp = (readJson(join(projectsDir(root), project, 'project.json')) as { mcp?: unknown }).mcp;
-    return mcp && typeof mcp === 'object' ? Object.fromEntries(Object.entries(mcp).filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean> : {};
-  } catch { return {}; }
-}
+export const appliesTo = (s: McpServer, project: string): boolean => !s.projects.length || s.projects.includes(project);
 
-function setChoice(project: string, id: string, on: boolean | null, root: string): void {
-  const file = join(projectsDir(root), project, 'project.json');
-  const data = readJson(file) as Record<string, unknown>;
-  const mcp = projectChoices(project, root);
-  if (on === null) delete mcp[id]; else mcp[id] = on;
-  writeJson(file, { ...data, mcp });
-}
+// The servers one project gets: on, and global or listed for it.
+export const enabledServers = (project: string, root: string): McpServer[] => listServers(root).filter((s) => s.enabled && appliesTo(s, project));
 
-// Turns a workspace server on or off in one project; the default again removes the choice.
-export function setProjectEnabled(project: string, id: string, on: boolean, root: string): void {
-  const server = read(workspaceFile(root)).find((s) => s.id === id);
-  if (server) { setChoice(project, id, on === server.enabledByDefault ? null : on, root); return; }
-  const own = read(projectFile(project, root));
-  const mine = own.find((s) => s.id === id);
-  if (!mine) throw new McpError('Unknown MCP server.');
-  writeJson(projectFile(project, root), { servers: own.map((s) => (s.id === id ? { ...s, enabledByDefault: on } : s)) });
-}
-
-// What one project has: the workspace catalog with the project's choices, then its own servers.
-export function effectiveServers(project: string, root: string): EffectiveServer[] {
-  const choices = projectChoices(project, root);
-  const inherited = read(workspaceFile(root)).map((server): EffectiveServer => ({
-    server, origin: 'workspace', enabled: choices[server.id] ?? server.enabledByDefault, changed: server.id in choices,
-  }));
-  const own = read(projectFile(project, root)).map((server): EffectiveServer => ({ server, origin: 'project', enabled: server.enabledByDefault, changed: false }));
-  return [...inherited, ...own];
-}
-
-export const enabledServers = (project: string, root: string): McpServer[] => effectiveServers(project, root).filter((e) => e.enabled).map((e) => e.server);
-
-// The servers an agent's contract names that the project has on, and the names it cannot have.
+// The servers an agent's contract names that the project has, and the names it cannot have.
 export function serversForAgent(project: string, mcps: { name: string }[], root: string): { servers: McpServer[]; missing: string[] } {
   const on = enabledServers(project, root);
   const servers = mcps.flatMap((m) => on.filter((s) => s.id === m.name));
@@ -282,7 +234,7 @@ export function writeMerged(file: string, entries: GeneratedEntry[], tool: 'clau
 // `script`: the server file (the .ts in the repository, or a built bundle); without Node.js, `runtime` runs it as Node (ELECTRON_RUN_AS_NODE).
 export function mokiServer(project: string, root: string, script: string, node: string | null, runtime = process.execPath): McpServer {
   return {
-    id: MOKI_SERVER, name: 'Moki', description: 'This project in Moki (read-only)', transport: 'stdio', url: '', headers: {}, access: 'read', enabledByDefault: true,
+    id: MOKI_SERVER, name: 'Moki', description: 'This project in Moki (read-only)', transport: 'stdio', url: '', headers: {}, access: 'read', enabled: true, projects: [project],
     command: node ?? runtime, args: [script, '--project', project],
     env: { QA_ROOT: root, QA_WORKSPACE: workspaceDir(root), ...(node ? {} : { ELECTRON_RUN_AS_NODE: '1' }) },
   };

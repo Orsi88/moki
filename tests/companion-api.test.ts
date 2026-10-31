@@ -38,7 +38,7 @@ before(() => {
   writeFileSync(join(projects, 'acme', 'inbox', 'us-1.md'), '# US-1');
   const file = join(projects, 'acme', 'project.json');
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), agents: ['test-designer'] }));
-  saveServer('workspace', null, { name: 'Playwright', command: 'npx', args: ['@playwright/mcp@latest'] }, root);
+  saveServer({ name: 'Playwright', command: 'npx', args: ['@playwright/mcp@latest'] }, root);
   execFileSync('git', ['init', '-q'], { cwd: folder });
   writeFileSync(join(folder, '.mcp.json'), JSON.stringify({ mcpServers: { mine: { command: 'mine' } } }));
 

@@ -25,7 +25,7 @@ import { cleanPrompt, type LaunchResult } from './launcher.ts';
 import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
 import { isPageEdit, parsePdfChange, pdfScript, toComments, type PdfRunner } from './pdfcraft.ts';
-import { MOKI_SERVER, McpError, effectiveServers, enabledServers, generatedEntries, importConfig, listServers, mokiServer, removeServer, saveServer, serversForAgent, setProjectEnabled, syncCursorFolder, toolConfig, writeMerged, type GeneratedEntry, type McpScope, type McpServer } from '../scripts/lib/mcp.ts';
+import { MOKI_SERVER, McpError, appliesTo, enabledServers, generatedEntries, importConfig, listServers, mokiServer, removeServer, saveServer, serversForAgent, syncCursorFolder, toolConfig, writeMerged, type GeneratedEntry, type McpServer } from '../scripts/lib/mcp.ts';
 import { probeServer, type ProbeResult } from './mcp-probe.ts';
 import { AGENT_AIS, cleanContract, duplicateAgent, isUsableAgent, libraryDir, listAgents, listCategories, parseAgent, validateAgent, validateContract, withContract, type Agent, type AgentContract } from '../scripts/lib/agents.ts';
 
@@ -371,8 +371,8 @@ export function createService(root: string, deps: Deps) {
     if (!top.some((n) => n.name === 'notes')) top.push({ name: 'notes', path: 'notes', type: 'dir', children: [] }); // created with the first note
     const rank = (n: TreeNode): number => { const i = TOP_ORDER.indexOf(n.name); return i === -1 ? TOP_ORDER.length : i; };
     top.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-    const managed = effectiveServers(project, root).filter((e) => e.enabled)
-      .map((e): TreeNode => ({ name: e.server.name, path: `.mcps/Moki/${e.server.id}`, type: 'file', mcp: e.origin === 'workspace' ? 'Moki (workspace)' : 'Moki (project)' }));
+    const managed = enabledServers(project, root)
+      .map((s): TreeNode => ({ name: s.name, path: `.mcps/Moki/${s.id}`, type: 'file', mcp: s.projects.length ? 'Moki (this project)' : 'Moki (global)' }));
     return [...top, { name: 'MCPs', path: '.mcps', type: 'dir', children: [...managed, ...mcpServers(project)] }]; // last; ".mcps" never clashes with a real folder
   }
 
@@ -453,11 +453,6 @@ export function createService(root: string, deps: Deps) {
 
   // ---------------------------------------------------------- MCP Manager (scripts/lib/mcp.ts)
 
-  const mcpScope = (scope: unknown, project: unknown): [McpScope, string | null] => {
-    if (scope === 'workspace') return ['workspace', null];
-    if (scope === 'project') { projectDir(project); return ['project', project as string]; }
-    throw new ServiceError('Choose where: the workspace or this project.');
-  };
   const statusFile = (): string => join(workspaceDir(root), 'mcp-status.json');
   const mcpStatus = (): Record<string, ProbeResult> => { try { return JSON.parse(readFileSync(statusFile(), 'utf8')) as Record<string, ProbeResult>; } catch { return {}; } };
   const saveStatus = (status: Record<string, ProbeResult>): void => { mkdirSync(workspaceDir(root), { recursive: true }); writeFileSync(statusFile(), `${JSON.stringify(status, null, 2)}\n`); };
@@ -468,8 +463,8 @@ export function createService(root: string, deps: Deps) {
       appendFileSync(join(workspaceDir(root), 'logs', 'mcp.log'), `${JSON.stringify({ at: new Date().toISOString(), ...line })}\n`);
     } catch { /* the log never stops the action */ }
   };
-  // Projects that have a workspace server on, for the delete confirmation.
-  const usersOf = (id: string): string[] => listProjects(root).filter((p) => effectiveServers(p, root).some((e) => e.origin === 'workspace' && e.server.id === id && e.enabled));
+  // The projects a server is given to, for the list and the delete confirmation.
+  const usersOf = (s: McpServer): string[] => (s.enabled ? listProjects(root).filter((p) => appliesTo(s, p)) : []);
 
   // Moki's own read-only server (ide/mcp/server.ts), bound to the project; the installed app runs its bundle (QA_MCP_SERVER).
   const generated = (project: string, servers: McpServer[]): GeneratedEntry[] =>
@@ -932,60 +927,52 @@ export function createService(root: string, deps: Deps) {
     // MCP servers configured where the AI tools start (a project's linked folder, or the framework root), for the agent forms.
     knownMcps: (project?: unknown) => {
       const id = typeof project === 'string' && listProjects(root).includes(project) ? project : null;
-      const managed = id ? effectiveServers(id, root).map((e) => e.server.id) : listServers('workspace', null, root).map((s) => s.id);
+      const managed = (id ? enabledServers(id, root) : listServers(root)).map((s) => s.id);
       return [...new Set([...managed, ...mcpServers(id).map((n) => n.name)])].sort((a, b) => a.localeCompare(b));
     },
 
     // ---------------------------------------------------------- MCP servers (Settings › MCP servers)
 
-    // The workspace catalog, or one project's view of it (inherited with its choices, then its own), with the last test of each.
-    mcpCatalog: (project?: unknown) => {
+    // The catalog, with the last test of each server and the projects it is given to; and the projects to choose from.
+    mcpCatalog: () => {
       const status = mcpStatus();
-      if (project == null) {
-        return { scope: 'workspace' as const, servers: listServers('workspace', null, root).map((s) => ({ ...s, status: status[s.id] ?? null, usedBy: usersOf(s.id), origin: 'workspace' as const, enabled: true, changed: false })) };
-      }
-      projectDir(project);
-      return { scope: 'project' as const, servers: effectiveServers(project as string, root).map((e) => ({ ...e.server, status: status[e.server.id] ?? null, usedBy: [] as string[], origin: e.origin, enabled: e.enabled, changed: e.changed })) };
+      return {
+        servers: listServers(root).map((s) => ({ ...s, status: status[s.id] ?? null, usedBy: usersOf(s) })),
+        projects: listProjects(root).map((id) => ({ id, name: projectSummary(id, root).name })),
+      };
     },
-    saveMcpServer: (scope: unknown, project: unknown, raw: unknown) => {
-      const [where, id] = mcpScope(scope, project);
-      const saved = failing(() => saveServer(where, id, raw, root));
-      mcpLog({ action: 'save', scope: where, project: id, server: saved.id });
+    saveMcpServer: (raw: unknown) => {
+      const saved = failing(() => saveServer(raw, root));
+      mcpLog({ action: 'save', server: saved.id, projects: saved.projects });
       return saved;
     },
-    removeMcpServer: (scope: unknown, project: unknown, server: unknown) => {
-      const [where, id] = mcpScope(scope, project);
-      failing(() => removeServer(where, id, String(server ?? ''), root));
+    removeMcpServer: (server: unknown) => {
+      failing(() => removeServer(String(server ?? ''), root));
       const status = mcpStatus();
       if (status[String(server)]) { delete status[String(server)]; saveStatus(status); }
-      mcpLog({ action: 'remove', scope: where, project: id, server });
-      return true;
-    },
-    setProjectMcp: (project: string, server: unknown, on: unknown) => {
-      projectDir(project);
-      failing(() => setProjectEnabled(project, String(server ?? ''), on === true, root));
+      mcpLog({ action: 'remove', server });
       return true;
     },
     // Starts (or calls) the server once to list its tools, only when the person asks.
-    testMcpServer: async (scope: unknown, project: unknown, server: unknown) => {
-      const [where, id] = mcpScope(scope, project);
-      const found = listServers(where, id, root).find((s) => s.id === server);
+    testMcpServer: async (server: unknown) => {
+      const found = listServers(root).find((s) => s.id === server);
       if (!found) throw new ServiceError('Unknown MCP server.');
       const result = await (deps.probe ?? probeServer)(found);
       saveStatus({ ...mcpStatus(), [found.id]: result });
       mcpLog({ action: 'test', server: found.id, ok: result.ok, tools: result.tools.length, ms: result.ms, ...(result.error ? { error: result.error } : {}) });
       return result;
     },
-    // A pasted configuration (Claude Code, Cursor or VS Code format); credentials written in it become ${VARIABLE}.
-    importMcpServers: (scope: unknown, project: unknown, text: unknown) => {
-      const [where, id] = mcpScope(scope, project);
+    // A pasted configuration (Claude Code, Cursor or VS Code format), global or for the projects chosen;
+    // credentials written in it become ${VARIABLE}.
+    importMcpServers: (text: unknown, projects?: unknown) => {
       const { servers, replaced } = failing(() => importConfig(String(text ?? '').slice(0, 200_000)));
+      const where = Array.isArray(projects) ? projects.map(String) : [];
       const saved: McpServer[] = [];
       const problems: string[] = [];
       for (const raw of servers) {
-        try { saved.push(saveServer(where, id, raw, root)); } catch (e) { problems.push(e instanceof McpError ? e.message : String(e)); }
+        try { saved.push(saveServer({ ...(raw as object), projects: where }, root)); } catch (e) { problems.push(e instanceof McpError ? e.message : String(e)); }
       }
-      mcpLog({ action: 'import', scope: where, project: id, servers: saved.map((s) => s.id) });
+      mcpLog({ action: 'import', servers: saved.map((s) => s.id), projects: where });
       return { saved, replaced, problems };
     },
     // Servers configured in the AI tools' own files (for "Import into Moki").

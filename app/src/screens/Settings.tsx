@@ -3,7 +3,7 @@
 // linked by arrows into multi-agent operations. Skills: what is
 // already installed (and where), and adding a skill. Documents: the look of the files
 // activities and agents generate (header, footer, fonts, colours, watermark). MCP servers:
-// the workspace catalog and what each project turns on (components/McpManager.tsx).
+// one catalog for the workspace, each server global or for the projects chosen (components/McpManager.tsx).
 
 import { useEffect, useState } from 'react';
 import { type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
@@ -75,7 +75,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
       </div>
       <div className="settings-body">
         {tab === 'documents' ? <DocumentStyleForm key={target?.id ?? 'none'} project={target} />
-          : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} />
+          : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} projects={projects} />
           : tab === 'operations' ? <Operations tools={tools} />
           : tab === 'agents'
           ? (
