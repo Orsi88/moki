@@ -166,6 +166,16 @@ export interface Usage {
   memory: { total: number; used: number; app: number; projects: { project: string; bytes: number; sessions: { id: string; bytes: number }[] }[] }; // a session is one terminal tab
 }
 
+// MCP Manager (scripts/lib/mcp.ts): the servers of the workspace and of one project.
+export type McpScope = 'workspace' | 'project';
+export interface McpServer {
+  id: string; name: string; description: string; transport: 'stdio' | 'http';
+  command: string; args: string[]; url: string; env: Record<string, string>; headers: Record<string, string>;
+  access: 'read' | 'execute'; enabledByDefault: boolean;
+}
+export interface McpProbe { at: string; ok: boolean; tools: { name: string; description: string }[]; server?: string; error?: string; ms: number }
+export interface McpEntry extends McpServer { status: McpProbe | null; usedBy: string[]; origin: McpScope; enabled: boolean; changed: boolean }
+
 // window.qa: desktop/preload.ts in the desktop app.
 export interface Bridge {
   query?: string; // the page parameters, when the host cannot put them in the URL (VS Code webview)
@@ -264,6 +274,15 @@ export const api = {
   deleteAgent: (name: string) => call<boolean>('deleteAgent', name),
   saveAgentContract: (name: string, contract: AgentContract) => call<boolean>('saveAgentContract', name, contract),
   knownMcps: (project?: string | null) => call<string[]>('knownMcps', project ?? null),
+  mcpCatalog: (project?: string | null) => call<{ scope: McpScope; servers: McpEntry[] }>('mcpCatalog', project ?? null),
+  saveMcpServer: (scope: McpScope, project: string | null, server: Partial<McpServer>) => call<McpServer>('saveMcpServer', scope, project, server),
+  removeMcpServer: (scope: McpScope, project: string | null, id: string) => call<boolean>('removeMcpServer', scope, project, id),
+  setProjectMcp: (project: string, id: string, on: boolean) => call<boolean>('setProjectMcp', project, id, on),
+  testMcpServer: (scope: McpScope, project: string | null, id: string) => call<McpProbe>('testMcpServer', scope, project, id),
+  importMcpServers: (scope: McpScope, project: string | null, text: string) => call<{ saved: McpServer[]; replaced: string[]; problems: string[] }>('importMcpServers', scope, project, text),
+  foundMcpServers: (project?: string | null) => call<{ source: string; name: string; config: unknown }[]>('foundMcpServers', project ?? null),
+  copyMcpConfig: (project: string, tool: 'claude' | 'cursor') => call<{ text: string; copied: boolean }>('copyMcpConfig', project, tool),
+  syncCursorMcp: (project: string, allow: boolean) => call<{ file: string; changed: boolean; backup?: string }>('syncCursorMcp', project, allow),
   operationAgents: () => call<OperationAgent[]>('operationAgents'),
   operations: () => call<Operation[]>('operations', lang), // the first time, an example in the app's language
   checkOperation: (op: OperationDraft) => call<OperationCheck>('checkOperation', op),

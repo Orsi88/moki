@@ -1,14 +1,17 @@
 // The Moki Companion inside VS Code: finds the Moki project of the open folder,
 // lists what it offers (context, notes, context shared by tags, agents, skills) in
 // native views, keeps what the person selects or allows, and gives VS Code's AI the
-// Moki MCP server (ide/mcp/server.ts) fixed to that project. The Moki desktop UI does not
-// load here; everything goes through desktop/companion.ts, which only reads.
+// Moki MCP server (ide/mcp/server.ts) fixed to that project, plus the MCP servers the
+// project has on in Moki's MCP Manager (scripts/lib/mcp.ts). The Moki desktop UI does
+// not load here; everything goes through desktop/companion.ts, which only reads.
 
 import * as vscode from 'vscode';
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT, setWorkspaceDir } from '../../scripts/lib/repo.mjs';
-import { listProjects, projectSummary, projectsDir } from '../../scripts/lib/core.ts';
+import { ROOT, setWorkspaceDir, workspaceDir } from '../../scripts/lib/repo.mjs';
+import { linkedFolder, listProjects, projectSummary, projectsDir, which } from '../../scripts/lib/core.ts';
+import { MCP_FILE, generatedEntries, mokiServer, resolveServer, syncCursorFolder, type McpServer } from '../../scripts/lib/mcp.ts';
 import { activeWorkspace, setWorkspaceEnv } from '../../desktop/workspaces.ts';
 import { DEFAULT_MODES, openCompanion, projectsForFolder, type Companion, type Mode, type Resource, type ResourceKind } from '../../desktop/companion.ts';
 
@@ -26,7 +29,7 @@ const MODE_LABELS: Record<Mode, { label: string; detail: string; icon: string }>
 };
 const PICKED = 'moki.project'; // the project chosen for this VS Code workspace (workspaceState)
 
-type Node = { group: ResourceKind } | { resource: Resource };
+type Node = { group: ResourceKind } | { resource: Resource } | { mcp: true } | { server: McpServer; problem: string };
 
 export function start(context: vscode.ExtensionContext): void {
   // The workspace opened last in Moki; the MCP server gets it too.
@@ -51,9 +54,18 @@ export function start(context: vscode.ExtensionContext): void {
     watcher = null;
     if (!project) return;
     watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(projectsDir(ROOT), project)), '**'));
-    const later = (): void => { clearTimeout(timer); timer = setTimeout(() => changed.fire(), 400); };
+    const later = (): void => { clearTimeout(timer); timer = setTimeout(() => { changed.fire(); mcpChanged.fire(); }, 400); };
     watcher.onDidCreate(later); watcher.onDidChange(later); watcher.onDidDelete(later);
   };
+  // The workspace's MCP catalog lives outside the project folder.
+  const catalog = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(workspaceDir(ROOT)), MCP_FILE));
+  const catalogChanged = (): void => { changed.fire(); mcpChanged.fire(); };
+  catalog.onDidCreate(catalogChanged); catalog.onDidChange(catalogChanged); catalog.onDidDelete(catalogChanged);
+
+  // The project's servers with their variables read from this environment; one whose variable is missing is left out, with why.
+  const servers = (): { server: McpServer; resolved: McpServer | null; problem: string }[] => (companion?.mcpServers() ?? []).map((server) => {
+    try { return { server, resolved: resolveServer(server), problem: '' }; } catch (e) { return { server, resolved: null, problem: e instanceof Error ? e.message : String(e) }; }
+  });
 
   // Another project means another context: nothing of the previous one stays visible or reachable.
   const use = (project: string | null): void => {
@@ -109,6 +121,22 @@ export function start(context: vscode.ExtensionContext): void {
     onDidChangeTreeData: changed.event,
     getTreeItem: (n) => {
       if ('resource' in n) return item(n.resource);
+      if ('mcp' in n) {
+        const t = new vscode.TreeItem('MCP servers', vscode.TreeItemCollapsibleState.Collapsed);
+        t.id = 'group:mcp';
+        t.description = String(companion?.mcpServers().length ?? 0);
+        t.tooltip = 'The MCP servers this project has on in Moki (Settings › MCP servers). VS Code\'s AI gets them; turn them on or off in Moki.';
+        t.iconPath = new vscode.ThemeIcon('plug');
+        return t;
+      }
+      if ('server' in n) {
+        const t = new vscode.TreeItem(n.server.name, vscode.TreeItemCollapsibleState.None);
+        t.id = `mcp:${n.server.id}`;
+        t.description = n.problem ? 'not available' : `${n.server.transport === 'http' ? 'HTTP' : 'stdio'}${n.server.access === 'execute' ? ' · executes' : ''}`;
+        t.tooltip = n.problem || n.server.description || n.server.id;
+        t.iconPath = new vscode.ThemeIcon(n.problem ? 'warning' : 'plug');
+        return t;
+      }
       const g = GROUPS.find((x) => x.kind === n.group)!;
       const count = companion?.allResources().filter((r) => r.kind === n.group).length ?? 0;
       const t = new vscode.TreeItem(g.label, n.group === 'context' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
@@ -120,7 +148,8 @@ export function start(context: vscode.ExtensionContext): void {
     getChildren: (n) => {
       if (!companion) return [];
       const list = companion.allResources();
-      if (!n) return GROUPS.filter((g) => list.some((r) => r.kind === g.kind)).map((g) => ({ group: g.kind }));
+      if (!n) return [...GROUPS.filter((g) => list.some((r) => r.kind === g.kind)).map((g): Node => ({ group: g.kind })), ...(companion.mcpServers().length ? [{ mcp: true } as const] : [])];
+      if ('mcp' in n) return servers().map(({ server, problem }) => ({ server, problem }));
       return 'group' in n ? list.filter((r) => r.kind === n.group).map((resource) => ({ resource })) : [];
     },
   };
@@ -156,15 +185,43 @@ export function start(context: vscode.ExtensionContext): void {
   const mcpScript = join(context.extensionPath, 'dist', 'mcp.cjs');
   const buildId = ((): string => { try { return (JSON.parse(readFileSync(join(context.extensionPath, 'dist', 'build-info.json'), 'utf8')) as { buildId: string }).buildId; } catch { return '0'; } })();
 
+  // A definition's version changes only when its configuration does, so VS Code restarts only that server.
+  const version = (s: McpServer): string => createHash('sha256').update(JSON.stringify(s)).digest('hex').slice(0, 16);
+
   context.subscriptions.push(
-    status, changed, mcpChanged, ...views, new vscode.Disposable(() => { clearTimeout(timer); watcher?.dispose(); }),
-    // VS Code's AI gets one server, fixed to the project of this folder; none without a project.
+    status, changed, mcpChanged, catalog, ...views, new vscode.Disposable(() => { clearTimeout(timer); watcher?.dispose(); }),
+    // VS Code's AI gets Moki's server, fixed to the project of this folder, and the servers the project has on; none without a project.
     vscode.lm.registerMcpServerDefinitionProvider('moki', {
       onDidChangeMcpServerDefinitions: mcpChanged.event,
-      provideMcpServerDefinitions: () => (companion ? [new vscode.McpStdioServerDefinition(
-        'Moki', process.execPath, [mcpScript, '--project', companion.project],
-        { ELECTRON_RUN_AS_NODE: '1', QA_ROOT: ROOT, QA_WORKSPACE: process.env.QA_WORKSPACE ?? null }, `${companion.project}-${buildId}`,
-      )] : []),
+      provideMcpServerDefinitions: () => {
+        if (!companion) return [];
+        const own = servers().flatMap(({ resolved: s }): vscode.McpServerDefinition[] => {
+          if (!s) return [];
+          if (s.transport === 'http') return [new vscode.McpHttpServerDefinition(s.name, vscode.Uri.parse(s.url), s.headers, version(s))];
+          return [new vscode.McpStdioServerDefinition(s.name, which(s.command) ?? s.command, s.args, s.env, version(s))];
+        });
+        return [new vscode.McpStdioServerDefinition(
+          'Moki', process.execPath, [mcpScript, '--project', companion.project],
+          { ELECTRON_RUN_AS_NODE: '1', QA_ROOT: ROOT, QA_WORKSPACE: process.env.QA_WORKSPACE ?? null }, `${companion.project}-${buildId}`,
+        ), ...own];
+      },
+    }),
+    // Cursor opened on this folder reads <folder>/.cursor/mcp.json: Moki's entries go there after the person confirms.
+    vscode.commands.registerCommand('moki.syncCursor', async () => {
+      if (!companion) { void vscode.window.showInformationMessage('Choose the Moki project of this folder first.'); return; }
+      const linked = linkedFolder(companion.project, ROOT);
+      if (!linked || !existsSync(linked.path)) { void vscode.window.showWarningMessage('This project has no linked folder on this computer. Link it in the Moki desktop app (Choose my folder).'); return; }
+      if (linked.writeBlocked) { void vscode.window.showWarningMessage(`project.json does not allow writing to ${linked.path} (writeAllowed: false).`); return; }
+      const ok = await vscode.window.showWarningMessage(`Write the MCP servers this project has on to ${linked.path}/.cursor/mcp.json?`, {
+        modal: true, detail: 'Only Moki\'s entries (moki, moki-*) change; yours stay. The current file is backed up to .moki-backup/ first.',
+      }, 'Write');
+      if (ok !== 'Write') return;
+      try {
+        const moki = mokiServer(companion.project, ROOT, mcpScript, which('node'));
+        const r = syncCursorFolder(linked.path, generatedEntries(moki, companion.mcpServers()));
+        companion.log('sync-cursor', { changed: r.changed });
+        void vscode.window.showInformationMessage(r.changed ? `Cursor updated: ${r.file}` : 'Cursor already had these servers.');
+      } catch (e) { void vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e)); }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(resolveProject),
     vscode.commands.registerCommand('moki.chooseProject', chooseProject),

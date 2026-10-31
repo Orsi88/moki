@@ -11,6 +11,7 @@ import { isUsableAgent, listAgents } from '../scripts/lib/agents.ts';
 import { readJson, workspaceLabel } from '../scripts/lib/repo.mjs';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
 import { PathError, resolveInside } from './fs-guard.ts';
+import { enabledServers, type McpServer } from '../scripts/lib/mcp.ts';
 
 export type ResourceKind = 'context' | 'note' | 'shared' | 'agent' | 'skill';
 // auto: listed and readable; ask: listed, readable once the person selects it; manual: hidden until selected.
@@ -197,10 +198,17 @@ export function openCompanion(root: string, project: string) {
   return {
     project,
 
-    summary: (): ProjectSummary & { agents: string[]; skills: string[] } => {
+    // mcpServers: the MCP servers on in Moki for this project (MCP Manager), by id; never their command or variables.
+    summary: (): ProjectSummary & { agents: string[]; skills: string[]; mcpServers: { id: string; name: string; transport: string; access: string; description: string }[] } => {
       const list = all().filter(visible);
-      return { ...projectSummary(project, root), agents: list.filter((r) => r.kind === 'agent').map((r) => r.title), skills: list.filter((r) => r.kind === 'skill').map((r) => r.title) };
+      return {
+        ...projectSummary(project, root), agents: list.filter((r) => r.kind === 'agent').map((r) => r.title), skills: list.filter((r) => r.kind === 'skill').map((r) => r.title),
+        mcpServers: enabledServers(project, root).map(({ id, name, transport, access, description }) => ({ id, name, transport, access, description })),
+      };
     },
+
+    // The MCP servers on for this project, with their configuration (only the IDE extension uses it, to register them).
+    mcpServers: (): McpServer[] => enabledServers(project, root),
 
     // What the person sees in the IDE: everything, with its mode.
     allResources: all,

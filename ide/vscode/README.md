@@ -29,6 +29,8 @@ The extension keeps the framework in `<Documents>/Moki`, the same folder as the 
 
 The server is bound to one project when it starts and no tool can change it. Files of other projects are reachable only through a shared tag, and secret-looking files (`.env*`, keys, certificates, `credentials*`) are never listed or read.
 
+The MCP servers the project has on in Moki (Settings › MCP servers, `docs/mcp-servers.md`) are registered too, with their `${VARIABLE}` values read from VS Code's environment; one whose variable is not set is left out, and the **MCP servers** group of the panel says why. **Moki: Sync MCP Servers to Cursor** writes them (and Moki's server) to `<linked folder>/.cursor/mcp.json` after you confirm, for Cursor opened on the system's folder.
+
 Other AI tools can use the same server: `npm run mcp -- --project <id>` from the repository (or `--folder <path>` to find the project linked to a folder), for example in a Claude Code `.mcp.json` or a Cursor `mcp.json`.
 
 ## Build it from the source

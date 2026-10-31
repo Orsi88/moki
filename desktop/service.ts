@@ -3,12 +3,12 @@
 // folder, choices come from fixed lists. It reuses the shared core — no QA
 // logic lives here; the AI tools do the QA work following the skills.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   ACTIVITIES, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isActivity, isTool, isUsable, linkedFolder, listProjects,
-  listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
+  listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, which, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
@@ -25,12 +25,15 @@ import { cleanPrompt, type LaunchResult } from './launcher.ts';
 import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
 import { isPageEdit, parsePdfChange, pdfScript, toComments, type PdfRunner } from './pdfcraft.ts';
+import { MOKI_SERVER, McpError, effectiveServers, enabledServers, generatedEntries, importConfig, listServers, mokiServer, removeServer, saveServer, serversForAgent, setProjectEnabled, syncCursorFolder, toolConfig, writeMerged, type GeneratedEntry, type McpScope, type McpServer } from '../scripts/lib/mcp.ts';
+import { probeServer, type ProbeResult } from './mcp-probe.ts';
 import { AGENT_AIS, cleanContract, duplicateAgent, isUsableAgent, libraryDir, listAgents, listCategories, parseAgent, validateAgent, validateContract, withContract, type Agent, type AgentContract } from '../scripts/lib/agents.ts';
 
 export class ServiceError extends Error {}
 
 export interface Deps {
-  launch: (tool: ToolKey, prompt: string, root: string, plugins?: string[]) => LaunchResult; // plugins: the project's own (project.json)
+  // plugins: the project's own (project.json); extra: more arguments for the tool (Claude Code's --mcp-config)
+  launch: (tool: ToolKey, prompt: string, root: string, plugins?: string[], extra?: string[]) => LaunchResult;
   openFolder: (folder: string) => void;
   openPath: (file: string) => void;
   reveal?: (path: string) => void; // shows a file or folder selected in the system file manager
@@ -43,6 +46,7 @@ export interface Deps {
   trash?: (path: string) => Promise<void>; // removing skills/agents moves them to the trash (tests delete)
   onWorkspace?: (dir: string) => void; // the active workspace changed (the app passes it to the tools it starts)
   detectTools?: () => Record<ToolKey, boolean>; // AI tools installed (tests fake it)
+  probe?: (server: McpServer) => Promise<ProbeResult>; // MCP server test (tests pass a fake)
 }
 
 export interface TreeNode {
@@ -367,7 +371,9 @@ export function createService(root: string, deps: Deps) {
     if (!top.some((n) => n.name === 'notes')) top.push({ name: 'notes', path: 'notes', type: 'dir', children: [] }); // created with the first note
     const rank = (n: TreeNode): number => { const i = TOP_ORDER.indexOf(n.name); return i === -1 ? TOP_ORDER.length : i; };
     top.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
-    return [...top, { name: 'MCPs', path: '.mcps', type: 'dir', children: mcpServers(project) }]; // last; ".mcps" never clashes with a real folder
+    const managed = effectiveServers(project, root).filter((e) => e.enabled)
+      .map((e): TreeNode => ({ name: e.server.name, path: `.mcps/Moki/${e.server.id}`, type: 'file', mcp: e.origin === 'workspace' ? 'Moki (workspace)' : 'Moki (project)' }));
+    return [...top, { name: 'MCPs', path: '.mcps', type: 'dir', children: [...managed, ...mcpServers(project)] }]; // last; ".mcps" never clashes with a real folder
   }
 
   // MCP servers the AI tools see in the project's repository (the linked folder, or the framework root where they start).
@@ -407,6 +413,9 @@ export function createService(root: string, deps: Deps) {
       '.codex/config.toml': 'codex', '.cursor/mcp.json': 'cursor-agent', '.gemini/settings.json': 'gemini',
     };
     for (const n of mcpServers(project)) { const tool = owner[n.mcp ?? '']; if (tool && by[tool]) by[tool]?.push(n.name); }
+    // The servers on in Moki: Claude Code and Cursor get them when Moki starts them.
+    const managed = enabledServers(project, root).map((s) => s.id);
+    for (const tool of ['claude', 'cursor-agent']) if (by[tool]) by[tool] = [...new Set([...(by[tool] ?? []), ...managed])];
     return by;
   };
 
@@ -440,6 +449,64 @@ export function createService(root: string, deps: Deps) {
     sources.push(['.codex/config.toml', Object.fromEntries([...codex.matchAll(/^\[mcp_servers\.("?)([^\]"]+)\1\]/gm)].map((m) => [m[2], 1]))]);
     return sources.flatMap(([source, servers]) => Object.keys(servers && typeof servers === 'object' ? servers : {})
       .map((name): TreeNode => ({ name, path: `.mcps/${source}/${name}`, type: 'file', mcp: source })));
+  }
+
+  // ---------------------------------------------------------- MCP Manager (scripts/lib/mcp.ts)
+
+  const mcpScope = (scope: unknown, project: unknown): [McpScope, string | null] => {
+    if (scope === 'workspace') return ['workspace', null];
+    if (scope === 'project') { projectDir(project); return ['project', project as string]; }
+    throw new ServiceError('Choose where: the workspace or this project.');
+  };
+  const statusFile = (): string => join(workspaceDir(root), 'mcp-status.json');
+  const mcpStatus = (): Record<string, ProbeResult> => { try { return JSON.parse(readFileSync(statusFile(), 'utf8')) as Record<string, ProbeResult>; } catch { return {}; } };
+  const saveStatus = (status: Record<string, ProbeResult>): void => { mkdirSync(workspaceDir(root), { recursive: true }); writeFileSync(statusFile(), `${JSON.stringify(status, null, 2)}\n`); };
+  // What the MCP Manager did, without values: <workspace>/logs/mcp.log.
+  const mcpLog = (line: Record<string, unknown>): void => {
+    try {
+      mkdirSync(join(workspaceDir(root), 'logs'), { recursive: true });
+      appendFileSync(join(workspaceDir(root), 'logs', 'mcp.log'), `${JSON.stringify({ at: new Date().toISOString(), ...line })}\n`);
+    } catch { /* the log never stops the action */ }
+  };
+  // Projects that have a workspace server on, for the delete confirmation.
+  const usersOf = (id: string): string[] => listProjects(root).filter((p) => effectiveServers(p, root).some((e) => e.origin === 'workspace' && e.server.id === id && e.enabled));
+
+  // Moki's own read-only server (ide/mcp/server.ts), bound to the project; the installed app runs its bundle (QA_MCP_SERVER).
+  const generated = (project: string, servers: McpServer[]): GeneratedEntry[] =>
+    generatedEntries(mokiServer(project, root, process.env.QA_MCP_SERVER || join(root, 'ide', 'mcp', 'server.ts'), which('node')), servers);
+
+  // The project's MCP servers for a tool Moki starts: Claude Code gets --mcp-config (a file in workspace/temporary/);
+  // Cursor opens in the Moki folder, so the moki entries of <root>/.cursor/mcp.json are rewritten (the person's entries stay).
+  function mcpLaunch(tool: ToolKey, project: string, servers: McpServer[] = enabledServers(project, root)): string[] {
+    if (tool === 'claude') {
+      const dir = join(root, 'workspace', 'temporary');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `mcp-${project}-${stamp()}.json`);
+      writeFileSync(file, `${JSON.stringify(toolConfig(generated(project, servers), 'claude'), null, 2)}\n`);
+      return ['--mcp-config', file];
+    }
+    if (tool === 'cursor' || tool === 'cursor-agent') {
+      try { writeMerged(join(root, '.cursor', 'mcp.json'), generated(project, servers), 'cursor'); } catch (e) { mcpLog({ action: 'cursor', project, error: e instanceof Error ? e.message : String(e) }); }
+    }
+    return [];
+  }
+
+  // The servers the AI tools have in their own files, to import into Moki (Moki's own entries left out).
+  function foundServers(project: string | null): { source: string; name: string; config: unknown }[] {
+    const repo = (project && projectRepository(project, root)) || root;
+    const json = (file: string): Record<string, unknown> => { try { return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>; } catch { return {}; } };
+    const claude = json(join(home, '.claude.json')) as { mcpServers?: unknown; projects?: Record<string, { mcpServers?: unknown }> };
+    const sources: [string, unknown][] = [
+      ['.mcp.json', json(join(repo, '.mcp.json')).mcpServers],
+      ['Claude Code (local)', (claude.projects?.[repo] ?? claude.projects?.[posix(repo)])?.mcpServers],
+      ['Claude Code (user)', claude.mcpServers],
+      ['.cursor/mcp.json', json(join(repo, '.cursor', 'mcp.json')).mcpServers],
+      ['.vscode/mcp.json', json(join(repo, '.vscode', 'mcp.json')).servers],
+      ['.gemini/settings.json', json(join(repo, '.gemini', 'settings.json')).mcpServers],
+    ];
+    return sources.flatMap(([source, servers]) => Object.entries(servers && typeof servers === 'object' ? servers as Record<string, unknown> : {})
+      .filter(([name, c]) => name !== MOKI_SERVER && !name.startsWith('moki-') && c && typeof c === 'object')
+      .map(([name, config]) => ({ source, name, config })));
   }
 
   // Images a project's Markdown points to (relative paths), embedded as data: URIs: inside the project only
@@ -781,7 +848,7 @@ export function createService(root: string, deps: Deps) {
         return { step: String(x.step ?? ''), input: String(x.input ?? ''), text: cleanPrompt(String(x.text ?? '')).slice(0, 20_000), files };
       }).filter((a) => wanted.has(`${a.step}:${a.input}`));
       const context = cleanPrompt(String(r.context ?? '')).slice(0, 20_000);
-      const withFiles = agents.map((a) => ({ ...a, file: agentFile(a) }));
+      const withFiles = agents.map((a) => ({ ...a, file: agentFile(a), servers: serversForAgent(project, a.mcps, root).servers }));
       return failing(() => createOperationRun(projectDir(project), project, op, withFiles, check.order, { tools, answers, context }));
     },
     operationRuns: (project: string) => listRuns(project, root).filter(isOperationRun).map((run) => run),
@@ -807,9 +874,14 @@ export function createService(root: string, deps: Deps) {
       const lang = LANGUAGES.includes(String(language)) ? String(language) : 'English';
       const prompt = stepPrompt(run, v.slot, workspaceLabel(root), lang);
       const step = run.steps.find((x) => x.id === v.step);
-      const result = deps.launch(step?.ai as ToolKey, windowsSafePrompt(prompt, project, root), root, projectSummary(project, root).plugins); // the project's app plugins, as for any request
+      // The step gets the MCP servers its agent names, as they were when the run started: a run never changes tools midway.
+      const tool = step?.ai as ToolKey;
+      const servers = step?.servers ?? [];
+      const current = new Map(enabledServers(project, root).map((s) => [s.id, JSON.stringify(s)]));
+      const mcpChanged = servers.some((s) => current.get(s.id) !== JSON.stringify(s));
+      const result = deps.launch(tool, windowsSafePrompt(prompt, project, root), root, projectSummary(project, root).plugins, mcpLaunch(tool, project, servers)); // the project's app plugins, as for any request
       if (result.opened) failing(() => markStarted(dir, v.slot, result.terminal?.id));
-      return { ...result, prompt };
+      return { ...result, prompt, mcpChanged };
     },
     approveOperationStep: (project: string, runId: unknown) => failing(() => approve(runDir(project, runId))),
     // The user's choice when no arrow fits the result, or a loop reached its limit: a step to go to, or '' to end the operation.
@@ -860,7 +932,84 @@ export function createService(root: string, deps: Deps) {
     // MCP servers configured where the AI tools start (a project's linked folder, or the framework root), for the agent forms.
     knownMcps: (project?: unknown) => {
       const id = typeof project === 'string' && listProjects(root).includes(project) ? project : null;
-      return [...new Set(mcpServers(id).map((n) => n.name))].sort((a, b) => a.localeCompare(b));
+      const managed = id ? effectiveServers(id, root).map((e) => e.server.id) : listServers('workspace', null, root).map((s) => s.id);
+      return [...new Set([...managed, ...mcpServers(id).map((n) => n.name)])].sort((a, b) => a.localeCompare(b));
+    },
+
+    // ---------------------------------------------------------- MCP servers (Settings › MCP servers)
+
+    // The workspace catalog, or one project's view of it (inherited with its choices, then its own), with the last test of each.
+    mcpCatalog: (project?: unknown) => {
+      const status = mcpStatus();
+      if (project == null) {
+        return { scope: 'workspace' as const, servers: listServers('workspace', null, root).map((s) => ({ ...s, status: status[s.id] ?? null, usedBy: usersOf(s.id), origin: 'workspace' as const, enabled: true, changed: false })) };
+      }
+      projectDir(project);
+      return { scope: 'project' as const, servers: effectiveServers(project as string, root).map((e) => ({ ...e.server, status: status[e.server.id] ?? null, usedBy: [] as string[], origin: e.origin, enabled: e.enabled, changed: e.changed })) };
+    },
+    saveMcpServer: (scope: unknown, project: unknown, raw: unknown) => {
+      const [where, id] = mcpScope(scope, project);
+      const saved = failing(() => saveServer(where, id, raw, root));
+      mcpLog({ action: 'save', scope: where, project: id, server: saved.id });
+      return saved;
+    },
+    removeMcpServer: (scope: unknown, project: unknown, server: unknown) => {
+      const [where, id] = mcpScope(scope, project);
+      failing(() => removeServer(where, id, String(server ?? ''), root));
+      const status = mcpStatus();
+      if (status[String(server)]) { delete status[String(server)]; saveStatus(status); }
+      mcpLog({ action: 'remove', scope: where, project: id, server });
+      return true;
+    },
+    setProjectMcp: (project: string, server: unknown, on: unknown) => {
+      projectDir(project);
+      failing(() => setProjectEnabled(project, String(server ?? ''), on === true, root));
+      return true;
+    },
+    // Starts (or calls) the server once to list its tools, only when the person asks.
+    testMcpServer: async (scope: unknown, project: unknown, server: unknown) => {
+      const [where, id] = mcpScope(scope, project);
+      const found = listServers(where, id, root).find((s) => s.id === server);
+      if (!found) throw new ServiceError('Unknown MCP server.');
+      const result = await (deps.probe ?? probeServer)(found);
+      saveStatus({ ...mcpStatus(), [found.id]: result });
+      mcpLog({ action: 'test', server: found.id, ok: result.ok, tools: result.tools.length, ms: result.ms, ...(result.error ? { error: result.error } : {}) });
+      return result;
+    },
+    // A pasted configuration (Claude Code, Cursor or VS Code format); credentials written in it become ${VARIABLE}.
+    importMcpServers: (scope: unknown, project: unknown, text: unknown) => {
+      const [where, id] = mcpScope(scope, project);
+      const { servers, replaced } = failing(() => importConfig(String(text ?? '').slice(0, 200_000)));
+      const saved: McpServer[] = [];
+      const problems: string[] = [];
+      for (const raw of servers) {
+        try { saved.push(saveServer(where, id, raw, root)); } catch (e) { problems.push(e instanceof McpError ? e.message : String(e)); }
+      }
+      mcpLog({ action: 'import', scope: where, project: id, servers: saved.map((s) => s.id) });
+      return { saved, replaced, problems };
+    },
+    // Servers configured in the AI tools' own files (for "Import into Moki").
+    foundMcpServers: (project?: unknown) => foundServers(typeof project === 'string' && listProjects(root).includes(project) ? project : null),
+    // The project's servers in a tool's format, copied to paste where Moki does not put them.
+    copyMcpConfig: (project: string, tool: unknown) => {
+      projectDir(project);
+      const text = `${JSON.stringify(toolConfig(generated(project, enabledServers(project, root)), tool === 'cursor' ? 'cursor' : 'claude'), null, 2)}\n`;
+      deps.copy?.(text);
+      return { text, copied: Boolean(deps.copy) };
+    },
+    // Cursor opened on the system's own folder: Moki's entries in <linked folder>/.cursor/mcp.json, the person's entries kept.
+    // Like any write to the linked folder it needs the person's confirmation, and writeAllowed: false refuses it.
+    syncCursorMcp: (project: string, allow: unknown) => {
+      projectDir(project);
+      const linked = linkedFolder(project, root);
+      if (!linked) throw new ServiceError('This project has no linked folder. Link the system\'s folder first (Choose my folder).');
+      if (linked.writeBlocked) throw new ServiceError(`project.json does not allow writing to the linked folder ${linked.path} (writeAllowed: false).`);
+      if (!existsSync(linked.path)) throw new ServiceError(`The linked folder was not found: ${linked.path}. Link it again.`);
+      const file = join(linked.path, '.cursor', 'mcp.json');
+      if (allow !== true) throw new ServiceError(`This changes ${file}. Confirm to allow it.`);
+      const result = failing(() => syncCursorFolder(linked.path, generated(project, enabledServers(project, root))));
+      mcpLog({ action: 'sync-cursor', project, changed: result.changed });
+      return result;
     },
 
     // Only the user's own agents can be edited; the text is validated like a built-in agent.
@@ -1319,7 +1468,7 @@ export function createService(root: string, deps: Deps) {
         return { opened: false, prompt, upload, bundleReady: existsSync(join(root, 'dist', 'chat', 'quality-agents-all.md')) };
       }
       const sent = t.clipboard ? prompt : windowsSafePrompt(prompt, project, root);
-      return { ...deps.launch(tool, sent, root, projectSummary(project, root).plugins), prompt };
+      return { ...deps.launch(tool, sent, root, projectSummary(project, root).plugins, mcpLaunch(tool, project)), prompt };
     },
   };
 }

@@ -48,6 +48,11 @@
         }
       }
     },
+    "mcp": {
+      "type": "object",
+      "description": "Set by Settings > MCP servers: this project's choice for each workspace MCP server, by id (true on, false off). Absent = the server's default (enabledByDefault). See docs/mcp-servers.md.",
+      "additionalProperties": { "type": "boolean" }
+    },
     "linkedSkills": { "type": "array", "items": { "type": "string" }, "description": "Set by the desktop app's \"Set up project\": names of global skills (~/.claude/skills, ~/.agents/skills) this project uses; requests name them. Nothing is copied." },
     "environments": {
       "type": "array",

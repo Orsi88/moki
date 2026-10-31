@@ -36,13 +36,15 @@
       { "command": "moki.select", "title": "Select or Unselect for the AI", "category": "Moki" },
       { "command": "moki.setMode", "title": "How the AI May Use It…", "category": "Moki", "icon": "$(shield)" },
       { "command": "moki.clearSelection", "title": "Clear Selection", "category": "Moki", "icon": "$(clear-all)" },
-      { "command": "moki.showActivity", "title": "Show What the AI Read", "category": "Moki", "icon": "$(history)" }
+      { "command": "moki.showActivity", "title": "Show What the AI Read", "category": "Moki", "icon": "$(history)" },
+      { "command": "moki.syncCursor", "title": "Sync MCP Servers to Cursor", "category": "Moki", "icon": "$(plug)" }
     ],
     "menus": {
       "view/title": [
         { "command": "moki.chooseProject", "when": "view == moki.resources", "group": "navigation@1" },
         { "command": "moki.showActivity", "when": "view == moki.resources && moki.connected", "group": "navigation@2" },
         { "command": "moki.refresh", "when": "view == moki.resources", "group": "navigation@3" },
+        { "command": "moki.syncCursor", "when": "view == moki.resources && moki.connected", "group": "more@1" },
         { "command": "moki.clearSelection", "when": "view == moki.selected && moki.connected", "group": "navigation" }
       ],
       "view/item/context": [

@@ -1150,3 +1150,28 @@ select:disabled { cursor: not-allowed; opacity: 0.6; }
 .pdf-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent); font-size: 12px; cursor: pointer; }
 .link-btn:disabled { color: var(--faint); cursor: default; }
+
+/* Settings › MCP servers (components/McpManager.tsx) */
+.mcp { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.mcp-list { flex: 1; min-width: 0; max-width: 860px; margin: 0 auto; padding: 28px 28px 48px; overflow: auto; }
+.mcp-list h1 { font-size: 1.6rem; margin-bottom: 6px; }
+.mcp-section { font-size: 1rem; margin: 22px 0 8px; }
+.mcp-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 10px; }
+.mcp-tools input[type=search] { flex: 1; min-width: 160px; }
+.mcp-import { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.mcp-import textarea, .mcp-form textarea { font-family: var(--mono, monospace); font-size: 0.82rem; }
+.mcp-rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; }
+.mcp-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); }
+.mcp-row:first-child { border-top: 0; }
+.mcp-row.on { background: var(--accent-soft); }
+.mcp-row .pill { margin: 0; }
+.mcp-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; }
+span.mcp-row-main { cursor: default; }
+.mcp-name { font-weight: 600; }
+.mcp-panel { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); padding: 20px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.mcp-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mcp-panel-head h2 { font-size: 1.1rem; margin: 0; }
+.mcp-form { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.mcp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mcp-tool-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 900px) { .mcp { flex-direction: column; overflow: auto; } .mcp-panel { width: auto; border-left: 0; border-top: 1px solid var(--border); } }

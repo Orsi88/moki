@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Orsi88/moki/schemas/mcp-servers.schema.json",
+  "title": "MCP servers (MCP Manager)",
+  "description": "workspace/mcp-servers.json (offered to every project of the workspace) and workspace/projects/<id>/mcp-servers.json (only that project). Written by scripts/lib/mcp.ts. Values never hold credentials: they are ${VARIABLE} references read from the environment when a server starts. See docs/mcp-servers.md.",
+  "type": "object",
+  "required": ["servers"],
+  "properties": {
+    "servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "transport", "access", "enabledByDefault"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable (a rename keeps it) and unique in the whole workspace. Agents name it in their mcps contract." },
+          "name": { "type": "string", "maxLength": 60 },
+          "description": { "type": "string", "maxLength": 300 },
+          "transport": { "enum": ["stdio", "http"] },
+          "command": { "type": "string", "description": "stdio: a program name or absolute path, started without a shell." },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "url": { "type": "string", "description": "http: the server's endpoint (http:// or https://)." },
+          "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "stdio: environment variables; credentials as ${VARIABLE}." },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "http: request headers; credentials as ${VARIABLE}." },
+          "access": { "enum": ["read", "execute"], "description": "execute: it changes things outside Moki; operation steps that use it wait for approval." },
+          "enabledByDefault": { "type": "boolean", "description": "Workspace server: on in projects that did not choose (false by default for execute). Project server: on or off." }
+        }
+      }
+    }
+  }
+}

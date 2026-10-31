@@ -21,7 +21,7 @@ In a system's repository linked to a Moki project, Claude Code can read the proj
 { "mcpServers": { "moki": { "command": "node", "args": ["<moki folder>/ide/mcp/server.ts", "--project", "<project-id>"] } } }
 ```
 
-See `ide/vscode/README.md` for the tools.
+See `ide/vscode/README.md` for the tools. When the Moki desktop app starts Claude Code, it passes this server and the project's MCP servers with `--mcp-config` by itself (`docs/mcp-servers.md`).
 
 ## Running
 

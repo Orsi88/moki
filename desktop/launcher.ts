@@ -17,7 +17,8 @@ import type { TermSpec } from './terminals.ts';
 
 export interface LaunchResult { opened: boolean; message: string; copied?: boolean; terminal?: { id: string; title: string } }
 
-export type Launcher = (tool: ToolKey, prompt: string, root: string, plugins?: string[]) => LaunchResult;
+// extra: arguments Moki adds for this start (Claude Code's --mcp-config), before the prompt.
+export type Launcher = (tool: ToolKey, prompt: string, root: string, plugins?: string[], extra?: string[]) => LaunchResult;
 export type FolderOpener = (folder: string) => void;
 
 // Inside the desktop app, main.ts points QA_RUN_TOOL to the bundled run-tool and
@@ -70,7 +71,7 @@ const LINUX_TERMINALS: [string, string[]][] = [
   ['x-terminal-emulator', ['-e']], ['gnome-terminal', ['--']], ['konsole', ['-e']], ['xfce4-terminal', ['-x']], ['xterm', ['-e']],
 ];
 
-export const launchTool: Launcher = (tool, prompt, root, plugins = []) => {
+export const launchTool: Launcher = (tool, prompt, root, plugins = [], extra = []) => {
   const t = TOOLS[tool];
   if (!t.command || !t.args) throw new Error(`${t.label} is not started from the app.`);
   if (!which(t.command)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
@@ -90,7 +91,7 @@ export const launchTool: Launcher = (tool, prompt, root, plugins = []) => {
   mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const title = `Moki - ${t.label}`;
-  const args = [...pluginArgs(tool, root, plugins), ...t.args(cleanPrompt(prompt))];
+  const args = [...pluginArgs(tool, root, plugins), ...extra, ...t.args(cleanPrompt(prompt))];
 
   if (process.platform === 'win32') {
     const file = requestFile(tool, args, root, title);
@@ -127,11 +128,11 @@ function requestFile(tool: ToolKey, args: string[], root: string, title: string)
 // Starts a terminal tool in a terminal tab of the app, with the request or, for an
 // empty prompt, just the tool. `prepare` registers the command with
 // desktop/terminals.ts; the tab starts it once it knows its size.
-export function launchInTerminal(tool: ToolKey, prompt: string, root: string, prepare: (spec: TermSpec) => string, plugins: string[] = []): LaunchResult {
+export function launchInTerminal(tool: ToolKey, prompt: string, root: string, prepare: (spec: TermSpec) => string, plugins: string[] = [], extra: string[] = []): LaunchResult {
   const t = TOOLS[tool];
   if (!t.command || !t.args || t.clipboard) throw new Error(`${t.label} does not run in a terminal.`);
   if (!which(t.command)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
-  const args = [...pluginArgs(tool, root, plugins), ...(prompt ? t.args(cleanPrompt(prompt)) : [])];
+  const args = [...pluginArgs(tool, root, plugins), ...extra, ...(prompt ? t.args(cleanPrompt(prompt)) : [])];
   const id = prepare(process.platform === 'win32'
     ? { file: which('node') ?? process.execPath, args: [runToolPath(), requestFile(tool, args, root, t.label)], cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
     : { file: t.command, args, cwd: root });

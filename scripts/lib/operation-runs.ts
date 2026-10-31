@@ -15,12 +15,14 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { join } from 'node:path';
 import { nowStamp } from './repo.mjs';
 import { nextLink, startOf, type Operation, type OperationAgent, type OperationLink } from './operations.ts';
+import type { McpServer } from './mcp.ts';
 
 export type VisitStatus = 'awaiting-approval' | 'ready' | 'running' | 'done';
 export interface RunStep {
   id: string; agent: string; name: string; file: string; // the agent and its file (relative to the framework root, or absolute)
   inputs: string[]; outputs: string[]; outcomes: string[]; executes: string[]; // MCP servers it executes through
   lane: string; ai: string;
+  servers?: McpServer[]; // the MCP servers of its agent the project had on when the run started (only ${VARIABLE} references, no values)
 }
 export interface Visit {
   slot: string; step: string; round: number; from: string; // the visit before ('' for the first)
@@ -82,7 +84,7 @@ function visit(run: OperationRun, stepId: string, from: Visit | undefined, link?
   return v;
 }
 
-export function createOperationRun(projectDir: string, project: string, op: Operation, agents: (OperationAgent & { file: string })[], order: string[], req: RunRequest): OperationRun {
+export function createOperationRun(projectDir: string, project: string, op: Operation, agents: (OperationAgent & { file: string; servers?: McpServer[] })[], order: string[], req: RunRequest): OperationRun {
   const runs = join(projectDir, 'runs');
   let id = `${nowStamp()}-op-${op.id}`.slice(0, 120);
   for (let i = 2; existsSync(join(runs, id)); i++) id = `${nowStamp()}-op-${op.id}-${i}`;
@@ -103,6 +105,7 @@ export function createOperationRun(projectDir: string, project: string, op: Oper
     return {
       id: sid, agent: agent.name, name: agent.name, file: agent.file, inputs: agent.inputs, outputs: agent.outputs, outcomes: agent.outcomes ?? [],
       executes: agent.mcps.filter((m) => m.mode === 'execute').map((m) => m.name), lane: laneOf(step.x + 105), ai, // the lane under the middle of its card
+      servers: agent.servers ?? [],
     };
   });
 

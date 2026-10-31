@@ -53,7 +53,7 @@ Rules (checked by `npm run validate` for built-in agents and by the app when you
   - `inputs`: comma-separated, in words (max 80 characters each).
   - `outputs`: comma-separated file names with an extension, no folders; `*` matches any name (`*.pdf`).
   - `outcomes`: comma-separated results the agent can end with (up to 8, a word or two each). It writes the one it ended with in its summary (`outcome: <result>`); an operation follows the arrow of that result.
-  - `mcps`: one `name: read` or `name: execute` line per MCP server. An operation asks for approval before a step that executes.
+  - `mcps`: one `name: read` or `name: execute` line per MCP server, by its id in Settings › MCP servers. The step gets only the servers its contract names that the project has on (`docs/mcp-servers.md`). An operation asks for approval before a step that executes.
   - `ai`: `claude`, `codex`, `cursor-agent`, `gemini` or `antigravity`; left out, the AI is chosen when it runs.
   - A `read-only` agent writes nothing, so it cannot list outputs or execute through an MCP.
 - In the desktop app, the **In an operation** section of an agent shows these fields; on your own agents (and in *Create agent*) they are edited there, without touching the file.

@@ -23,6 +23,8 @@ const UI = join(DIST, '..', 'dist'); // app/dist, inside the app (not the framew
 const ICON = join(UI, 'icon.png');
 // The tool runner must be a real file on disk: in the installer it is unpacked from app.asar.
 process.env.QA_RUN_TOOL = join(DIST, 'run-tool.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+// Moki's MCP server, which the AI tools started from the app get (bundled from ide/mcp/server.ts), unpacked the same way.
+process.env.QA_MCP_SERVER = join(DIST, 'mcp.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 
 const terminals = createTerminals((channel, id, payload) => win?.webContents.send(channel, id, payload));
 
@@ -31,8 +33,8 @@ const fakeTools = process.env.QA_FAKE_TOOLS === '1';
 
 const service = createService(ROOT, {
   // Terminal tools open in a tab of the app; editors, or no node-pty, use the external launcher.
-  launch: (tool, prompt, root, plugins = []) => (fakeTools ? { opened: true, message: 'fake' }
-    : terminals.available() && !TOOLS[tool].clipboard ? launchInTerminal(tool, prompt, root, terminals.prepare, plugins) : launchTool(tool, prompt, root, plugins)),
+  launch: (tool, prompt, root, plugins = [], extra = []) => (fakeTools ? { opened: true, message: 'fake' }
+    : terminals.available() && !TOOLS[tool].clipboard ? launchInTerminal(tool, prompt, root, terminals.prepare, plugins, extra) : launchTool(tool, prompt, root, plugins, extra)),
   ...(fakeTools ? { detectTools: () => Object.fromEntries(Object.keys(TOOLS).map((k) => [k, true])) as Record<ToolKey, boolean> } : {}),
   openFolder,
   openPath: (file) => { void shell.openPath(file); },

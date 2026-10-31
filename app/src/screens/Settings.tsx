@@ -2,7 +2,8 @@
 // every project, and the only place an agent is created. Operations: agents
 // linked by arrows into multi-agent operations. Skills: what is
 // already installed (and where), and adding a skill. Documents: the look of the files
-// activities and agents generate (header, footer, fonts, colours, watermark).
+// activities and agents generate (header, footer, fonts, colours, watermark). MCP servers:
+// the workspace catalog and what each project turns on (components/McpManager.tsx).
 
 import { useEffect, useState } from 'react';
 import { type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
@@ -13,8 +14,9 @@ import { SkillsDialog, type SkillDialogTab } from '../components/SkillsDialog';
 import { Library } from './Library';
 import { DocumentStyleForm } from '../components/DocumentStyleForm';
 import { Operations } from './Operations';
+import { McpManager } from '../components/McpManager';
 
-export type SettingsTab = 'agents' | 'operations' | 'skills' | 'documents';
+export type SettingsTab = 'agents' | 'operations' | 'skills' | 'mcp' | 'documents';
 
 interface Props {
   tab: SettingsTab;
@@ -59,6 +61,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
           <button type="button" role="tab" aria-selected={tab === 'agents'} className={`dialog-tab${tab === 'agents' ? ' on' : ''}`} onClick={() => onTab('agents')}>{t('Agents')}</button>
           <button type="button" role="tab" aria-selected={tab === 'operations'} className={`dialog-tab${tab === 'operations' ? ' on' : ''}`} onClick={() => onTab('operations')}>{t('Operations')}</button>
           <button type="button" role="tab" aria-selected={tab === 'skills'} className={`dialog-tab${tab === 'skills' ? ' on' : ''}`} onClick={() => onTab('skills')}>{t('Skills')}</button>
+          <button type="button" role="tab" aria-selected={tab === 'mcp'} className={`dialog-tab${tab === 'mcp' ? ' on' : ''}`} onClick={() => onTab('mcp')}>{t('MCP servers')}</button>
           <button type="button" role="tab" aria-selected={tab === 'documents'} className={`dialog-tab${tab === 'documents' ? ' on' : ''}`} onClick={() => onTab('documents')}>{t('Documents')}</button>
         </div>
         {showPicker && (
@@ -72,6 +75,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
       </div>
       <div className="settings-body">
         {tab === 'documents' ? <DocumentStyleForm key={target?.id ?? 'none'} project={target} />
+          : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} />
           : tab === 'operations' ? <Operations tools={tools} />
           : tab === 'agents'
           ? (
