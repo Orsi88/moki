@@ -14,6 +14,9 @@
   "activationEvents": ["onStartupFinished"],
   "contributes": {
     "mcpServerDefinitionProviders": [{ "id": "moki", "label": "Moki" }],
+    "icons": {
+      "moki-cat": { "description": "Moki", "default": { "fontPath": "dist/moki-icons.woff", "fontCharacter": "\\E000" } }
+    },
     "viewsContainers": {
       "activitybar": [{ "id": "moki", "title": "Moki", "icon": "resources/moki-activitybar.svg" }]
     },

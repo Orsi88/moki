@@ -10,6 +10,7 @@ import { build as viteBuild } from 'vite';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { ROOT } from './lib/repo.mjs';
+import { iconFont } from './lib/icon-font.mjs';
 
 const ext = join(ROOT, 'ide', 'vscode');
 const out = join(ext, 'dist');
@@ -37,6 +38,8 @@ await viteBuild({ configFile: join(ROOT, 'app', 'vite.companion.config.ts'), log
 cpSync(join(ROOT, 'app', 'public', 'cats'), join(out, 'webview', 'cats'), { recursive: true });
 cpSync(join(ROOT, 'app', 'public', 'favicon.svg'), join(out, 'webview', 'favicon.svg'));
 cpSync(join(ROOT, 'app', 'public', 'icon.png'), join(out, 'icon.png'));
+// The status bar shows only font icons: the cat of the Activity Bar, as a one-glyph font (contributes.icons).
+writeFileSync(join(out, 'moki-icons.woff'), iconFont(readFileSync(join(ext, 'resources', 'moki-activitybar.svg'), 'utf8')));
 // Identifies this build, so an installed extension refreshes its framework files once per build.
 writeFileSync(join(out, 'build-info.json'), JSON.stringify({ buildId: new Date().toISOString() }));
 cpSync(join(ROOT, 'LICENSE'), join(ext, 'LICENSE'));

@@ -94,7 +94,7 @@ export function start(context: vscode.ExtensionContext): void {
       watch(project);
       mcpChanged.fire();
     }
-    status.text = companion ? `$(beaker) Moki: ${name(companion.project)}` : candidates.length > 1 ? '$(beaker) Moki: choose a project' : '$(beaker) Moki: no project';
+    status.text = companion ? `$(moki-cat) Moki: ${name(companion.project)}` : candidates.length > 1 ? '$(moki-cat) Moki: choose a project' : '$(moki-cat) Moki: no project';
     status.tooltip = companion ? 'Moki project of this folder. Click to change.' : 'Choose the Moki project of this folder.';
     refresh();
   };
