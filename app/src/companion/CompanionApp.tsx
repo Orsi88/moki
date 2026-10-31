@@ -59,14 +59,13 @@ export function CompanionApp() {
 
   const header = (
     <header className="mk-head">
-      <div className="mk-head-text">
-        <span className="mk-brand">Moki</span>
-        <select value={state.project?.id ?? ''} onChange={(e) => choose(e.target.value)} aria-label={t('Project')}>
-          {!state.project && <option value="">{t('Choose a project')}</option>}
-          {state.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      </div>
-      {state.project && <span className="pill pill-completed mk-status">{t('Connected')}</span>}
+      {/* The view's title already says Moki: here only whether a project is connected, and which. */}
+      <span className={`mk-dot${state.project ? ' on' : ''}`} role="img"
+        aria-label={state.project ? t('Connected') : t('No project')} title={state.project ? t('Connected') : t('No project')} />
+      <select value={state.project?.id ?? ''} onChange={(e) => choose(e.target.value)} aria-label={t('Project')}>
+        {!state.project && <option value="">{t('Choose a project')}</option>}
+        {state.projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
     </header>
   );
 
