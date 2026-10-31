@@ -8,14 +8,24 @@ export const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').rep
 const hide = (text) => text.replace(/\\([!-/:-@[-`{-~])/g, (_, c) => String.fromCharCode(0xe000 + c.charCodeAt(0)));
 const unhide = (html) => html.replace(/[\ue000-\ue07f]/g, (c) => escHtml(String.fromCharCode(c.charCodeAt(0) - 0xe000)));
 
+// Set only while markdownToHtml runs (it is synchronous): turns a relative image path into a data: URI, or null.
+let resolveImage = null;
+
 function inline(text) {
   return unhide(escHtml(hide(text))
+    // Relative images become data: URIs through the caller's resolver; the line below still accepts only raster data: URIs.
+    .replace(/!\[([^\]]*)\]\(([^)\s:]+)\)/g, (m, alt, src) => {
+      const uri = resolveImage?.(src.replace(/&amp;/g, '&'));
+      return uri ? `![${alt}](${uri})` : m;
+    })
     // Only embedded raster images (Word previews); no remote or file images.
     .replace(/!\[([^\]]*)\]\((data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+)\)/g, '<img alt="$1" src="$2">')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    // <https://...>: an autolink (http and https only; the text is already escaped).
+    .replace(/&lt;(https?:\/\/[^\s<>]+?)&gt;/g, '<a href="$1">$1</a>')
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>'));
 }
 
@@ -36,9 +46,16 @@ function table(head, rows) {
   return `<table><thead>${tr(grid[0], 'th')}</thead><tbody>${grid.slice(1).map((row) => tr(row, 'td')).join('')}</tbody></table>`;
 }
 
-// Small Markdown subset: headings, paragraphs, lists (2 levels), tables,
+// Small Markdown subset: headings (# and setext), paragraphs, nested lists, tables,
 // blockquotes, code blocks, horizontal rules. Enough for generated reports.
-export function markdownToHtml(md) {
+// options.image: (src) => data: URI or null, for relative image paths (the desktop app reads them inside the project).
+/** @param {string} md @param {{ image?: ((src: string) => string | null) | null }} [options] */
+export function markdownToHtml(md, { image = null } = {}) {
+  resolveImage = image;
+  try { return render(md); } finally { resolveImage = null; }
+}
+
+function render(md) {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   const out = [];
   let i = 0;
@@ -71,25 +88,35 @@ export function markdownToHtml(md) {
       out.push(`<blockquote>${inline(buf.join(' '))}</blockquote>`);
     } else if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
       const html = [];
-      const stack = [];
+      const stack = []; // open lists: { tag, indent }
       while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
         const m = lines[i].match(/^(\s*)([-*]|\d+\.)\s+(.*)$/);
-        const depth = m[1].length >= 2 ? 1 : 0;
+        const indent = m[1].replace(/\t/g, '    ').length;
         const tag = /\d/.test(m[2]) ? 'ol' : 'ul';
-        while (stack.length > depth + 1 || (depth === 0 && stack.length && stack[0] !== tag)) html.push(`</li></${stack.pop()}>`);
-        if (stack.length === depth) { html.push(`<${tag}><li>`); stack.push(tag); } else html.push('</li><li>');
+        // Deeper by 2+ spaces opens a nested list; less indented closes lists back to that level.
+        while (stack.length > 1 && indent < stack.at(-1).indent) html.push(`</li></${stack.pop().tag}>`);
+        const top = stack.at(-1);
+        if (!top || indent >= top.indent + 2) { html.push(`<${tag}><li>`); stack.push({ tag, indent }); }
+        else if (top.tag !== tag) { html.push(`</li></${stack.pop().tag}><${tag}><li>`); stack.push({ tag, indent }); }
+        else html.push('</li><li>');
         // "- [ ] item" / "- [x] item": a checklist item (the box is drawn, not editable here).
         const task = m[3].match(/^\[([ xX])\]\s+(.*)$/);
         html.push(task ? `<input type="checkbox" class="task" disabled${task[1] === ' ' ? '' : ' checked'}> ${inline(task[2])}` : inline(m[3]));
         i++;
       }
-      while (stack.length) html.push(`</li></${stack.pop()}>`);
+      while (stack.length) html.push(`</li></${stack.pop().tag}>`);
       out.push(html.join(''));
     } else if (!line.trim()) {
       i++;
     } else {
       const buf = [];
-      while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|>|\s*([-*]|\d+\.)\s+)/.test(lines[i])) buf.push(lines[i++]);
+      let level = 0;
+      while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|>|\s*([-*]|\d+\.)\s+)/.test(lines[i])) {
+        // Setext heading: text underlined with === (level 1) or --- (level 2). A lone --- is a rule (handled above).
+        if (buf.length && /^ {0,3}(=+|-+)\s*$/.test(lines[i])) { level = lines[i].trim()[0] === '=' ? 1 : 2; i++; break; }
+        buf.push(lines[i++]);
+      }
+      if (level) { out.push(`<h${level}>${inline(buf.join(' ').trim())}</h${level}>`); continue; }
       // A line ending in two spaces is a line break inside the paragraph.
       out.push(`<p>${inline(buf.join('\n')).replace(/ {2,}\n/g, '<br>').replace(/\n/g, ' ')}</p>`);
     }

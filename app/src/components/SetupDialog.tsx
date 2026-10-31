@@ -1,6 +1,6 @@
 // "Set up the project": what it is for, in the QA's own words, which global
 // skills it uses (linked by name, nothing copied), which agents it enables and
-// which optional app plugins (caveman) its sessions load.
+// which optional app plugins (caveman, superpowers) its sessions load.
 // New skills come from the registry (Find skills, prefilled with the
 // description). The AI tool can then adapt the context to the description
 // ("Prepare the project"), or, for a blank project, interview the user and

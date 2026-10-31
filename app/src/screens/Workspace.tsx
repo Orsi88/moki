@@ -497,6 +497,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           )}
           <DocView
             content={tab.content}
+            project={project.id}
             mode={tab.mode}
             draft={tab.draft}
             dirty={isDirty(tab)}
@@ -506,6 +507,10 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
             onSave={() => save(tab.path)}
             onOpenExternal={() => openExternal(tab.path)}
             onLink={onLink}
+            onPdfSaved={(path) => {
+              if (path !== tab.path) { openPath(path); return; }
+              api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content) })).catch((e: Error) => setError(e.message));
+            }}
             openWith={{
               kept: kept[extOf(tab.path)] ?? null,
               apps: () => api.openWithApps(project.id, tab.path).catch((e: Error) => { setError(e.message); return null; }),

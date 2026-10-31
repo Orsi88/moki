@@ -3,9 +3,11 @@ import { api, type FileContent, type OpenWithApps } from '../api';
 import { t } from '../i18n';
 import { IconEdit, IconExternal, IconEye, IconMore } from './Icons';
 import { FileIcon } from '../icons';
+import { PdfDoc } from './PdfDoc';
 
 interface Props {
   content: FileContent;
+  project?: string; // lets the preview of unsaved edits show the file's relative images
   mode: 'preview' | 'edit';
   draft: string;
   dirty: boolean;
@@ -15,12 +17,13 @@ interface Props {
   onSave: () => void;
   onOpenExternal: () => void;
   onLink: (href: string) => void;
+  onPdfSaved?: (path: string) => void; // a PDF change was saved, to this file (the same one, or its -edited copy)
   // "Open with": the programs the system offers, and the one kept in Moki for this type (null = the system's default).
   openWith?: { kept: { id: string; name: string } | null; apps: () => Promise<OpenWithApps | null>; open: (app: OpenWithApps['apps'][number] | null, keep: boolean) => void; reset: () => void };
 }
 
-// Excel and Word files get "Open with" (OPEN_WITH_TYPES in desktop/fs-guard.ts).
-const OPEN_WITH = /\.(xlsx|xls|docx|doc)$/i;
+// Excel, Word and PDF files get "Open with" (OPEN_WITH_TYPES in desktop/fs-guard.ts).
+const OPEN_WITH = /\.(xlsx|xls|docx|doc|pdf)$/i;
 
 const colName = (i: number): string => (i >= 26 ? colName(Math.floor(i / 26) - 1) : '') + String.fromCharCode(65 + (i % 26));
 
@@ -112,9 +115,20 @@ function PdfView({ data, title }: { data: string; title: string }) {
   return url ? <iframe className="pdf-view" src={url} title={title} /> : null;
 }
 
+// The page rendered by Chromium in a sandboxed frame: no scripts, forms or navigation, its own origin.
+function HtmlView({ text, title }: { text: string; title: string }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    const next = URL.createObjectURL(new Blob([text], { type: 'text/html' }));
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [text]);
+  return url ? <iframe className="pdf-view" sandbox="" src={url} title={title} /> : null;
+}
+
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function DocView({ content, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onLink, openWith }: Props) {
+export function DocView({ content, project, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onLink, onPdfSaved, openWith }: Props) {
   const editable = (content.kind === 'markdown' || content.kind === 'text') && content.editable;
   const crumbs = content.path.split('/');
   const savedHtml = content.kind === 'markdown' ? content.html : '';
@@ -136,9 +150,9 @@ export function DocView({ content, mode, draft, dirty, saving, onDraft, onMode, 
     if (content.kind !== 'markdown' || mode !== 'preview') return;
     if (draft === content.text) { setHtml(content.html); return; }
     let cancel = false;
-    api.renderMarkdown(draft).then((next) => { if (!cancel) setHtml(next); }).catch(() => { if (!cancel) setHtml(content.html); });
+    api.renderMarkdown(draft, project, content.path).then((next) => { if (!cancel) setHtml(next); }).catch(() => { if (!cancel) setHtml(content.html); });
     return () => { cancel = true; };
-  }, [content, draft, mode]);
+  }, [content, draft, mode, project]);
 
   // Links inside rendered Markdown never navigate the window.
   const onClick = (e: MouseEvent<HTMLDivElement>) => {
@@ -190,7 +204,10 @@ export function DocView({ content, mode, draft, dirty, saving, onDraft, onMode, 
           </>
         )}
         {content.kind === 'xlsx' && <SheetView key={content.path} sheets={content.sheets} />}
-        {content.kind === 'pdf' && <PdfView data={content.data} title={content.path} />}
+        {content.kind === 'pdf' && (project && onPdfSaved
+          ? <PdfDoc key={content.path} project={project} path={content.path} data={content.data} native={<PdfView data={content.data} title={content.path} />} onSaved={onPdfSaved} />
+          : <PdfView data={content.data} title={content.path} />)}
+        {content.kind === 'html' && <HtmlView text={content.text} title={content.path} />}
         {content.kind === 'image' && <div className="image-view"><img src={content.dataUrl} alt={content.path} /></div>}
         {content.kind === 'binary' && (
           <div className="binary-view">

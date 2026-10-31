@@ -12,6 +12,7 @@ import { callService, createService } from '../../desktop/service.ts';
 import { launchInTerminal, launchTool, openFolder } from '../../desktop/launcher.ts';
 import { noteKey, noteQuery, parseNoteRequest } from '../../desktop/notes.ts';
 import { setWorkspaceEnv } from '../../desktop/workspaces.ts';
+import { pdfcraftAvailable, runPdfcraft } from '../../desktop/pdfcraft.ts';
 import type { TermSpec } from '../../desktop/terminals.ts';
 
 // Arguments as an array and no shell, so the request is never read as a command line.
@@ -40,7 +41,7 @@ function watchProject(project: unknown, onChange: () => void): vscode.Disposable
 // app/dist/index.html with a webview CSP, a base for its relative URLs and the bridge loaded first.
 function page(webview: vscode.Webview, ui: vscode.Uri, query: string): string {
   const src = webview.cspSource;
-  const csp = `default-src 'none'; script-src ${src}; style-src ${src} 'unsafe-inline'; img-src ${src} data:; font-src ${src}; frame-src blob:; connect-src 'none'; object-src 'none'; base-uri ${src}; form-action 'none'`;
+  const csp = `default-src 'none'; script-src ${src}; style-src ${src} 'unsafe-inline'; img-src ${src} data:; font-src ${src}; frame-src blob:; worker-src blob:; connect-src 'none'; object-src 'none'; base-uri ${src}; form-action 'none'`;
   const head = `<head>\n<meta http-equiv="Content-Security-Policy" content="${csp}">\n<base href="${webview.asWebviewUri(ui)}/">\n`
     + `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(ui, 'webview-bridge.js'))}" data-query="${query.replace(/&/g, '&amp;')}"></script>`;
   return readFileSync(join(ui.fsPath, 'index.html'), 'utf8').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '').replace('<head>', head);
@@ -58,6 +59,7 @@ export function start(context: vscode.ExtensionContext): void {
     trash: async (path) => { await vscode.workspace.fs.delete(vscode.Uri.file(path), { recursive: true, useTrash: true }); },
     pickFolder: async () => (await vscode.window.showOpenDialog({ title: 'Choose a folder', canSelectFolders: true, canSelectFiles: false }))?.[0]?.fsPath ?? null,
     onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
+    pdfcraft: { available: pdfcraftAvailable, run: runPdfcraft },
   });
   const ui = vscode.Uri.joinPath(context.extensionUri, 'dist', 'ui');
   const panels = new Map<string, vscode.WebviewPanel>(); // '' is the main page; notes by noteKey

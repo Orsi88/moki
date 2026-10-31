@@ -50,17 +50,19 @@ export function detached(cmd: string, args: string[], options: { shell?: boolean
 // Plugins only for the sessions the app opens (adapters/app-plugins/README.md); each is
 // skipped when what it needs is missing. Codex has no per-session plugins, so it gets
 // one line of developer instructions (one line: launcher scripts drop line breaks).
-// `plugins` are the ones the project turned on (project.json plugins: caveman).
+// `plugins` are the ones the project turned on (project.json plugins: caveman, superpowers).
 export function pluginArgs(tool: ToolKey, root: string, plugins: string[] = []): string[] {
   const node = tool === 'codex' || Boolean(which('node')); // the Claude hooks run on Node
   const rtk = Boolean(which('rtk'));
   const caveman = node && plugins.includes('caveman');
+  const superpowers = plugins.includes('superpowers'); // its hook runs on bash and skips itself without it
   const dir = join(root, 'adapters', 'app-plugins');
-  if (tool === 'claude') return [...(node ? ['ponytail'] : []), ...(rtk ? ['rtk'] : []), ...(caveman ? ['caveman'] : [])].flatMap((p) => ['--plugin-dir', join(dir, p)]);
+  if (tool === 'claude') return [...(node ? ['ponytail'] : []), ...(rtk ? ['rtk'] : []), ...(caveman ? ['caveman'] : []), ...(superpowers ? ['superpowers'] : [])].flatMap((p) => ['--plugin-dir', join(dir, p)]);
   if (tool !== 'codex') return [];
   const lines = [`Ponytail mode is active (level full): before writing, changing or reviewing code, read ${join(dir, 'ponytail', 'skills', 'ponytail', 'SKILL.md')} and follow it.`];
   if (rtk) lines.push('Run shell commands through rtk to shrink their output (rtk git status, rtk grep, rtk ls...); rtk proxy CMD runs one unfiltered.');
   if (caveman) lines.push(`Caveman mode is active: before every reply, read ${join(dir, 'caveman', 'skills', 'caveman', 'SKILL.md')} and follow it.`);
+  if (superpowers) lines.push(`Superpowers skills are active: read ${join(dir, 'superpowers', 'skills', 'using-superpowers', 'SKILL.md')} and follow it; the other skills are in ${join(dir, 'superpowers', 'skills')}.`);
   return ['-c', `developer_instructions=${lines.join(' ')}`];
 }
 

@@ -9,7 +9,7 @@ export interface ProjectSummary {
   linkedSkills: string[]; // global skills this project uses, by name
   starter: Starter;
   tags: string[]; // tag ids
-  plugins: string[]; // app plugins turned on for this project (caveman)
+  plugins: string[]; // app plugins turned on for this project (caveman, superpowers)
 }
 // A tag shares context between projects: the context of the projects with it and the files marked with it.
 export interface Tag { id: string; name: string; color: string; description: string }
@@ -30,8 +30,22 @@ export interface SkillInfo { name: string; status: string; description: string }
 export type ToolKind = 'terminal' | 'editor' | 'chat' | 'print';
 export interface ToolInfo { id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean }
 export interface ActivityInfo { id: string; label: string; hint: string; skill: string; needsFiles: boolean; available: boolean; status: string }
-// "Open with" (Excel and Word files): the programs the system offers; dialog = the system shows its own list instead (Windows).
+// "Open with" (Excel, Word and PDF files): the programs the system offers; dialog = the system shows its own list instead (Windows).
 export interface OpenWithApps { dialog: boolean; apps: { id: string; name: string; isDefault: boolean }[] }
+// PDF comments and page edits, written by PdfCraft (desktop/pdfcraft.ts). Quads: 8 numbers, points from the page's top-left.
+export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; replies: PdfComment[] }
+export interface PdfMark { page: number; quads: number[][] }
+export type PdfChange =
+  | { op: 'highlight'; page: number; find: string; all: boolean; contents?: string; color: string }
+  | { op: 'highlight'; marks: PdfMark[]; contents?: string; color: string }
+  | { op: 'reply'; id: string; text: string }
+  | { op: 'edit'; id: string; contents: string }
+  | { op: 'delete'; id: string }
+  | { op: 'rotate-pages'; pages: number[]; degrees: 90 | 180 | 270 }
+  | { op: 'delete-pages'; pages: number[] }
+  | { op: 'move-page'; page: number; to: number }
+  | { op: 'insert-blank'; at: number }
+  | { op: 'set-info'; title: string; author: string };
 export interface InboxFile { name: string; size: number; modified: string }
 export interface OpenRun { id: string; status: string; currentStep: string }
 
@@ -45,6 +59,7 @@ export type FileContent =
   | { kind: 'markdown'; path: string; text: string; html: string; editable: boolean }
   | { kind: 'text'; path: string; text: string; editable: boolean }
   | { kind: 'json'; path: string; text: string }
+  | { kind: 'html'; path: string; text: string } // shown rendered, read-only
   | { kind: 'docx'; path: string; html: string }
   | { kind: 'xlsx'; path: string; sheets: {
     name: string; hidden: boolean; drawing: boolean; rows: (string | { n: string })[][]; truncated: boolean;
@@ -219,7 +234,7 @@ export const api = {
   tree: (project: string) => call<TreeNode[]>('tree', project),
   readFile: (project: string, path: string) => call<FileContent>('readFile', project, path),
   writeFile: (project: string, path: string, text: string) => call<FileContent>('writeFile', project, path, text),
-  renderMarkdown: (text: string) => call<string>('renderMarkdown', text),
+  renderMarkdown: (text: string, project?: string, path?: string) => call<string>('renderMarkdown', text, project, path),
   documentStyle: (project?: string | null) => call<{ global: DocumentStyle; project: DocumentStyle | null }>('documentStyle', project ?? null),
   saveDocumentStyle: (project: string | null, style: DocumentStyle | null) => call<boolean>('saveDocumentStyle', project, style),
   createNote: (project: string, title: string, text: string) => call<string>('createNote', project, title, text),
@@ -234,6 +249,10 @@ export const api = {
   copyPath: (project: string, path: string) => call<string>('copyPath', project, path),
   openWithApps: (project: string, path: string) => call<OpenWithApps>('openWithApps', project, path),
   openWith: (project: string, path: string, app: string) => call<boolean>('openWith', project, path, app),
+  pdfcraftStatus: () => call<{ available: boolean; platform: string }>('pdfcraftStatus'),
+  pdfComments: (project: string, path: string) => call<PdfComment[]>('pdfComments', project, path),
+  // path: where the change was saved (a "-edited" copy for files in inbox/ and for page edits).
+  pdfChange: (project: string, path: string, change: PdfChange) => call<{ path: string; comments: PdfComment[] }>('pdfChange', project, path, change),
   linkRepository: (project: string) => call<(ProjectSummary & { backup?: string }) | null>('linkRepository', project),
   openLinkedFolder: (project: string) => call<boolean>('openLinkedFolder', project),
   launch: (req: LaunchRequest) => call<LaunchResult>('launch', req),

@@ -33,10 +33,10 @@ Not for the other Craft apps: each has its own skill. Not for the launcher itsel
 From the launcher catalog and the PdfCraft README on 2026-10-27. They drift: the repositories win.
 
 - **In the suite:** ArtCraft Launcher lists PdfCraft as "Reading, organizing and protecting PDFs" (`crates/core/src/catalog.rs` in https://github.com/storytold/craft-launcher) and installs and updates it from https://github.com/storytold/pdfcraft/releases; bundle id `ai.storyteller.pdfcraft`; page https://getartcraft.com/apps/pdfcraft.
-- **Repository:** https://github.com/storytold/pdfcraft (branch `main`, Apache-2.0, Rust)
+- **Repository:** https://github.com/storytold/pdfcraft (branch `main`, MIT OR Apache-2.0, Rust)
 - **What:** read, organize, combine, split and secure PDFs; comments, forms, layers and attachments; desktop and browser.
 - **Run:** `cargo run --release -p pdfcraft -- some.pdf`; OCR models: `cargo xtask models`.
-- **CLI:** `pdfcraft-cli` (`combine`, `extract`, `split`, `info`, `text`, `edit`, `tools`, `run`, `mcp`).
+- **CLI:** `pdfcraft-cli` (`info`, `render`, `text`, `edit`, `combine`, `extract`, `split`, `check`, `audit`, `batch`, `tools`, `run`, `mcp`, `ui`). Comments (highlight by text or quads, reply, edit, delete) go through `run --script steps.json --report` (the script is a file, not stdin), not `edit`.
 - **MCP:** opt-in, `pdfcraft-cli mcp` over stdio, no network port; `--root` confines file access; builds without it: `cargo build -p pdfcraft-cli --no-default-features`.
 - **Former name:** Released as PrintCraft until 0.2.1 (older release assets and installers carry that name).
 - **Contributor and agent rules:** `AGENTS.md` at the repository root; details in `docs/`.

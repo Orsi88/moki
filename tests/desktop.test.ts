@@ -9,6 +9,8 @@ import { PathError, resolveInside, isEditable, isOpenable } from '../desktop/fs-
 import { launchInTerminal, pluginArgs, scriptFor, windowsStartArgs, type LaunchResult } from '../desktop/launcher.ts';
 import type { TermSpec } from '../desktop/terminals.ts';
 import { parseGioMime } from '../desktop/open-with.ts';
+import { parsePdfChange, pdfcraftCandidates, pdfScript, toComments, type PdfChange, type PdfStep } from '../desktop/pdfcraft.ts';
+import { selectionMarks } from '../app/src/pdf-quads.ts';
 import { docxToMarkdown, readableInputs } from '../scripts/lib/docx.ts';
 import { frameworkTarget, syncFramework } from '../desktop/framework.ts';
 import { noteKey, noteQuery, parseNoteRequest } from '../desktop/notes.ts';
@@ -50,6 +52,7 @@ before(() => {
   writeFileSync(join(project, 'runs', RUN, 'outputs', 'report.md'), '# Report\n\nSee [the story](../../../inbox/us-1.md).');
   writeFileSync(join(project, 'inbox', 'us-1.md'), '# US-1');
   writeFileSync(join(project, 'inbox', 'report.pdf'), '%PDF-1.4');
+  writeFileSync(join(project, 'inbox', 'page.html'), '<h1>Page</h1>');
   writeFileSync(join(project, 'inbox', 'us-2.docx'), makeDocx());
   writeFileSync(join(project, 'inbox', 'cases.xlsx'), zip([
     ['xl/workbook.xml', '<workbook><sheets><sheet name="Cases" r:id="rId1"/><sheet name="Empty" state="hidden" r:id="rId2"/></sheets></workbook>'],
@@ -129,6 +132,7 @@ test('readFile renders each kind of file', () => {
     { name: 'Empty', hidden: true, drawing: false, merges: [], truncated: false, widths: [], hiddenRows: [], hiddenCols: [], align: {}, rows: [] },
   ]);
   assert.deepEqual(service.readFile('acme', 'inbox/report.pdf'), { kind: 'pdf', path: 'inbox/report.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
+  assert.deepEqual(service.readFile('acme', 'inbox/page.html'), { kind: 'html', path: 'inbox/page.html', text: '<h1>Page</h1>' });
   const exe = service.readFile('acme', 'inbox/tool.exe') as Extract<FileContent, { kind: 'binary' }>;
   assert.equal(exe.kind, 'binary');
   assert.equal(exe.openable, false);
@@ -251,7 +255,7 @@ test('"open with" lists the system programs and opens only with one of them', as
   assert.deepEqual(opened, ['calc.desktop']);
   await assert.rejects(svc.openWith('acme', 'inbox/sheet.xlsx', '/usr/bin/sh'), /not offered/);
   await assert.rejects(svc.openWith('acme', 'inbox/sheet.xlsx', ''), /not offered/, 'no system dialog here');
-  await assert.rejects(svc.openWithApps('acme', 'inbox/us-1.md'), /only for Excel and Word/);
+  await assert.rejects(svc.openWithApps('acme', 'inbox/us-1.md'), /only for Excel, Word and PDF/);
   await assert.rejects(svc.openWithApps('acme', '../../sheet.xlsx'), ServiceError);
   await assert.rejects(service.openWithApps('acme', 'inbox/sheet.xlsx'), /not available/, 'no chooser given');
   assert.deepEqual(opened, ['calc.desktop']);
@@ -261,6 +265,116 @@ test('gio mime output: the default program, then the recommended ones', () => {
   const out = 'Default application for “application/vnd.ms-excel”: calc.desktop\nRegistered applications:\n\tcalc.desktop\n\torg.gnome.Nautilus.desktop\nRecommended applications:\n\tgrid.desktop\n\tcalc.desktop\n';
   assert.deepEqual(parseGioMime(out), { def: 'calc.desktop', ids: ['calc.desktop', 'grid.desktop'] });
   assert.deepEqual(parseGioMime('No default applications for “x”\nNo registered applications\nNo recommended applications\n'), { def: '', ids: [] });
+  // Nothing recommended (seen for application/pdf): the registered ones.
+  const pdf = 'Default application for “application/pdf”: papers.desktop\nRegistered applications:\n\tpdfcraft.desktop\n\tpapers.desktop\nRecommended applications:\n';
+  assert.deepEqual(parseGioMime(pdf), { def: 'papers.desktop', ids: ['papers.desktop', 'pdfcraft.desktop'] });
+});
+
+test('PdfCraft scripts: open, change, save in place or to a copy, list', () => {
+  const quad = [1, 2, 3, 2, 1, 4, 3, 4];
+  assert.deepEqual(pdfScript('a.pdf', null, 'ana').map((s) => s.tool), ['doc_open', 'comment_list']);
+  const find = pdfScript('a.pdf', { op: 'highlight', page: 2, find: 'prazo', all: true, contents: 'ver', color: 'green' }, 'ana');
+  assert.deepEqual(find.map((s) => s.tool), ['doc_open', 'comment_add', 'doc_save', 'comment_list']);
+  assert.deepEqual(find[1].args, { doc: 1, type: 'highlight', color: 'green', author: 'ana', contents: 'ver', page: 2, find: 'prazo', all: true });
+  assert.deepEqual(find[2].args, { doc: 1 }, 'in place');
+  const marks = pdfScript('a.pdf', { op: 'highlight', marks: [{ page: 1, quads: [quad] }, { page: 3, quads: [quad, quad] }], color: 'yellow' }, 'ana', 'inbox/a-edited.pdf');
+  assert.deepEqual(marks.filter((s) => s.tool === 'comment_add').map((s) => [s.args.page, (s.args.quads as number[][]).length, 'contents' in s.args]), [[1, 1, false], [3, 2, false]]);
+  assert.deepEqual(marks.at(-2)?.args, { doc: 1, path: 'inbox/a-edited.pdf' });
+  assert.deepEqual(pdfScript('a.pdf', { op: 'reply', id: 'x', text: 'ok' }, 'ana')[1], { tool: 'comment_reply', args: { doc: 1, id: 'x', text: 'ok', author: 'ana' } });
+  assert.deepEqual(pdfScript('a.pdf', { op: 'edit', id: 'x', contents: '' }, 'ana')[1], { tool: 'comment_edit', args: { doc: 1, id: 'x', contents: '' } });
+  assert.deepEqual(pdfScript('a.pdf', { op: 'delete', id: 'x' }, 'ana')[1], { tool: 'comment_delete', args: { doc: 1, id: 'x' } });
+  // Page edits: the same open → change → save → list.
+  const edits: [PdfChange, PdfStep[]][] = [
+    [{ op: 'rotate-pages', pages: [2], degrees: 90 }, [{ tool: 'page_rotate', args: { doc: 1, pages: [2], degrees: 90 } }]],
+    [{ op: 'delete-pages', pages: [1, 3] }, [{ tool: 'page_delete', args: { doc: 1, pages: [1, 3] } }]],
+    [{ op: 'move-page', page: 2, to: 1 }, [{ tool: 'page_move', args: { doc: 1, pages: [2], to: 1 } }]],
+    [{ op: 'insert-blank', at: 4 }, [{ tool: 'page_insert_blank', args: { doc: 1, at: 4 } }]],
+    [{ op: 'set-info', title: 'Título', author: '' }, [{ tool: 'doc_set_info', args: { doc: 1, key: 'Title', value: 'Título' } }, { tool: 'doc_set_info', args: { doc: 1, key: 'Author', value: '' } }]],
+  ];
+  for (const [change, middle] of edits) {
+    const steps = pdfScript('a.pdf', change, 'ana');
+    assert.deepEqual(steps.slice(1, -2), middle, change.op);
+    assert.deepEqual(steps.slice(-2).map((x) => x.tool), ['doc_save', 'comment_list']);
+  }
+});
+
+test('pdfcraft-cli off PATH: install folders on Windows, usual bin folders elsewhere', () => {
+  const win = pdfcraftCandidates('win32', { LOCALAPPDATA: 'L', ProgramFiles: 'P' }, 'H');
+  assert.deepEqual(win, [join('L', 'Programs', 'ArtCraft', 'PdfCraft', 'pdfcraft-cli.exe'), join('L', 'Programs', 'PdfCraft', 'pdfcraft-cli.exe'),
+    join('P', 'ArtCraft', 'PdfCraft', 'pdfcraft-cli.exe'), join('P', 'PdfCraft', 'pdfcraft-cli.exe')]);
+  assert.ok(pdfcraftCandidates('darwin', {}, 'H').includes(join('/opt/homebrew/bin', 'pdfcraft-cli')));
+  assert.ok(pdfcraftCandidates('linux', {}, 'H').includes(join('H', '.local', 'bin', 'pdfcraft-cli')));
+});
+
+test('PDF changes from the UI are checked', () => {
+  const quad = [1, 2, 3, 2, 1, 4, 3, 4];
+  assert.deepEqual(parsePdfChange({ op: 'highlight', page: 1, find: 'a', color: 'teal' }), { op: 'highlight', page: 1, find: 'a', all: false, contents: undefined, color: 'yellow' });
+  assert.equal((parsePdfChange({ op: 'highlight', marks: [{ page: 1, quads: [quad] }] }) as { marks: unknown[] }).marks.length, 1);
+  for (const bad of [
+    { op: 'highlight', page: 0, find: 'a' }, { op: 'highlight', page: 1.5, find: 'a' }, { op: 'highlight', page: 1, find: '  ' },
+    { op: 'highlight', page: 1, find: 'x'.repeat(501) }, { op: 'highlight', marks: [{ page: 1, quads: [quad.slice(1)] }] },
+    { op: 'highlight', marks: [{ page: 1, quads: [[...quad.slice(1), Number.NaN]] }] }, { op: 'highlight', marks: [] },
+    { op: 'reply', id: 'x', text: '' }, { op: 'edit', id: '', contents: 'a' }, { op: 'delete' }, { op: 'render' }, null,
+    { op: 'rotate-pages', pages: [1], degrees: 45 }, { op: 'rotate-pages', pages: [1], degrees: -90 }, { op: 'rotate-pages', pages: [], degrees: 90 },
+    { op: 'delete-pages', pages: [1, 1] }, { op: 'delete-pages', pages: [0] }, { op: 'delete-pages', pages: Array.from({ length: 1001 }, (_, i) => i + 1) },
+    { op: 'move-page', page: 1, to: 0 }, { op: 'insert-blank', at: 1.5 }, { op: 'set-info', title: 1, author: '' }, { op: 'set-info', title: 'x'.repeat(1001), author: '' },
+  ]) assert.throws(() => parsePdfChange(bad), Error, JSON.stringify(bad));
+  assert.deepEqual(parsePdfChange({ op: 'rotate-pages', pages: [3, 1], degrees: 270 }), { op: 'rotate-pages', pages: [3, 1], degrees: 270 });
+  assert.deepEqual(parsePdfChange({ op: 'set-info', title: '', author: 'Ana' }), { op: 'set-info', title: '', author: 'Ana' });
+  assert.deepEqual(toComments({ comments: [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', extra: 1, replies: [{ id: 'r', page: 2, contents: 'ok' }] }, { no: 'id' }] }),
+    [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', replies: [{ id: 'r', page: 2, type: '', author: null, contents: 'ok', color: null, replies: [] }] }]);
+});
+
+test('a selection on drawn pages becomes quads in points', () => {
+  // Two pages 612pt wide drawn at 918px (zoom 1.5), the second 1200px lower.
+  const pages = [{ page: 1, box: { left: 100, top: 0, right: 1018, bottom: 1188 }, widthPt: 612 }, { page: 2, box: { left: 100, top: 1200, right: 1018, bottom: 2388 }, widthPt: 612 }];
+  const line = { left: 250, top: 150, right: 400, bottom: 165 };
+  assert.deepEqual(selectionMarks([line, line, { left: 100, top: 1230, right: 160, bottom: 1245 }, { left: 0, top: 0, right: 50, bottom: 20 }, { left: 300, top: 300, right: 300.5, bottom: 310 }, pages[0].box], pages), [
+    { page: 1, quads: [[100, 100, 200, 100, 100, 110, 200, 110]] },
+    { page: 2, quads: [[0, 20, 40, 20, 0, 30, 40, 30]] },
+  ]);
+});
+
+test('PDF comments go through PdfCraft, inside the project, never changing the inbox file', async () => {
+  const project = join(root, 'workspace', 'projects', 'acme');
+  writeFileSync(join(project, 'inbox', 'doc.pdf'), '%PDF-1.7\n');
+  mkdirSync(join(project, 'runs', 'out'), { recursive: true });
+  writeFileSync(join(project, 'runs', 'out', 'r.pdf'), '%PDF-1.7\n');
+  const calls: { steps: PdfStep[]; root: string }[] = [];
+  let failWith = '';
+  const svc = createService(root, { ...noLaunch, pdfcraft: { available: () => true, run: async (steps, dir) => {
+    calls.push({ steps, root: dir });
+    if (failWith) throw new Error(failWith);
+    return steps.map((s) => (s.tool === 'comment_list' ? { comments: [{ id: 'c1', page: 1, replies: [] }] } : {}));
+  } } });
+  assert.deepEqual(svc.pdfcraftStatus(), { available: true, platform: process.platform });
+  assert.deepEqual(service.pdfcraftStatus(), { available: false, platform: process.platform });
+  assert.deepEqual((await svc.pdfComments('acme', 'inbox/doc.pdf')).map((c) => c.id), ['c1']);
+  assert.equal(calls[0].root, realpathSync(project));
+  assert.equal(calls[0].steps[0].args.path, 'inbox/doc.pdf');
+  const change = { op: 'highlight', page: 1, find: 'a', color: 'yellow' };
+  assert.equal((await svc.pdfChange('acme', 'inbox/doc.pdf', change)).path, 'inbox/doc-edited.pdf');
+  assert.deepEqual(calls.at(-1)?.steps.find((s) => s.tool === 'doc_save')?.args, { doc: 1, path: 'inbox/doc-edited.pdf' });
+  writeFileSync(join(project, 'inbox', 'doc-edited.pdf'), '%PDF-1.7\n');
+  assert.equal((await svc.pdfChange('acme', 'inbox/doc.pdf', change)).path, 'inbox/doc-edited-2.pdf');
+  assert.equal((await svc.pdfChange('acme', 'inbox/doc-edited.pdf', change)).path, 'inbox/doc-edited.pdf', 'the copy saves in place');
+  assert.equal((await svc.pdfChange('acme', 'runs/out/r.pdf', change)).path, 'runs/out/r.pdf');
+  assert.deepEqual(calls.at(-1)?.steps.find((s) => s.tool === 'doc_save')?.args, { doc: 1 });
+  // Page edits never save over the file, inside the inbox or not; the -edited copy then saves in place.
+  const del = { op: 'delete-pages', pages: [1] };
+  assert.equal((await svc.pdfChange('acme', 'runs/out/r.pdf', del)).path, 'runs/out/r-edited.pdf');
+  assert.deepEqual(calls.at(-1)?.steps.find((s) => s.tool === 'page_delete')?.args, { doc: 1, pages: [1] });
+  writeFileSync(join(project, 'runs', 'out', 'r-edited.pdf'), '%PDF-1.7\n');
+  assert.equal((await svc.pdfChange('acme', 'runs/out/r-edited.pdf', del)).path, 'runs/out/r-edited.pdf');
+  await assert.rejects(svc.pdfChange('acme', 'inbox/doc.pdf', { op: 'render' }), ServiceError);
+  await assert.rejects(svc.pdfComments('acme', 'inbox/us-1.md'), /PDF not found/);
+  await assert.rejects(svc.pdfComments('acme', '../../x.pdf'), ServiceError);
+  await assert.rejects(svc.pdfComments('nope', 'inbox/doc.pdf'), /Unknown project/);
+  await assert.rejects(service.pdfComments('acme', 'inbox/doc.pdf'), /not available/);
+  failWith = '"zzz" was not found on page 1';
+  await assert.rejects(svc.pdfChange('acme', 'runs/out/r.pdf', change), (e: Error) => e instanceof ServiceError && /not found on page 1/.test(e.message));
+  for (const f of ['doc.pdf', 'doc-edited.pdf']) rmSync(join(project, 'inbox', f));
+  rmSync(join(project, 'runs', 'out'), { recursive: true });
 });
 
 test('run details and open activities', () => {
@@ -1144,6 +1258,9 @@ test('app plugins load only in app sessions: Claude by folder, Codex as one line
     assert.deepEqual(pluginArgs('claude', '/home/u/qa', ['caveman']).slice(-2), ['--plugin-dir', join(dir, 'caveman')]);
     assert.doesNotMatch(value, /caveman/i);
     assert.match(pluginArgs('codex', '/home/u/qa', ['caveman'])[1], /Caveman .*caveman.*SKILL\.md/);
+    assert.deepEqual(pluginArgs('claude', '/home/u/qa', ['superpowers']).slice(-2), ['--plugin-dir', join(dir, 'superpowers')]);
+    assert.doesNotMatch(value, /superpowers/i);
+    assert.match(pluginArgs('codex', '/home/u/qa', ['superpowers'])[1], /Superpowers .*using-superpowers.*SKILL\.md/);
     rmSync(join(bin, 'rtk'));
     process.env.PATH = (path ?? '').split(':').filter((d) => !existsSync(join(d, 'rtk'))).join(':');
     assert.deepEqual(pluginArgs('claude', '/home/u/qa'), ['--plugin-dir', join(dir, 'ponytail')]);
@@ -1194,6 +1311,24 @@ test('markdown rendering escapes HTML and attribute injection', () => {
   // Only embedded raster images become <img>: no remote images, no attribute injection.
   assert.doesNotMatch(markdownToHtml('![a](https://x/y.png) ![b](data:image/png;base64,AA" onerror="x) ![c](data:image/svg+xml;base64,AA)'), /<img/);
   assert.match(html, /<strong>ok<\/strong>/);
+});
+
+test('markdown relative images are embedded from inside the project only', () => {
+  const project = join(root, 'workspace', 'projects', 'acme');
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  mkdirSync(join(project, 'inbox', 'img'), { recursive: true });
+  writeFileSync(join(project, 'inbox', 'img', 'shot one.png'), png);
+  writeFileSync(join(project, 'inbox', 'logo.svg'), '<svg onload="alert(1)"/>');
+  writeFileSync(join(root, 'outside.png'), png);
+  const text = '![shot](img/shot%20one.png) ![up](../../../../outside.png) ![svg](logo.svg) ![web](https://x/y.png) ![none](img/missing.png)';
+  writeFileSync(join(project, 'inbox', 'images.md'), text);
+  const md = service.readFile('acme', 'inbox/images.md') as Extract<FileContent, { kind: 'markdown' }>;
+  const imgs = md.html.match(/<img [^>]*>/g) ?? [];
+  assert.deepEqual(imgs, [`<img alt="shot" src="data:image/png;base64,${png.toString('base64')}">`]);
+  // The preview of unsaved edits embeds them the same way, only when told the project and the file.
+  assert.match(service.renderMarkdown(`x ${text}`, 'acme', 'inbox/images.md'), /<img alt="shot" src="data:image\/png;base64,/);
+  assert.doesNotMatch(service.renderMarkdown(text), /<img/);
+  assert.doesNotMatch(service.renderMarkdown(text, '../..', 'inbox/images.md'), /<img/);
 });
 
 test('docx extraction keeps headings, lists and tables', () => {

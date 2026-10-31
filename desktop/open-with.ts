@@ -24,11 +24,14 @@ export interface AppChooser {
 }
 
 // `gio mime <type>` output (LC_ALL=C): the default program on the first line, then the
-// registered and the recommended ones, one per tab-indented line. Pure, for testing.
+// registered and the recommended ones, one per tab-indented line. The registered ones are the
+// fallback when nothing is recommended (seen for application/pdf). Pure, for testing.
 export function parseGioMime(out: string): { def: string; ids: string[] } {
   const def = /^Default application for .*: (\S+)$/m.exec(out)?.[1] ?? '';
-  const recommended = (out.split(/^Recommended applications:$/m)[1] ?? '').split('\n').map((l) => l.trim());
-  return { def, ids: [...new Set([def, ...recommended].filter(Boolean))] };
+  const list = (name: string): string[] => (new RegExp(`^${name} applications:\\n((?:\\t.*\\n?)*)`, 'm').exec(out)?.[1] ?? '')
+    .split('\n').map((l) => l.trim()).filter(Boolean);
+  const recommended = list('Recommended');
+  return { def, ids: [...new Set([def, ...(recommended.length ? recommended : list('Registered'))].filter(Boolean))] };
 }
 
 const C = { env: { ...process.env, LC_ALL: 'C' } };

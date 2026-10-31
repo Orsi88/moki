@@ -59,7 +59,7 @@ Switch workspaces at the bottom of the project list, or go back to the list with
 
 The create form still says "one project per system you test". A blank project and a linked folder use the same form.
 
-**Inside a project.** A tree of the project: context, inbox, activities, notes. Drop files onto the window and they are copied into the inbox — up to 40 files, 200 MB each. Folders are skipped. Markdown is formatted; **Ctrl+E** edits, **Ctrl+S** saves, **Ctrl+W** closes. Word files are turned into text so any AI can read them. Excel files show their values and PDFs open in the built-in viewer; the button next to them opens either in its own program. Files the AI saves show up in the tree as they land.
+**Inside a project.** A tree of the project: context, inbox, activities, notes. Drop files onto the window and they are copied into the inbox — up to 40 files, 200 MB each. Folders are skipped. Markdown is formatted; **Ctrl+E** edits, **Ctrl+S** saves, **Ctrl+W** closes. Word files are turned into text so any AI can read them. Excel files show their values and PDFs open with selectable text; with PdfCraft installed you can highlight and comment on them, and edit their pages (rotate, move, insert, delete) and their title and author (a file from the inbox, and any page edit, goes to an `-edited.pdf` copy). The button next to them opens either in its own program, and "…" lets you choose it (Excel, Word and PDF). Files the AI saves show up in the tree as they land.
 
 **Open in your AI tool** (the play button):
 

@@ -1,6 +1,6 @@
 // Skills: "Already installed" lists what this project has and what is global,
 // each row saying where it lives. "Add a skill" searches the SkillMD registry
-// or asks the AI tool to draft a proposal. "Plugins" turns caveman on for this
+// or asks the AI tool to draft a proposal. "Plugins" turns caveman or superpowers on for this
 // project only (ponytail and rtk are always on). Agents are not created here.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
@@ -40,6 +40,7 @@ export const pluginList = (): { name: string; text: string; optional: boolean }[
   { name: 'ponytail', text: t('Simplest code that works: YAGNI, standard library first, no unrequested abstractions.'), optional: false },
   { name: 'rtk', text: t('Runs shell commands through rtk to shrink their output. Needs the rtk command installed.'), optional: false },
   { name: 'caveman', text: t('Terse replies: answer first, no filler, every technical fact kept. Fewer tokens per answer.'), optional: true },
+  { name: 'superpowers', text: t('Development workflow skills: brainstorming, plans, test-driven development, systematic debugging, code review.'), optional: true },
 ];
 
 function PluginsPanel({ project }: { project: ProjectSummary }) {

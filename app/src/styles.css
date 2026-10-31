@@ -1106,3 +1106,47 @@ select:disabled { cursor: not-allowed; opacity: 0.6; }
 .search-hit-where { font-size: 0.72rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-hit-snippet { font-size: 0.78rem; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .search-panel mark { background: var(--accent-soft); color: var(--text); border-radius: 2px; padding: 0 1px; }
+
+/* PDF: pages drawn by pdf.js (selectable text layer) and the comments panel (PdfDoc) */
+.pdf-doc { display: flex; flex: 1; min-height: 0; }
+.pdf-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.pdf-toolbar { display: flex; align-items: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.pdf-toolbar .view-toggle button { width: auto; padding: 0 10px; font-size: 12px; }
+.pdf-zoom { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+.pdf-pages { flex: 1; min-width: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; align-items: safe center; gap: 12px; background: var(--bg-3); } /* safe: a page wider than the view starts at the left edge instead of being cut off there */
+.pdf-page-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
+.pdf-page-tools { display: flex; align-items: center; gap: 2px; padding: 2px 6px; border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--border); }
+.pdf-page-tools .muted { margin-right: 6px; }
+.pdf-tabs { align-self: stretch; display: flex; }
+.pdf-tabs button { flex: 1; width: auto; padding: 0 8px; font-size: 12px; }
+.pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.35); --scale-round-x: 1px; --scale-round-y: 1px; }
+.pdf-page canvas { display: block; }
+.pdf-page .textLayer { position: absolute; inset: 0; overflow: clip; line-height: 1; transform-origin: 0 0; z-index: 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size)); }
+.pdf-page .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; }
+.pdf-page .textLayer > :not(.markedContent), .pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.pdf-page .textLayer .markedContent { display: contents; }
+/* A rotated page: pdf.js lays the text out unrotated and marks the layer with the rotation (pdf_viewer.css). */
+.pdf-page .textLayer[data-main-rotation='90'] { transform: rotate(90deg) translateY(-100%); }
+.pdf-page .textLayer[data-main-rotation='180'] { transform: rotate(180deg) translate(-100%, -100%); }
+.pdf-page .textLayer[data-main-rotation='270'] { transform: rotate(270deg) translateX(-100%); }
+.pdf-page .textLayer ::selection { background: rgb(0 90 255 / 0.3); }
+.pdf-panel { width: 300px; flex: none; overflow: auto; padding: 12px 14px; border-left: 1px solid var(--border); background: var(--bg-2); display: flex; flex-direction: column; gap: 10px; }
+.pdf-panel h3 { margin: 4px 0 0; font-size: 13px; }
+.pdf-form { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.pdf-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.pdf-form label.check { flex-direction: row; align-items: center; gap: 6px; }
+.pdf-form input[type='text'], .pdf-form input[type='number'], .pdf-form textarea, .pdf-form select, .pdf-edit textarea {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; }
+.pdf-comments, .pdf-replies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pdf-comment { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+.pdf-replies { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); }
+.pdf-comment-head { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.pdf-swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--border); }
+.pdf-comment-text { margin: 4px 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pdf-actions { display: flex; gap: 10px; }
+.pdf-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent); font-size: 12px; cursor: pointer; }
+.link-btn:disabled { color: var(--faint); cursor: default; }

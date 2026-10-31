@@ -15,7 +15,7 @@ export type ActivityKey = 'open' | 'review' | 'tests' | 'review-then-tests' | 'f
 export type Starter = 'qa' | 'blank';
 export const STARTERS: Starter[] = ['qa', 'blank'];
 // App plugins a project turns on itself (adapters/app-plugins/README.md); ponytail and rtk are always on.
-export const PROJECT_PLUGINS = ['caveman'];
+export const PROJECT_PLUGINS = ['caveman', 'superpowers'];
 export type ToolKey = 'claude' | 'codex' | 'cursor-agent' | 'gemini' | 'antigravity' | 'cursor' | 'vscode' | 'chat' | 'print';
 
 export interface Activity { label: string; hint?: string; skill: string; needsFiles: boolean }

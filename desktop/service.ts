@@ -4,7 +4,7 @@
 // logic lives here; the AI tools do the QA work following the skills.
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   ACTIVITIES, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isActivity, isTool, isUsable, linkedFolder, listProjects,
@@ -24,6 +24,7 @@ import { xlsxSheets } from '../scripts/xlsx.mjs';
 import { cleanPrompt, type LaunchResult } from './launcher.ts';
 import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
+import { isPageEdit, parsePdfChange, pdfScript, toComments, type PdfRunner } from './pdfcraft.ts';
 import { AGENT_AIS, cleanContract, duplicateAgent, isUsableAgent, libraryDir, listAgents, listCategories, parseAgent, validateAgent, validateContract, withContract, type Agent, type AgentContract } from '../scripts/lib/agents.ts';
 
 export class ServiceError extends Error {}
@@ -34,7 +35,8 @@ export interface Deps {
   openPath: (file: string) => void;
   reveal?: (path: string) => void; // shows a file or folder selected in the system file manager
   copy?: (text: string) => void; // system clipboard (the window has no clipboard permission)
-  appChooser?: AppChooser; // "Open with" for Excel and Word files (desktop/open-with.ts); tests pass a fake
+  appChooser?: AppChooser; // "Open with" for Excel, Word and PDF files (desktop/open-with.ts); tests pass a fake
+  pdfcraft?: { available: () => boolean; run: PdfRunner }; // PDF comments (desktop/pdfcraft.ts); tests pass a fake
   pickFolder?: () => Promise<string | null>; // native folder dialog; the UI never sends paths
   home?: string; // user folder for skills and agents for all projects (tests point it elsewhere)
   fetch?: typeof fetch;
@@ -68,6 +70,7 @@ export type FileContent =
   | { kind: 'markdown'; path: string; text: string; html: string; editable: boolean }
   | { kind: 'text'; path: string; text: string; editable: boolean }
   | { kind: 'json'; path: string; text: string }
+  | { kind: 'html'; path: string; text: string } // shown rendered, read-only
   | { kind: 'docx'; path: string; html: string }
   | { kind: 'xlsx'; path: string; sheets: Sheet[] }
   | { kind: 'image'; path: string; dataUrl: string }
@@ -123,6 +126,7 @@ export function createService(root: string, deps: Deps) {
   useWorkspace(activeWorkspace(root));
   let pickedWorkspace: string | null = null; // a folder chosen for a workspace in the native dialog
   const failing = <T>(fn: () => T): T => { try { return fn(); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); } };
+  const failingAsync = async <T>(fn: () => Promise<T>): Promise<T> => { try { return await fn(); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); } };
 
   const projectDir = (id: unknown): string => {
     if (typeof id !== 'string' || !listProjects(root).includes(id)) throw new ServiceError('Unknown project.');
@@ -136,13 +140,32 @@ export function createService(root: string, deps: Deps) {
     }
   };
 
-  // An Excel or Word file of the project, and the system's "Open with".
+  // An Excel, Word or PDF file of the project, and the system's "Open with".
   const openWithTarget = (project: string, rel: unknown): [AppChooser, string] => {
     const file = inside(projectDir(project), rel);
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
-    if (!openWithType(file)) throw new ServiceError('"Open with" is only for Excel and Word files.');
+    if (!openWithType(file)) throw new ServiceError('"Open with" is only for Excel, Word and PDF files.');
     if (!deps.appChooser) throw new ServiceError('"Open with" is not available here.');
     return [deps.appChooser, file];
+  };
+
+  // A .pdf of the project, as a path relative to its folder (the root PdfCraft is confined to).
+  const pdfTarget = (project: string, rel: unknown) => {
+    const dir = realpathSync(projectDir(project));
+    const file = inside(dir, rel);
+    if (extname(file).toLowerCase() !== '.pdf' || !existsSync(file) || !statSync(file).isFile()) throw new ServiceError('PDF not found.');
+    if (!deps.pdfcraft) throw new ServiceError('PDF comments and editing are not available here.');
+    return { pdf: deps.pdfcraft, dir, path: posix(relative(dir, file)) };
+  };
+  // A change goes to "<name>-edited.pdf" beside the file when the file is one the user brought
+  // (inbox/) or the change edits the document itself (pages, title, author: no undo after a save).
+  // Later changes save that copy in place.
+  const editedCopy = (dir: string, path: string, pageEdit: boolean): string | undefined => {
+    if (/-edited(-\d+)?\.pdf$/i.test(path) || (!path.startsWith('inbox/') && !pageEdit)) return undefined;
+    const base = path.slice(0, -4);
+    let next = `${base}-edited.pdf`;
+    for (let n = 2; existsSync(join(dir, next)); n++) next = `${base}-edited-${n}.pdf`;
+    return next;
   };
 
   const findAgent = (name: unknown): Agent => {
@@ -419,6 +442,23 @@ export function createService(root: string, deps: Deps) {
       .map((name): TreeNode => ({ name, path: `.mcps/${source}/${name}`, type: 'file', mcp: source })));
   }
 
+  // Images a project's Markdown points to (relative paths), embedded as data: URIs: inside the project only
+  // (inside() rejects .. and symlinks out), raster types only, each up to IMAGE_LIMIT and OFFICE_LIMIT in all.
+  function imageResolver(project: string, from: string): (src: string) => string | null {
+    let budget = OFFICE_LIMIT;
+    return (src) => {
+      const type = IMAGE_TYPES[extname(src).toLowerCase()];
+      if (!type || type === 'image/svg+xml' || src.startsWith('/') || src.startsWith('\\')) return null;
+      try {
+        const file = inside(projectDir(project), join(dirname(from), decodeURIComponent(src)));
+        const stat = statSync(file);
+        if (!stat.isFile() || stat.size > IMAGE_LIMIT || stat.size > budget) return null;
+        budget -= stat.size;
+        return `data:${type};base64,${readFileSync(file).toString('base64')}`;
+      } catch { return null; }
+    };
+  }
+
   function readFile(project: string, rel: string): FileContent {
     const file = inside(projectDir(project), rel);
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
@@ -467,7 +507,8 @@ export function createService(root: string, deps: Deps) {
     if (!isText) return { kind: 'binary', path, size, openable: isOpenable(file) };
     if (size > TEXT_LIMIT) return { kind: 'binary', path, size, openable: isOpenable(file), reason: 'File too large to preview.' };
     const text = readFileSync(file, 'utf8');
-    if (ext === '.md') return { kind: 'markdown', path, text, html: markdownToHtml(text), editable: true };
+    if (ext === '.md') return { kind: 'markdown', path, text, html: markdownToHtml(text, { image: imageResolver(project, path) }), editable: true };
+    if (ext === '.html' || ext === '.htm') return { kind: 'html', path, text };
     if (ext === '.json') {
       try { return { kind: 'json', path, text: JSON.stringify(JSON.parse(text), null, 2) }; } catch { return { kind: 'json', path, text }; }
     }
@@ -610,8 +651,10 @@ export function createService(root: string, deps: Deps) {
       return readFile(project, rel);
     },
 
-    // Preview of unsaved Markdown (the note popup); same renderer as readFile.
-    renderMarkdown: (text: unknown) => markdownToHtml(typeof text === 'string' ? text.slice(0, TEXT_LIMIT) : ''),
+    // Preview of unsaved Markdown (the note popup, a .md tab with edits); same renderer as readFile.
+    // With the project and the file's path, its relative images are embedded as in readFile.
+    renderMarkdown: (text: unknown, project?: unknown, path?: unknown) => markdownToHtml(typeof text === 'string' ? text.slice(0, TEXT_LIMIT) : '',
+      { image: typeof project === 'string' && typeof path === 'string' ? imageResolver(project, path) : null }),
 
     // Document style (Settings › Documents): how the PDF, Word and Excel files the activities
     // generate look. One for all projects (workspace/) and, optionally, one per project.
@@ -960,7 +1003,7 @@ export function createService(root: string, deps: Deps) {
       return true;
     },
 
-    // "Open with" (Excel and Word): the programs the system offers; the one chosen must be among them.
+    // "Open with" (Excel, Word and PDF): the programs the system offers; the one chosen must be among them.
     openWithApps: async (project: string, rel: string) => {
       const [chooser, file] = openWithTarget(project, rel);
       return { dialog: chooser.dialog, apps: await chooser.apps(file) };
@@ -972,6 +1015,20 @@ export function createService(root: string, deps: Deps) {
       if (!known) throw new ServiceError('This program is not offered for this file.');
       await chooser.open(file, app as string);
       return true;
+    },
+
+    // PDF comments, written by PdfCraft. The author is the system user name.
+    pdfcraftStatus: () => ({ available: Boolean(deps.pdfcraft?.available()), platform: process.platform }),
+    pdfComments: async (project: string, rel: unknown) => {
+      const t = pdfTarget(project, rel);
+      return toComments((await failingAsync(() => t.pdf.run(pdfScript(t.path, null, userInfo().username), t.dir))).at(-1));
+    },
+    pdfChange: async (project: string, rel: unknown, change: unknown) => {
+      const t = pdfTarget(project, rel);
+      const c = failing(() => parsePdfChange(change));
+      const saveAs = editedCopy(t.dir, t.path, isPageEdit(c));
+      const results = await failingAsync(() => t.pdf.run(pdfScript(t.path, c, userInfo().username, saveAs), t.dir));
+      return { path: saveAs ?? t.path, comments: toComments(results.at(-1)) };
     },
 
     // ---------------------------------------------------------- installed skills and agents (Skills & agents dialog)

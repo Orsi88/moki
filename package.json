@@ -49,6 +49,7 @@
     "electron": "43.7.8",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "pdfjs-dist": "6.4.299",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "typescript": "5.9.3",

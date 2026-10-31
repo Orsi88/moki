@@ -34,10 +34,11 @@ export const EDITABLE_EXTENSIONS = new Set(['.md', '.txt']);
 export const isOpenable = (file: string): boolean => OPENABLE_EXTENSIONS.has(extname(file).toLowerCase());
 export const isEditable = (file: string): boolean => EDITABLE_EXTENSIONS.has(extname(file).toLowerCase());
 
-// Files with "Open with" (choose among the programs the system offers): Excel and Word,
+// Files with "Open with" (choose among the programs the system offers): Excel, Word and PDF,
 // all in OPENABLE_EXTENSIONS. The value is the type's MIME name, which Linux uses to look up its programs.
 export const OPEN_WITH_TYPES: Record<string, string> = {
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xls': 'application/vnd.ms-excel',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.doc': 'application/msword',
+  '.pdf': 'application/pdf',
 };
 export const openWithType = (file: string): string | undefined => OPEN_WITH_TYPES[extname(file).toLowerCase()];

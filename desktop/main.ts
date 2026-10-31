@@ -14,6 +14,7 @@ import { launchInTerminal, launchTool, openFolder } from './launcher.ts';
 import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './notes.ts';
 import { setWorkspaceEnv } from './workspaces.ts';
 import { appChooser } from './open-with.ts';
+import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
 import { memoryUsage, planUsage } from './usage.ts';
 
@@ -38,6 +39,7 @@ const service = createService(ROOT, {
   reveal: (path) => shell.showItemInFolder(path),
   copy: (text) => clipboard.writeText(text),
   appChooser,
+  pdfcraft: { available: pdfcraftAvailable, run: runPdfcraft },
   trash: (path) => shell.trashItem(path),
   pickFolder: async () => {
     if (!win) return null;
