@@ -1,5 +1,5 @@
 {
-  "//": "Type checking for the TypeScript run directly by Node (desktop main process, qa command, tests). The browser app has its own app/tsconfig.json.",
+  "//": "Type checking for the TypeScript run directly by Node (desktop main process, qa command, MCP server, tests). The browser app has its own app/tsconfig.json.",
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
@@ -17,5 +17,5 @@
     "noUnusedLocals": true
   },
   "include": ["scripts/**/*.ts", "desktop/**/*.ts", "ide/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["tests/ui", "ide/vscode/webview-bridge.ts"]
+  "exclude": ["tests/ui", "ide/vscode/dist"]
 }

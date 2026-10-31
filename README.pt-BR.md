@@ -218,7 +218,7 @@ Para entender ou planejar uma mudança, peça ao agente `moki-consultant`: ele s
 | `AGENTS.md` | O que uma ferramenta de IA lê quando esta pasta é aberta: regras e o catálogo de skills |
 | `skills/`, `agents/`, `core/` | Skills, agentes prontos, políticas comuns — edite aqui |
 | `app/`, `desktop/` | A janela |
-| `ide/vscode/` | A extensão do VS Code: a mesma janela dentro do VS Code |
+| `ide/vscode/`, `ide/mcp/` | A extensão do VS Code (IDE Companion) e o servidor MCP do Moki, somente leitura, para a IA da IDE |
 | `workspace/`, `workspaces/` | Workspaces e projetos locais — nunca versionados |
 
 ## Licença

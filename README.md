@@ -218,7 +218,7 @@ To understand or plan a change, ask the `moki-consultant` agent: it only reads, 
 | `AGENTS.md` | What an AI tool reads when this folder is opened: rules and the skill catalog |
 | `skills/`, `agents/`, `core/` | Skills, built-in agents, shared policies — edit here |
 | `app/`, `desktop/` | The window |
-| `ide/vscode/` | The VS Code extension: the same window inside VS Code |
+| `ide/vscode/`, `ide/mcp/` | The VS Code extension (IDE Companion) and the read-only Moki MCP server for the AI of the IDE |
 | `workspace/`, `workspaces/` | Local workspaces and projects — never versioned |
 
 ## License

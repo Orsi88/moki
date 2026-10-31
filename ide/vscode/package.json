@@ -1,18 +1,64 @@
 {
   "name": "moki",
   "displayName": "Moki",
-  "description": "QA skills for AI tools inside VS Code: projects, runs, evidence and the AI tools of the Moki framework.",
+  "description": "Moki IDE Companion: the context, agents and skills of your Moki QA project for VS Code's AI, through a read-only MCP server, with a panel to choose what the AI may use.",
   "version": "0.2.2",
   "publisher": "orsi88",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/Orsi88/moki" },
-  "icon": "dist/ui/icon.png",
-  "engines": { "vscode": "^1.96.0" },
+  "icon": "dist/icon.png",
+  "engines": { "vscode": "^1.101.0" },
   "categories": ["Testing", "AI"],
   "type": "module",
   "main": "./dist/extension.cjs",
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
-    "commands": [{ "command": "moki.open", "title": "Open Moki", "category": "Moki" }]
+    "mcpServerDefinitionProviders": [{ "id": "moki", "label": "Moki" }],
+    "viewsContainers": {
+      "activitybar": [{ "id": "moki", "title": "Moki", "icon": "$(beaker)" }]
+    },
+    "views": {
+      "moki": [
+        { "id": "moki.resources", "name": "Project resources" },
+        { "id": "moki.selected", "name": "Selected for the AI" }
+      ]
+    },
+    "viewsWelcome": [
+      { "view": "moki.resources", "contents": "This folder is not linked to a Moki project.\n[Choose a project](command:moki.chooseProject)\nTo link it for good, open the project in the Moki desktop app and use Choose my folder.", "when": "!moki.connected" },
+      { "view": "moki.selected", "contents": "Tick a resource in Project resources to give it to the AI first (moki_get_context), or to allow one set to Ask first.", "when": "moki.connected" }
+    ],
+    "commands": [
+      { "command": "moki.chooseProject", "title": "Choose Project", "category": "Moki", "icon": "$(project)" },
+      { "command": "moki.refresh", "title": "Refresh", "category": "Moki", "icon": "$(refresh)" },
+      { "command": "moki.openResource", "title": "Open in Editor", "category": "Moki", "icon": "$(go-to-file)" },
+      { "command": "moki.copyReference", "title": "Copy Reference", "category": "Moki" },
+      { "command": "moki.copyContent", "title": "Copy Content", "category": "Moki" },
+      { "command": "moki.select", "title": "Select or Unselect for the AI", "category": "Moki" },
+      { "command": "moki.setMode", "title": "How the AI May Use It…", "category": "Moki", "icon": "$(shield)" },
+      { "command": "moki.clearSelection", "title": "Clear Selection", "category": "Moki", "icon": "$(clear-all)" },
+      { "command": "moki.showActivity", "title": "Show What the AI Read", "category": "Moki", "icon": "$(history)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "moki.chooseProject", "when": "view == moki.resources", "group": "navigation@1" },
+        { "command": "moki.showActivity", "when": "view == moki.resources && moki.connected", "group": "navigation@2" },
+        { "command": "moki.refresh", "when": "view == moki.resources", "group": "navigation@3" },
+        { "command": "moki.clearSelection", "when": "view == moki.selected && moki.connected", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "moki.setMode", "when": "viewItem == resource", "group": "inline" },
+        { "command": "moki.openResource", "when": "viewItem == resource", "group": "1_open@1" },
+        { "command": "moki.copyReference", "when": "viewItem == resource", "group": "2_copy@1" },
+        { "command": "moki.copyContent", "when": "viewItem == resource", "group": "2_copy@2" },
+        { "command": "moki.setMode", "when": "viewItem == resource", "group": "3_mode@1" }
+      ],
+      "commandPalette": [
+        { "command": "moki.openResource", "when": "false" },
+        { "command": "moki.copyReference", "when": "false" },
+        { "command": "moki.copyContent", "when": "false" },
+        { "command": "moki.select", "when": "false" },
+        { "command": "moki.setMode", "when": "false" }
+      ]
+    }
   }
 }

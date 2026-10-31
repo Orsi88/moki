@@ -1,6 +1,6 @@
-// Entry point of the Moki VS Code extension. Like desktop/boot.ts: installed, it
-// keeps the framework in <Documents>/Moki (shared with the desktop app) and points
-// QA_ROOT to it before host.ts loads; run from the repository (Extension
+// Entry point of the Moki VS Code extension (the IDE Companion). Like desktop/boot.ts:
+// installed, it keeps the framework in <Documents>/Moki (shared with the desktop app)
+// and points QA_ROOT to it before host.ts loads; run from the repository (Extension
 // Development Host) it uses the repository.
 
 import * as vscode from 'vscode';
@@ -22,7 +22,6 @@ export function activate(context: vscode.ExtensionContext): void {
   } else {
     process.env.QA_ROOT = resolve(context.extensionPath, '..', '..');
   }
-  process.env.QA_RUN_TOOL = join(dist, 'run-tool.mjs');
   // host.cjs is a separate built file: ROOT (scripts/lib/repo.mjs) is read when it loads.
   (createRequire(import.meta.url)('./host.cjs') as typeof import('./host.ts')).start(context);
 }

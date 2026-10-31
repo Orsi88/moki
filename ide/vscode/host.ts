@@ -1,96 +1,206 @@
-// The Moki page inside VS Code: the desktop UI (app/dist) in a webview panel,
-// served by the same service as the desktop app (desktop/service.ts) through
-// webview messages instead of Electron IPC. The AI tools open in VS Code's own
-// terminals with the exact command and arguments the desktop app would run.
+// The Moki Companion inside VS Code: finds the Moki project of the open folder,
+// lists what it offers (context, notes, context shared by tags, agents, skills) in
+// native views, keeps what the person selects or allows, and gives VS Code's AI the
+// Moki MCP server (ide/mcp/server.ts) fixed to that project. The Moki desktop UI does not
+// load here; everything goes through desktop/companion.ts, which only reads.
 
 import * as vscode from 'vscode';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT } from '../../scripts/lib/repo.mjs';
-import { TOOLS, listProjects, projectsDir, which } from '../../scripts/lib/core.ts';
-import { callService, createService } from '../../desktop/service.ts';
-import { launchInTerminal, launchTool, openFolder } from '../../desktop/launcher.ts';
-import { noteKey, noteQuery, parseNoteRequest } from '../../desktop/notes.ts';
-import { setWorkspaceEnv } from '../../desktop/workspaces.ts';
-import { pdfcraftAvailable, runPdfcraft } from '../../desktop/pdfcraft.ts';
-import type { TermSpec } from '../../desktop/terminals.ts';
+import { ROOT, setWorkspaceDir } from '../../scripts/lib/repo.mjs';
+import { listProjects, projectSummary, projectsDir } from '../../scripts/lib/core.ts';
+import { activeWorkspace, setWorkspaceEnv } from '../../desktop/workspaces.ts';
+import { DEFAULT_MODES, openCompanion, projectsForFolder, type Companion, type Mode, type Resource, type ResourceKind } from '../../desktop/companion.ts';
 
-// Arguments as an array and no shell, so the request is never read as a command line.
-function openTerminal(spec: TermSpec): string {
-  const terminal = vscode.window.createTerminal({
-    name: 'Moki', shellPath: which(spec.file) ?? spec.file, shellArgs: spec.args, cwd: spec.cwd,
-    // VS Code terminals do not inherit this process's environment; the tools need the active workspace.
-    env: spec.env ?? { QA_WORKSPACE: process.env.QA_WORKSPACE ?? null },
-  });
-  terminal.show();
-  return terminal.name;
-}
+const GROUPS: { kind: ResourceKind; label: string; icon: string }[] = [
+  { kind: 'context', label: 'Context', icon: 'book' },
+  { kind: 'note', label: 'Notes', icon: 'note' },
+  { kind: 'shared', label: 'Shared by tags', icon: 'tag' },
+  { kind: 'agent', label: 'Agents', icon: 'person' },
+  { kind: 'skill', label: 'Skills', icon: 'tools' },
+];
+const MODE_LABELS: Record<Mode, { label: string; detail: string; icon: string }> = {
+  auto: { label: 'Automatic', detail: 'The AI may find and read it when it needs it.', icon: 'pass' },
+  ask: { label: 'Ask first', detail: 'The AI sees it in the list but reads it only after you select it.', icon: 'question' },
+  manual: { label: 'Manual only', detail: 'Hidden from the AI until you select it.', icon: 'eye-closed' },
+};
+const PICKED = 'moki.project'; // the project chosen for this VS Code workspace (workspaceState)
 
-// Files written by the AI tools appear live, debounced like the desktop app.
-function watchProject(project: unknown, onChange: () => void): vscode.Disposable | null {
-  if (typeof project !== 'string' || !listProjects(ROOT).includes(project)) return null;
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(projectsDir(ROOT), project)), '**'));
-  let timer: NodeJS.Timeout | undefined;
-  const changed = (): void => { clearTimeout(timer); timer = setTimeout(onChange, 400); };
-  watcher.onDidCreate(changed);
-  watcher.onDidChange(changed);
-  watcher.onDidDelete(changed);
-  return new vscode.Disposable(() => { clearTimeout(timer); watcher.dispose(); });
-}
-
-// app/dist/index.html with a webview CSP, a base for its relative URLs and the bridge loaded first.
-function page(webview: vscode.Webview, ui: vscode.Uri, query: string): string {
-  const src = webview.cspSource;
-  const csp = `default-src 'none'; script-src ${src}; style-src ${src} 'unsafe-inline'; img-src ${src} data:; font-src ${src}; frame-src blob:; worker-src blob:; connect-src 'none'; object-src 'none'; base-uri ${src}; form-action 'none'`;
-  const head = `<head>\n<meta http-equiv="Content-Security-Policy" content="${csp}">\n<base href="${webview.asWebviewUri(ui)}/">\n`
-    + `<script src="${webview.asWebviewUri(vscode.Uri.joinPath(ui, 'webview-bridge.js'))}" data-query="${query.replace(/&/g, '&amp;')}"></script>`;
-  return readFileSync(join(ui.fsPath, 'index.html'), 'utf8').replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/, '').replace('<head>', head);
-}
+type Node = { group: ResourceKind } | { resource: Resource };
 
 export function start(context: vscode.ExtensionContext): void {
-  const service = createService(ROOT, {
-    launch: (tool, prompt, root, plugins = []) => {
-      if (TOOLS[tool].clipboard) return launchTool(tool, prompt, root, plugins); // editors: as in the desktop app
-      const r = launchInTerminal(tool, prompt, root, openTerminal, plugins);
-      return { opened: r.opened, message: r.message }; // no terminal id: the page has no terminal tabs here
-    },
-    openFolder,
-    openPath: (file) => { void vscode.env.openExternal(vscode.Uri.file(file)); },
-    trash: async (path) => { await vscode.workspace.fs.delete(vscode.Uri.file(path), { recursive: true, useTrash: true }); },
-    pickFolder: async () => (await vscode.window.showOpenDialog({ title: 'Choose a folder', canSelectFolders: true, canSelectFiles: false }))?.[0]?.fsPath ?? null,
-    onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
-    pdfcraft: { available: pdfcraftAvailable, run: runPdfcraft },
-  });
-  const ui = vscode.Uri.joinPath(context.extensionUri, 'dist', 'ui');
-  const panels = new Map<string, vscode.WebviewPanel>(); // '' is the main page; notes by noteKey
+  // The workspace opened last in Moki; the MCP server gets it too.
+  if (!process.env.QA_WORKSPACE) setWorkspaceDir(ROOT, activeWorkspace(ROOT).path);
+  setWorkspaceEnv(ROOT, activeWorkspace(ROOT).path);
 
-  const open = (key: string, title: string, query: string): void => {
-    const existing = panels.get(key);
-    if (existing) { existing.reveal(); return; }
-    const panel = vscode.window.createWebviewPanel('moki', title, vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [ui] });
-    panels.set(key, panel);
-    panel.iconPath = vscode.Uri.joinPath(ui, 'icon.png');
-    panel.webview.html = page(panel.webview, ui, query);
-    let watcher: vscode.Disposable | null = null;
-    panel.onDidDispose(() => { watcher?.dispose(); panels.delete(key); });
-    // Messages come only from this panel's page; each kind validates its arguments like desktop/main.ts.
-    panel.webview.onDidReceiveMessage(async (raw: unknown) => {
-      const { id, type, args } = (raw ?? {}) as { id?: unknown; type?: unknown; args?: unknown };
-      const a: unknown[] = Array.isArray(args) ? args : [];
-      let value: unknown = null;
-      if (type === 'call') value = await callService(service, a[0], a[1]);
-      else if (type === 'watch') {
-        watcher?.dispose();
-        watcher = watchProject(a[0], () => { void panel.webview.postMessage({ event: 'changed', project: a[0] }); });
-        value = Boolean(watcher);
-      } else if (type === 'openLink' && typeof a[0] === 'string' && /^https?:\/\//.test(a[0])) void vscode.env.openExternal(vscode.Uri.parse(a[0], true));
-      else if (type === 'openNoteWindow' && key === '') {
-        const note = parseNoteRequest(a[0], ROOT);
-        if (note) open(noteKey(note) || `new:${Date.now()}`, 'Moki note', new URLSearchParams(noteQuery(note)).toString());
-        value = Boolean(note);
-      } else if (type === 'notesChanged') void panels.get('')?.webview.postMessage({ event: 'notes-changed' });
-      if (typeof id === 'number') void panel.webview.postMessage({ id, value });
-    });
+  let companion: Companion | null = null;
+  let candidates: string[] = [];
+  const changed = new vscode.EventEmitter<void>(); // trees
+  const mcpChanged = new vscode.EventEmitter<void>();
+  const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  status.command = 'moki.chooseProject';
+  status.show();
+
+  const folders = (): string[] => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+  const name = (id: string): string => projectSummary(id, ROOT).name;
+
+  let watcher: vscode.FileSystemWatcher | null = null;
+  let timer: NodeJS.Timeout | undefined;
+  const watch = (project: string | null): void => {
+    watcher?.dispose();
+    watcher = null;
+    if (!project) return;
+    watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(join(projectsDir(ROOT), project)), '**'));
+    const later = (): void => { clearTimeout(timer); timer = setTimeout(() => changed.fire(), 400); };
+    watcher.onDidCreate(later); watcher.onDidChange(later); watcher.onDidDelete(later);
   };
-  context.subscriptions.push(vscode.commands.registerCommand('moki.open', () => open('', 'Moki', '')));
+
+  // Another project means another context: nothing of the previous one stays visible or reachable.
+  const use = (project: string | null): void => {
+    if (project !== (companion?.project ?? null)) {
+      companion = project ? openCompanion(ROOT, project) : null;
+      watch(project);
+      mcpChanged.fire();
+    }
+    void vscode.commands.executeCommand('setContext', 'moki.connected', Boolean(companion));
+    status.text = companion ? `$(beaker) Moki: ${name(companion.project)}` : candidates.length > 1 ? '$(beaker) Moki: choose a project' : '$(beaker) Moki: no project';
+    status.tooltip = companion ? 'Moki project of this folder. Click to change.' : 'Choose the Moki project of this folder.';
+    changed.fire();
+  };
+
+  // A project chosen in the panel for this VS Code workspace wins while it exists; otherwise the one linked to the folder.
+  const resolveProject = (): void => {
+    candidates = [...new Set(folders().flatMap((f) => projectsForFolder(ROOT, f)))];
+    const picked = context.workspaceState.get<string>(PICKED);
+    const known = listProjects(ROOT);
+    if (picked && known.includes(picked)) use(picked);
+    else if (candidates.length === 1) use(candidates[0]);
+    else use(null);
+  };
+
+  const chooseProject = async (): Promise<void> => {
+    const known = listProjects(ROOT);
+    if (!known.length) {
+      void vscode.window.showInformationMessage('There are no Moki projects in the active workspace. Create one in the Moki desktop app.');
+      return;
+    }
+    const order = [...candidates, ...known.filter((p) => !candidates.includes(p))];
+    const pick = await vscode.window.showQuickPick(order.map((id) => ({
+      label: name(id), description: id, detail: candidates.includes(id) ? 'Linked to this folder' : projectSummary(id, ROOT).description || undefined, id,
+    })), { title: 'Moki project for this folder', placeHolder: candidates.length ? undefined : 'This folder is not linked to a project (link it in the Moki desktop app: project → Choose my folder)' });
+    if (!pick) return;
+    await context.workspaceState.update(PICKED, pick.id);
+    use(pick.id);
+  };
+
+  const item = (r: Resource): vscode.TreeItem => {
+    const t = new vscode.TreeItem(r.title, vscode.TreeItemCollapsibleState.None);
+    t.id = r.id;
+    t.description = r.mode === DEFAULT_MODES[r.kind] ? undefined : MODE_LABELS[r.mode].label;
+    t.tooltip = new vscode.MarkdownString(`**${r.title}**\n\n${r.description || ''}\n\n*${MODE_LABELS[r.mode].label}*: ${MODE_LABELS[r.mode].detail}`);
+    t.iconPath = new vscode.ThemeIcon(MODE_LABELS[r.mode].icon);
+    t.checkboxState = r.selected ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked;
+    t.contextValue = 'resource';
+    t.command = { command: 'moki.openResource', title: 'Open', arguments: [{ resource: r }] };
+    return t;
+  };
+
+  const resources: vscode.TreeDataProvider<Node> = {
+    onDidChangeTreeData: changed.event,
+    getTreeItem: (n) => {
+      if ('resource' in n) return item(n.resource);
+      const g = GROUPS.find((x) => x.kind === n.group)!;
+      const count = companion?.allResources().filter((r) => r.kind === n.group).length ?? 0;
+      const t = new vscode.TreeItem(g.label, n.group === 'context' ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
+      t.id = `group:${n.group}`;
+      t.description = String(count);
+      t.iconPath = new vscode.ThemeIcon(g.icon);
+      return t;
+    },
+    getChildren: (n) => {
+      if (!companion) return [];
+      const list = companion.allResources();
+      if (!n) return GROUPS.filter((g) => list.some((r) => r.kind === g.kind)).map((g) => ({ group: g.kind }));
+      return 'group' in n ? list.filter((r) => r.kind === n.group).map((resource) => ({ resource })) : [];
+    },
+  };
+  const selected: vscode.TreeDataProvider<Node> = {
+    onDidChangeTreeData: changed.event,
+    getTreeItem: (n) => ('resource' in n ? item(n.resource) : new vscode.TreeItem('')),
+    getChildren: (n) => (n || !companion ? [] : companion.allResources().filter((r) => r.selected).map((resource) => ({ resource }))),
+  };
+
+  const views = [
+    vscode.window.createTreeView('moki.resources', { treeDataProvider: resources, manageCheckboxStateManually: true }),
+    vscode.window.createTreeView('moki.selected', { treeDataProvider: selected, manageCheckboxStateManually: true }),
+  ];
+  for (const view of views) {
+    view.onDidChangeCheckboxState((e) => {
+      if (!companion) return;
+      for (const [n, state] of e.items) if ('resource' in n) companion.select(n.resource.id, state === vscode.TreeItemCheckboxState.Checked);
+      changed.fire();
+    });
+  }
+
+  // The resource of a command: the clicked row, or the selected row of the views.
+  const target = (n?: Node): Resource | null => {
+    const node = n ?? views.flatMap((v) => v.selection)[0];
+    return node && 'resource' in node ? node.resource : null;
+  };
+  const guarded = (fn: (c: Companion, r: Resource) => unknown) => async (n?: Node) => {
+    const r = target(n);
+    if (!companion || !r) return;
+    try { await fn(companion, r); } catch (e) { void vscode.window.showErrorMessage(e instanceof Error ? e.message : String(e)); }
+  };
+
+  const mcpScript = join(context.extensionPath, 'dist', 'mcp.cjs');
+  const buildId = ((): string => { try { return (JSON.parse(readFileSync(join(context.extensionPath, 'dist', 'build-info.json'), 'utf8')) as { buildId: string }).buildId; } catch { return '0'; } })();
+
+  context.subscriptions.push(
+    status, changed, mcpChanged, ...views, new vscode.Disposable(() => { clearTimeout(timer); watcher?.dispose(); }),
+    // VS Code's AI gets one server, fixed to the project of this folder; none without a project.
+    vscode.lm.registerMcpServerDefinitionProvider('moki', {
+      onDidChangeMcpServerDefinitions: mcpChanged.event,
+      provideMcpServerDefinitions: () => (companion ? [new vscode.McpStdioServerDefinition(
+        'Moki', process.execPath, [mcpScript, '--project', companion.project],
+        { ELECTRON_RUN_AS_NODE: '1', QA_ROOT: ROOT, QA_WORKSPACE: process.env.QA_WORKSPACE ?? null }, `${companion.project}-${buildId}`,
+      )] : []),
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(resolveProject),
+    vscode.commands.registerCommand('moki.chooseProject', chooseProject),
+    vscode.commands.registerCommand('moki.refresh', resolveProject),
+    vscode.commands.registerCommand('moki.openResource', guarded(async (c, r) => {
+      const file = c.filePath(r.id);
+      if (file) await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: true });
+    })),
+    vscode.commands.registerCommand('moki.copyReference', guarded(async (_c, r) => {
+      await vscode.env.clipboard.writeText(`Moki resource "${r.id}" (${r.title}): read it with the moki_get_resource tool.`);
+      vscode.window.setStatusBarMessage('Moki: reference copied', 3000);
+    })),
+    vscode.commands.registerCommand('moki.copyContent', guarded(async (c, r) => {
+      // Copying is the person's own action: it works whatever the mode.
+      const file = c.filePath(r.id);
+      if (!file) return;
+      await vscode.env.clipboard.writeText(`<!-- Moki: ${r.id} -->\n${readFileSync(file, 'utf8')}`);
+      vscode.window.setStatusBarMessage('Moki: content copied', 3000);
+    })),
+    vscode.commands.registerCommand('moki.select', guarded((c, r) => { c.select(r.id, !r.selected); changed.fire(); })),
+    vscode.commands.registerCommand('moki.setMode', guarded(async (c, r) => {
+      const pick = await vscode.window.showQuickPick((Object.keys(MODE_LABELS) as Mode[]).map((m) => ({
+        label: `$(${MODE_LABELS[m].icon}) ${MODE_LABELS[m].label}`, detail: MODE_LABELS[m].detail, description: m === r.mode ? 'current' : m === DEFAULT_MODES[r.kind] ? 'default' : undefined, mode: m,
+      })), { title: `How the AI may use "${r.title}"` });
+      if (!pick) return;
+      c.setMode(r.id, pick.mode);
+      changed.fire();
+    })),
+    vscode.commands.registerCommand('moki.clearSelection', () => { companion?.clearSelection(); changed.fire(); }),
+    vscode.commands.registerCommand('moki.showActivity', async () => {
+      if (!companion) return;
+      try { await vscode.window.showTextDocument(vscode.Uri.file(companion.logFile), { preview: true }); } catch {
+        void vscode.window.showInformationMessage('The AI has not read anything from Moki in this project yet.');
+      }
+    }),
+  );
+
+  resolveProject();
 }

@@ -166,7 +166,7 @@ export interface Usage {
   memory: { total: number; used: number; app: number; projects: { project: string; bytes: number; sessions: { id: string; bytes: number }[] }[] }; // a session is one terminal tab
 }
 
-// window.qa: desktop/preload.ts in the desktop app, ide/vscode/webview-bridge.ts in VS Code.
+// window.qa: desktop/preload.ts in the desktop app.
 export interface Bridge {
   query?: string; // the page parameters, when the host cannot put them in the URL (VS Code webview)
   call(method: string, ...args: unknown[]): Promise<{ ok: true; value: unknown } | { ok: false; error: string }>;
