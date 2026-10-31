@@ -22,6 +22,9 @@ export function activate(context: vscode.ExtensionContext): void {
   } else {
     process.env.QA_ROOT = resolve(context.extensionPath, '..', '..');
   }
+  // The tool runner (Windows terminals) and Moki's MCP server, as built next to this file.
+  process.env.QA_RUN_TOOL = join(dist, 'run-tool.mjs');
+  process.env.QA_MCP_SERVER = join(dist, 'mcp.cjs');
   // host.cjs is a separate built file: ROOT (scripts/lib/repo.mjs) is read when it loads.
   (createRequire(import.meta.url)('./host.cjs') as typeof import('./host.ts')).start(context);
 }

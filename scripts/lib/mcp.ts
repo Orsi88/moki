@@ -291,24 +291,32 @@ export function mokiServer(project: string, root: string, script: string, node: 
 export const generatedEntries = (moki: McpServer, servers: McpServer[]): GeneratedEntry[] =>
   [{ key: MOKI_SERVER, server: moki }, ...servers.map((server) => ({ key: entryKey(server.id), server }))];
 
-// Cursor opened on the system's own folder: Moki's entries in <folder>/.cursor/mcp.json, the person's kept.
-// The current file is copied to <folder>/.moki-backup/cursor-mcp-<date>/ first (hidden from Git, like linking does).
+// Hides a path from Git in <folder>/.git/info/exclude (local only). A .git file (worktree) is left alone.
+function excludeInGit(folder: string, line: string): void {
+  const git = join(folder, '.git', 'info', 'exclude');
+  if (!existsSync(join(folder, '.git'))) return;
+  try {
+    const text = existsSync(git) ? readFileSync(git, 'utf8') : '';
+    if (!text.split(/\r?\n/).includes(line)) { mkdirSync(dirname(git), { recursive: true }); writeFileSync(git, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`); }
+  } catch { /* not a .git folder: nothing hidden */ }
+}
+
+export const toolFile = (folder: string, tool: 'claude' | 'cursor'): string => (tool === 'cursor' ? join(folder, '.cursor', 'mcp.json') : join(folder, '.mcp.json'));
+
+// A folder the AI tool is opened on (Cursor: .cursor/mcp.json; Claude Code: .mcp.json): Moki's entries written, the person's kept.
+// The current file is copied to <folder>/.moki-backup/<tool>-mcp-<date>/ first; the backup, and a new .mcp.json, are hidden from Git.
 // The caller checks that writing there is allowed and that the person confirmed it.
-export function syncCursorFolder(folder: string, entries: GeneratedEntry[]): { file: string; changed: boolean; backup?: string } {
-  const file = join(folder, '.cursor', 'mcp.json');
+export function syncToolFolder(folder: string, entries: GeneratedEntry[], tool: 'claude' | 'cursor'): { file: string; changed: boolean; backup?: string } {
+  const file = toolFile(folder, tool);
   let backup: string | undefined;
   if (existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-    backup = join(folder, '.moki-backup', `cursor-mcp-${stamp}`);
+    backup = join(folder, '.moki-backup', `${tool}-mcp-${stamp}`);
     mkdirSync(backup, { recursive: true });
     writeFileSync(join(backup, 'mcp.json'), readFileSync(file));
-    const git = join(folder, '.git', 'info', 'exclude');
-    if (existsSync(join(folder, '.git'))) {
-      try {
-        const text = existsSync(git) ? readFileSync(git, 'utf8') : '';
-        if (!text.split(/\r?\n/).includes('.moki-backup/')) { mkdirSync(dirname(git), { recursive: true }); writeFileSync(git, `${text}${text && !text.endsWith('\n') ? '\n' : ''}.moki-backup/\n`); }
-      } catch { /* a .git file (worktree): the backup stays visible to Git */ }
-    }
-  }
-  return { file, changed: writeMerged(file, entries, 'cursor'), backup };
+    excludeInGit(folder, '.moki-backup/');
+  } else if (tool === 'claude') excludeInGit(folder, '.mcp.json'); // Moki created it: it stays out of the person's commits
+  return { file, changed: writeMerged(file, entries, tool), backup };
 }
+
+export const syncCursorFolder = (folder: string, entries: GeneratedEntry[]) => syncToolFolder(folder, entries, 'cursor');

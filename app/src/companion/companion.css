@@ -1,0 +1,65 @@
+/* Moki light (the IDE panel): the app's palette and components (styles.css) laid out for a
+   narrow sidebar — a fixed header, tabs and footer, and one scrolling column of cards. */
+
+body { font-size: 13px; background: var(--bg); }
+.mk { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
+
+.mk-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 8px; flex-shrink: 0; }
+.mk-logo { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; }
+.mk-head-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mk-brand { font-weight: 700; font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.mk-head select { width: 100%; padding: 3px 28px 3px 8px; font-size: 0.92rem; font-weight: 600; }
+.mk-status { margin: 0; flex-shrink: 0; font-size: 0.72rem; }
+
+.mk-tabs { padding: 0 8px; flex-shrink: 0; overflow-x: auto; }
+.mk-tabs .dialog-tab { padding: 7px 9px; font-size: 0.85rem; white-space: nowrap; }
+.mk-count { display: inline-block; margin-left: 5px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 0.7rem; font-weight: 700; line-height: 16px; text-align: center; }
+
+.mk-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 10px 16px; }
+.mk-body .result { margin: 0 0 10px; }
+.mk-list { display: flex; flex-direction: column; gap: 8px; }
+.mk-section { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin: 10px 2px 2px; }
+.mk-summary { margin: 0; }
+.mk-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px; padding: 24px 18px; }
+
+.mk-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); overflow: hidden; }
+.mk-card.on { border-color: var(--accent); }
+.mk-card-head { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 10px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.mk-card-head:disabled { cursor: default; opacity: 1; }
+.mk-card-head:not(:disabled):hover { background: var(--accent-soft); }
+.mk-card-icon { flex-shrink: 0; display: flex; }
+.mk-card-icon .cat-icon { width: 40px; height: 40px; }
+.mk-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mk-card-title { font-weight: 600; font-size: 0.93rem; overflow-wrap: anywhere; }
+.mk-card-hint { font-size: 0.8rem; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.mk-pill { margin: 2px 0; align-self: flex-start; font-size: 0.72rem; }
+.mk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mk-chip { font-size: 0.7rem; padding: 1px 7px; border-radius: 999px; background: var(--bg-3); color: var(--muted); }
+
+.mk-launch { display: flex; flex-direction: column; gap: 10px; padding: 4px 10px 12px; border-top: 1px solid var(--border); background: var(--bg); }
+.mk-launch .field { gap: 4px; margin-top: 6px; }
+.mk-launch select, .mk-launch textarea { width: 100%; font-size: 0.85rem; }
+.mk-files { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.mk-files label { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; min-width: 0; }
+.mk-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-actions { display: flex; flex-direction: column; gap: 6px; }
+.mk-actions .btn { justify-content: center; width: 100%; }
+
+.mk-ctx { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+.mk-ctx li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-top: 1px solid var(--border); }
+.mk-ctx li:first-child { border-top: 0; }
+.mk-ctx li.off .mk-ctx-name { color: var(--faint); text-decoration: line-through; }
+.mk-ctx-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.mk-ctx-name { font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-ctx .mk-card-hint { -webkit-line-clamp: 1; }
+
+.mk-switch { position: relative; flex-shrink: 0; width: 28px; height: 16px; cursor: pointer; }
+.mk-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.mk-switch-track { position: absolute; inset: 0; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border); transition: background 0.15s; }
+.mk-switch-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.mk-switch input:checked + .mk-switch-track { background: var(--accent); border-color: var(--accent); }
+.mk-switch input:checked + .mk-switch-track::after { transform: translateX(12px); background: var(--accent-text); }
+.mk-switch input:focus-visible + .mk-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mk-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--ribbon); }
+.mk-mcp { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

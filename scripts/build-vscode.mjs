@@ -1,10 +1,12 @@
-// Builds the VS Code extension (the Moki IDE Companion) in ide/vscode/dist: the
-// extension host and the Moki MCP server (ide/mcp/server.ts) with esbuild, the icon, and
-// the same framework files the installer ships (package.json build.extraResources).
-// The desktop UI is not part of it, so the desktop build is not needed.
+// Builds the VS Code extension (Moki light) in ide/vscode/dist: the extension host, the
+// Moki MCP server (ide/mcp/server.ts) and the tool runner with esbuild, the Moki panel
+// (app/companion.html, with Vite, into dist/webview) with the cats and the logo it shows,
+// and the same framework files the installer ships (package.json build.extraResources).
+// The full desktop UI is not part of it.
 // Usage: npm run vscode:build   (npm run vscode:package also makes release/moki-<version>.vsix)
 
 import { build as esbuild } from 'esbuild';
+import { build as viteBuild } from 'vite';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { ROOT } from './lib/repo.mjs';
@@ -28,6 +30,12 @@ await esbuild({ ...host, entryPoints: [join(ext, 'extension.ts')], outfile: join
 await esbuild({ ...host, entryPoints: [join(ext, 'host.ts')], outfile: join(out, 'host.cjs') });
 // The MCP server runs in its own process (VS Code starts it with ELECTRON_RUN_AS_NODE).
 await esbuild({ ...host, entryPoints: [join(ROOT, 'ide', 'mcp', 'server.ts')], outfile: join(out, 'mcp.cjs') });
+// Windows terminals start the AI tools through the tool runner (desktop/launcher.ts).
+await esbuild({ bundle: true, platform: 'node', target: 'node22', format: 'esm', logLevel: 'warning', entryPoints: [join(ROOT, 'desktop', 'run-tool.ts')], outfile: join(out, 'run-tool.mjs') });
+// The Moki panel: the app's look, its own small page.
+await viteBuild({ configFile: join(ROOT, 'app', 'vite.companion.config.ts'), logLevel: 'warn' });
+cpSync(join(ROOT, 'app', 'public', 'cats'), join(out, 'webview', 'cats'), { recursive: true });
+cpSync(join(ROOT, 'app', 'public', 'favicon.svg'), join(out, 'webview', 'favicon.svg'));
 cpSync(join(ROOT, 'app', 'public', 'icon.png'), join(out, 'icon.png'));
 // Identifies this build, so an installed extension refreshes its framework files once per build.
 writeFileSync(join(out, 'build-info.json'), JSON.stringify({ buildId: new Date().toISOString() }));

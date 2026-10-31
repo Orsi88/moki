@@ -1,37 +1,49 @@
-# Moki for VS Code (IDE Companion)
+# Moki for VS Code (Moki light)
 
-Gives VS Code's AI the knowledge of your [Moki](https://github.com/Orsi88/moki) QA project (context, notes, context shared by tags, agents and skills) through a read-only MCP server, with a panel where you choose what the AI may use. Moki does not replace the AI of the IDE: it gives it what it needs to work on the project. The Moki desktop app does not have to be open.
+A light version of [Moki](https://github.com/Orsi88/moki) in the side bar of VS Code, with the app's look: start QA activities, use your project's agents, choose what goes to the AI and follow the open runs, with Claude Code or the chat of VS Code. Moki does not replace the AI of the IDE: it gives it the project's context, agents, skills and MCP servers. The Moki desktop app does not have to be open.
 
 ## Use it
 
-1. Open the folder of your system in VS Code. If the folder (or one above it) is linked to a Moki project ("Choose my folder" in the desktop app), the status bar shows **Moki: <project>**. Otherwise click it, or the Moki icon in the activity bar, and choose a project.
-2. In Copilot Chat's agent mode, the **Moki** MCP server is listed with its tools. Ask for a task; the AI calls `moki_get_context` and reads only what it needs.
-3. In the **Moki** panel:
-   - **Project resources**: everything the project offers, by kind. Tick a resource to give it to the AI first (`moki_get_context` returns its text before anything else).
-   - **How the AI may use it** (shield icon): **Automatic** (the AI may find and read it), **Ask first** (listed, read only after you tick it; the default for another project's context shared by tags), **Manual only** (hidden from the AI until you tick it).
-   - Right-click: **Open in Editor**, **Copy Reference** (an id the AI can read with `moki_get_resource`), **Copy Content** (to paste into any chat).
-   - **Show What the AI Read** (history icon): every tool call, in `workspace/projects/<id>/logs/companion.log`.
+1. Open the folder of your system. If it (or a folder above it) is linked to a Moki project ("Choose my folder" in the app), the panel and the status bar show **Moki: <project>**; otherwise choose the project at the top of the panel.
+2. Click the Moki icon in the activity bar. The panel has four tabs:
 
-Choices are saved per project in `workspace/projects/<id>/companion.json`, so another project never sees them. A project chosen by hand is remembered for that VS Code workspace.
+| Tab | What you do |
+|---|---|
+| **Activities** | Pick one (Design tests, Review user stories, Failure pre-analysis…), choose inbox files, an agent, a note and the language |
+| **Agents** | The agents this project uses, with what they do; pick one to work with it |
+| **Context** | Switch each context file, note or shared file on or off for the AI; the star gives it to the AI first |
+| **Runs** | Activities to resume, and the operations running (run them step by step in the app) |
 
-The extension keeps the framework in `<Documents>/Moki`, the same folder as the Moki desktop app, so both show the same workspaces and projects. `QA_ROOT` chooses another folder. Updating the extension refreshes the framework files there; it never touches `workspace/` or `workspaces/`.
+3. Then:
+   - **Open in Claude Code** opens Claude Code in a VS Code terminal with the request ready and the project's MCP servers (`--mcp-config`), like the app does.
+   - **Copy for the chat** copies the same request and puts the cursor in the Claude Code chat (or opens Copilot Chat with it): paste and send.
 
-## MCP tools (all read-only)
+A file switched off stays out of the requests and of what the AI can read through Moki's MCP server. Choices are saved per project in `workspace/projects/<id>/companion.json`.
+
+## MCP servers
+
+- **Claude Code in the IDE** reads its servers from the folder's `.mcp.json`. **Connect Claude Code** (panel footer, or `Moki: Connect Claude Code`) writes Moki's server and the project's servers that are on there after you confirm; your own entries stay, the current file is backed up to `.moki-backup/` first, and a new `.mcp.json` is kept out of Git (`.git/info/exclude`).
+- **Copilot Chat** gets them automatically (`MCP: List Servers` shows **Moki**); a server whose `${VARIABLE}` is not set is left out.
+- **Cursor** on the linked folder: `Moki: Sync MCP Servers to Cursor`.
+
+The servers themselves are managed in the app (Settings › MCP servers, `docs/mcp-servers.md`).
+
+Moki's own server is read-only and bound to one project when it starts:
 
 | Tool | What it returns |
 |---|---|
-| `moki_get_project` | The project: name, description, deliverable language, tags, agents and skills |
+| `moki_get_project` | The project: name, description, deliverable language, tags, agents, skills and MCP servers |
 | `moki_list_resources` | References (id, title, description, mode), without content |
 | `moki_search_knowledge` | Matching lines in the files the AI may read |
 | `moki_get_resource` | The text of one resource |
-| `moki_get_context` | The context pack for a task: selected resources with text (within a budget), then references to the most related ones |
+| `moki_get_context` | The context pack for a task: the starred files with text (within a budget), then references to the most related ones |
 | `moki_get_agent` | An agent's instructions; reading them does not run the agent |
 
-The server is bound to one project when it starts and no tool can change it. Files of other projects are reachable only through a shared tag, and secret-looking files (`.env*`, keys, certificates, `credentials*`) are never listed or read.
+Files of other projects are reachable only through a shared tag, and secret-looking files (`.env*`, keys, certificates, `credentials*`) are never listed or read. `Moki: Show What the AI Read` opens `workspace/projects/<id>/logs/companion.log`. Other AI tools can use the server too: `npm run mcp -- --project <id>` from the repository.
 
-The MCP servers the project has on in Moki (Settings › MCP servers, `docs/mcp-servers.md`) are registered too, with their `${VARIABLE}` values read from VS Code's environment; one whose variable is not set is left out, and the **MCP servers** group of the panel says why. **Moki: Sync MCP Servers to Cursor** writes them (and Moki's server) to `<linked folder>/.cursor/mcp.json` after you confirm, for Cursor opened on the system's folder.
+## Security
 
-Other AI tools can use the same server: `npm run mcp -- --project <id>` from the repository (or `--folder <path>` to find the project linked to a folder), for example in a Claude Code `.mcp.json` or a Cursor `mcp.json`.
+The panel is a small page (`app/companion.html`) in a webview with its own Content-Security-Policy: scripts only with the page's nonce, styles and images only from the extension, no network. It talks only to `desktop/companion-api.ts`, a closed list of calls that always use the project VS Code is connected to (a project sent by the page is ignored) and go through the same service as the desktop app. AI tools start as a command plus arguments, never through a shell.
 
 ## Build it from the source
 
@@ -39,10 +51,10 @@ From the repository root, with Node.js 22.18 or newer:
 
 ```bash
 npm install
-npm run vscode:build     # the extension and the MCP server in ide/vscode/dist, the framework copy
+npm run vscode:build     # the extension, the panel, the MCP server and the framework copy in ide/vscode/dist
 npm run vscode:package   # release/moki-<version>.vsix
 ```
 
-Try it without installing: `code --extensionDevelopmentPath="$PWD/ide/vscode"` opens an Extension Development Host that uses the repository as the Moki folder (build first: the MCP server runs from `dist/mcp.cjs`). Install the package with `code --install-extension release/moki-<version>.vsix`. VS Code 1.101 or newer.
+Try it without installing: `code --extensionDevelopmentPath="$PWD/ide/vscode"` (build first). Install the package with `code --install-extension release/moki-<version>.vsix`. VS Code 1.101 or newer.
 
-Keep `version` in `ide/vscode/package.json` equal to the root `package.json`; the build stops when they differ. How it fits the rest of Moki: `skills/moki-architecture/references/architecture.md` (layer 7b).
+The extension keeps the framework in `<Documents>/Moki`, the same folder as the desktop app, so both show the same workspaces and projects (`QA_ROOT` chooses another folder). Keep `version` in `ide/vscode/package.json` equal to the root `package.json`; the build stops when they differ. How it fits the rest of Moki: `skills/moki-architecture/references/architecture.md` (layer 7b).

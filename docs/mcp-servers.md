@@ -41,7 +41,7 @@ Moki never stores credential values. In Environment and Headers, write `${VARIAB
 | Claude Code started from Moki | `--mcp-config` with the project's servers that are on and Moki's own server for the project (your own Claude Code servers still load) |
 | Cursor and Cursor Agent started from Moki | The `moki` and `moki-*` entries of `<Moki folder>/.cursor/mcp.json`; your entries stay. It holds the last project started in Cursor |
 | Cursor opened on the system's folder | **Sync with Cursor** (project tab, or `Moki: Sync MCP Servers to Cursor` in VS Code) writes the same entries to `<linked folder>/.cursor/mcp.json` after you confirm; `writeAllowed: false` refuses it and the current file is backed up to `.moki-backup/` first |
-| VS Code with the Moki extension | Moki's server and the project's servers that are on, registered automatically; a server whose variable is not set is left out and shown with the reason |
+| VS Code with the Moki extension | Copilot Chat: Moki's server and the project's servers that are on, registered automatically (a server whose variable is not set is left out). Claude Code in VS Code: **Connect Claude Code** in the Moki panel writes the same entries to the folder's `.mcp.json` after you confirm. **Open in Claude Code** in the panel starts it with `--mcp-config` |
 | Other tools (Codex, Gemini, Antigravity) | **Copy for Claude Code / Copy for Cursor** gives the configuration to paste; Moki warns when a step's agent needs a server its AI does not have |
 
 Moki's own server (`ide/mcp/server.ts`) is read-only and bound to one project: the AI reads the project's context, notes, shared context, agents and skills through it (`ide/vscode/README.md`).
