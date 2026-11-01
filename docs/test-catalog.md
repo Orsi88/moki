@@ -72,7 +72,7 @@ Run with `npm test`.
 | 5 | open folder / open with default program are confined and filtered | Integration | [desktop.test.ts:203](../tests/desktop.test.ts#L203) |
 | 6 | new files and folders: Markdown/text only, safe names, never inside activities | Integration | [desktop.test.ts:212](../tests/desktop.test.ts#L212) |
 | 7 | where an item is on this computer: shown in its folder or its full path, inside the project only | Integration | [desktop.test.ts:235](../tests/desktop.test.ts#L235) |
-| 8 | fs-guard sandbox and file type rules | Unit | [desktop.test.ts:1710](../tests/desktop.test.ts#L1710) |
+| 8 | fs-guard sandbox and file type rules | Unit | [desktop.test.ts:1711](../tests/desktop.test.ts#L1711) |
 
 ### Open with
 
@@ -99,18 +99,18 @@ Run with `npm test`.
 |---|---|---|---|
 | 1 | notes: the section is always listed and new notes get unique names | Integration | [desktop.test.ts:156](../tests/desktop.test.ts#L156) |
 | 2 | notes: one is deleted from the start screen; nothing outside notes/ is | Integration | [desktop.test.ts:164](../tests/desktop.test.ts#L164) |
-| 3 | note windows: only notes/<file>.md of a listed project or a loose note id, one window per note | Integration | [desktop.test.ts:1691](../tests/desktop.test.ts#L1691) |
+| 3 | note windows: only notes/<file>.md of a listed project or a loose note id, one window per note | Integration | [desktop.test.ts:1692](../tests/desktop.test.ts#L1692) |
 
 ### Rendering
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | markdown tables draw merged cells (<< and ^^) as one cell | Unit | [desktop.test.ts:1534](../tests/desktop.test.ts#L1534) |
-| 2 | markdown rendering escapes HTML and attribute injection | Unit | [desktop.test.ts:1540](../tests/desktop.test.ts#L1540) |
-| 3 | markdown relative images are embedded from inside the project only | Unit | [desktop.test.ts:1548](../tests/desktop.test.ts#L1548) |
-| 4 | docx extraction keeps headings, lists and tables | Unit | [desktop.test.ts:1566](../tests/desktop.test.ts#L1566) |
-| 5 | docx extraction keeps formatting, numbered lists, links, notes, comments and images | Unit | [desktop.test.ts:1577](../tests/desktop.test.ts#L1577) |
-| 6 | spreadsheet number formats show values as the spreadsheet programs do | Unit | [desktop.test.ts:1611](../tests/desktop.test.ts#L1611) |
+| 1 | markdown tables draw merged cells (<< and ^^) as one cell | Unit | [desktop.test.ts:1535](../tests/desktop.test.ts#L1535) |
+| 2 | markdown rendering escapes HTML and attribute injection | Unit | [desktop.test.ts:1541](../tests/desktop.test.ts#L1541) |
+| 3 | markdown relative images are embedded from inside the project only | Unit | [desktop.test.ts:1549](../tests/desktop.test.ts#L1549) |
+| 4 | docx extraction keeps headings, lists and tables | Unit | [desktop.test.ts:1567](../tests/desktop.test.ts#L1567) |
+| 5 | docx extraction keeps formatting, numbered lists, links, notes, comments and images | Unit | [desktop.test.ts:1578](../tests/desktop.test.ts#L1578) |
+| 6 | spreadsheet number formats show values as the spreadsheet programs do | Unit | [desktop.test.ts:1612](../tests/desktop.test.ts#L1612) |
 | 7 | a comment marks its text and goes to the block at the end; any Markdown viewer hides both | Unit | [md-comments.test.ts:8](../tests/md-comments.test.ts#L8) |
 | 8 | replies, edits and deletes keep the file's own text | Unit | [md-comments.test.ts:24](../tests/md-comments.test.ts#L24) |
 
@@ -118,13 +118,13 @@ Run with `npm test`.
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | search: projects by name, files by name and text, filters by tag | Integration | [desktop.test.ts:1777](../tests/desktop.test.ts#L1777) |
+| 1 | search: projects by name, files by name and text, filters by tag | Integration | [desktop.test.ts:1778](../tests/desktop.test.ts#L1778) |
 
 ### Workspaces
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | workspaces: each one has its own projects; requests name a workspace outside the default | Integration | [desktop.test.ts:1730](../tests/desktop.test.ts#L1730) |
+| 1 | workspaces: each one has its own projects; requests name a workspace outside the default | Integration | [desktop.test.ts:1731](../tests/desktop.test.ts#L1731) |
 
 ### Tags
 
@@ -218,14 +218,14 @@ Run with `npm test`.
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | UI requests run only service methods and return their errors as messages | Integration | [desktop.test.ts:1680](../tests/desktop.test.ts#L1680) |
+| 1 | UI requests run only service methods and return their errors as messages | Integration | [desktop.test.ts:1681](../tests/desktop.test.ts#L1681) |
 
 ### Installer
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | installer framework sync refreshes framework files and never touches workspace/ | Integration | [desktop.test.ts:1633](../tests/desktop.test.ts#L1633) |
-| 2 | installed copies keep the framework in QA_ROOT, the legacy folder or <Documents>/Moki | Integration | [desktop.test.ts:1664](../tests/desktop.test.ts#L1664) |
+| 1 | installer framework sync refreshes framework files and never touches workspace/ | Integration | [desktop.test.ts:1634](../tests/desktop.test.ts#L1634) |
+| 2 | installed copies keep the framework in QA_ROOT, the legacy folder or <Documents>/Moki | Integration | [desktop.test.ts:1665](../tests/desktop.test.ts#L1665) |
 
 ### Status bar usage
 
