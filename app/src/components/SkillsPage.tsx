@@ -121,7 +121,7 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
     <>
       {s.native && <span className="chip">{t('Native')}</span>}
       {s.proposals.length > 0 && <span className="chip chip-accent">{t('Your skill')}</span>}
-      {s.plugin && <span className="chip">{t('Plugin')}</span>}
+      {s.plugin && <span className="chip chip-plugin">{t('Plugin')}</span>}
       {s.native && !READY.has(s.native.status) && <span className="chip">{t('Coming soon')}</span>}
       {s.places.map((pl) => <span key={pl.kind === 'project' ? pl.project.id : 'global'} className="chip">{pl.kind === 'global' ? t('Every project') : `📁 ${pl.project.name}`}</span>)}
       {s.plugin && (s.plugin.optional
@@ -231,7 +231,7 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
       <ul className="list-cards">
         {shown.map((s) => (
           <li key={s.name}>
-            <button type="button" className="list-card skill-item" onClick={() => setOpen(s.name)}>
+            <button type="button" className={`list-card skill-item${s.plugin ? ' is-plugin' : ''}`} onClick={() => setOpen(s.name)}>
               <span className="list-card-title"><CatIcon id={skillCat(s.name)} size={26} />{s.name}</span>
               <span className="list-card-desc">{s.description}</span>
               <span className="chips">{badges(s)}</span>

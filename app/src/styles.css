@@ -14,6 +14,8 @@
   --accent-soft: rgb(241 210 124 / 0.13);
   --accent-text: #1c1b19;
   --ok: #8fbf7f;
+  --plugin: #c79be0; /* plugins (packages of skills and hooks), set apart from skills */
+  --plugin-soft: rgb(199 155 224 / 0.14);
   --warn: #e8935a;
   --err: #e5675b;
   --star: #f2c230; /* favorite notes: golden yellow */
@@ -44,6 +46,8 @@
     --accent-soft: rgb(201 154 34 / 0.14);
     --accent-text: #1f1e1b;
     --ok: #4f8a3f;
+    --plugin: #8a4fb8;
+    --plugin-soft: rgb(138 79 184 / 0.12);
     --warn: #c46a2f;
     --err: #c2453a;
     --star: #d9a406;
@@ -448,6 +452,7 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .library-single > .library-main > .list-page { overflow: visible; flex: 1 0 auto; }
 .list-group { display: flex; flex-direction: column; gap: 10px; }
 .chip-accent { background: var(--accent-soft); color: var(--accent); }
+.chip-plugin { background: var(--plugin-soft); color: var(--plugin); font-weight: 600; }
 .library-create { gap: 14px; }
 .library-create h1 { font-size: 1.6rem; }
 .library-back { margin: 0 6px 14px; }
@@ -1424,6 +1429,16 @@ span.mcp-row-main { cursor: default; }
 .tag-field .tag-picker:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tag-field .tag-input input, .tag-field .tag-input input:focus { border-color: transparent; background: transparent; box-shadow: none; outline: none; }
 .agent-card .tag-field { margin: 0; gap: 6px; }
+
+/* Plugins are purple wherever they are listed, so they are never taken for a skill. */
+.list-card.is-plugin, .skill-card.plugin-card { border-color: color-mix(in srgb, var(--plugin) 45%, var(--border)); background: color-mix(in srgb, var(--plugin) 6%, var(--bg-2)); }
+.list-card.is-plugin:hover, .list-card.is-plugin:focus-visible {
+  border-color: color-mix(in srgb, var(--plugin) 75%, transparent);
+  background: color-mix(in srgb, var(--plugin) 9%, var(--bg-2));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--plugin) 35%, transparent), 0 0 18px color-mix(in srgb, var(--plugin) 22%, transparent);
+}
+.file-pick.plugin-pick label.on { border-color: var(--plugin); background: var(--plugin-soft); }
+.file-pick.plugin-pick .file-name { color: var(--plugin); font-weight: 600; }
 
 /* Settings › Skills: the plugins per project (components/SkillsDialog.tsx). */
 .plugin-projects { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }

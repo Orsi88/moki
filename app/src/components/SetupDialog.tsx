@@ -164,7 +164,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
           <div className="field">
             <span className="label">{t('Plugins in this project')}</span>
             <span className="muted small">{t('ponytail and rtk are always on. These load only in the sessions opened from this project.')}</span>
-            <ul className="file-pick">
+            <ul className="file-pick plugin-pick">
               {pluginList().filter((p) => p.optional).map((p) => (
                 <li key={p.name}>
                   <label className={plugins.includes(p.name) ? 'on' : ''}>

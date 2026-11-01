@@ -63,9 +63,10 @@ function PluginsPanel({ projects }: { projects: ProjectSummary[] }) {
     {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
     <ul className="skill-list">
       {pluginList().map((p) => (
-        <li key={p.name} className="skill-card">
+        <li key={p.name} className="skill-card plugin-card">
           <div className="skill-card-head">
             <span className="choice-title">{p.name}</span>
+            <span className="chip chip-plugin">{t('Plugin')}</span>
             <span className="statusbar-spacer" />
             {!p.optional && <span className="chip">{t('Always on')}</span>}
           </div>
