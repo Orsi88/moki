@@ -1,20 +1,23 @@
 // Settings. Agents: the library, plus agents installed for one project or for
 // every project, and the only place an agent is created. Operations: agents
 // linked by arrows into multi-agent operations. Skills: what is
-// already installed (and where), and adding a skill. Documents: the look of the files
-// activities and agents generate (header, footer, fonts, colours, watermark).
+// already installed (and where), and adding a skill. Templates: the look of the files
+// activities and agents generate (header, footer, fonts, colours, watermark). MCP servers:
+// one catalog for the workspace, each server global or for the projects chosen (components/McpManager.tsx).
 
 import { useEffect, useState } from 'react';
-import { type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
+import { api, type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
 import { t } from '../i18n';
 import { recall, remember } from '../prefs';
 import { AgentForm } from '../components/AgentForm';
-import { SkillsDialog, type SkillDialogTab } from '../components/SkillsDialog';
+import { type SkillDialogTab } from '../components/SkillsDialog';
 import { Library } from './Library';
 import { DocumentStyleForm } from '../components/DocumentStyleForm';
+import { SkillsPage } from '../components/SkillsPage';
 import { Operations } from './Operations';
+import { McpManager } from '../components/McpManager';
 
-export type SettingsTab = 'agents' | 'operations' | 'skills' | 'documents';
+export type SettingsTab = 'agents' | 'operations' | 'skills' | 'mcp' | 'documents';
 
 interface Props {
   tab: SettingsTab;
@@ -29,14 +32,17 @@ interface Props {
   onTerminal: (terminal: TerminalRef, projectId: string) => void;
 }
 
-export function Settings({ tab, onTab, onClose, onBack, backLabel, project, projects, tools, onTerminal }: Props) {
-  const [pickedId, setPickedId] = useState<string | null>(null);
+export function Settings({ tab, onTab, onClose, onBack, backLabel, project, projects: given, tools, onTerminal }: Props) {
+  // Every project of the workspace, for the tabs' pickers (opened from a project, Settings is given only that one).
+  const [projects, setProjects] = useState<ProjectSummary[]>(given);
+  useEffect(() => { api.projects().then((all) => { if (all.length) setProjects(all); }).catch(() => {}); }, []);
   const [skillsTab, setSkillsTab] = useState<SkillDialogTab>('installed');
   const [creatingAgent, setCreatingAgent] = useState(false);
   const [installedTick, setInstalledTick] = useState(0);
   const [scope, setScope] = useState<SkillScope>(() => (recall('qa-skill-scope') === 'global' ? 'global' : 'project'));
-  const target = project ?? projects.find((p) => p.id === pickedId) ?? projects[0] ?? null;
-  const showPicker = !project && projects.length > 1;
+  // Settings is for the whole workspace: the tabs that work on one project (Agents, Skills, Templates)
+  // choose it inside the tab; it starts on the project Settings was opened from.
+  const target = project ?? projects[0] ?? null;
 
   const openSkills = (next: SkillDialogTab) => { setSkillsTab(next); onTab('skills'); };
 
@@ -59,25 +65,18 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
           <button type="button" role="tab" aria-selected={tab === 'agents'} className={`dialog-tab${tab === 'agents' ? ' on' : ''}`} onClick={() => onTab('agents')}>{t('Agents')}</button>
           <button type="button" role="tab" aria-selected={tab === 'operations'} className={`dialog-tab${tab === 'operations' ? ' on' : ''}`} onClick={() => onTab('operations')}>{t('Operations')}</button>
           <button type="button" role="tab" aria-selected={tab === 'skills'} className={`dialog-tab${tab === 'skills' ? ' on' : ''}`} onClick={() => onTab('skills')}>{t('Skills')}</button>
-          <button type="button" role="tab" aria-selected={tab === 'documents'} className={`dialog-tab${tab === 'documents' ? ' on' : ''}`} onClick={() => onTab('documents')}>{t('Documents')}</button>
+          <button type="button" role="tab" aria-selected={tab === 'mcp'} className={`dialog-tab${tab === 'mcp' ? ' on' : ''}`} onClick={() => onTab('mcp')}>{t('MCP servers')}</button>
+          <button type="button" role="tab" aria-selected={tab === 'documents'} className={`dialog-tab${tab === 'documents' ? ' on' : ''}`} onClick={() => onTab('documents')}>{t('Templates')}</button>
         </div>
-        {showPicker && (
-          <label className="settings-project">
-            <span className="label">{t('Project')}</span>
-            <select value={target?.id ?? ''} onChange={(e) => setPickedId(e.target.value)}>
-              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
-        )}
       </div>
       <div className="settings-body">
-        {tab === 'documents' ? <DocumentStyleForm key={target?.id ?? 'none'} project={target} />
+        {tab === 'documents' ? <DocumentStyleForm />
+          : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} projects={projects} />
           : tab === 'operations' ? <Operations tools={tools} />
           : tab === 'agents'
           ? (
             <Library
               embedded
-              project={target}
               installedTick={installedTick}
               onBack={() => {}}
               backLabel=""
@@ -115,13 +114,12 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
             </div>
           ) : (
             <>
-              <SkillsDialog
-                key={`${target.id}:${skillsTab}`}
-                embedded
-                initialTab={skillsTab}
+              <SkillsPage
+                key={skillsTab}
+                startOnAdd={skillsTab === 'add'}
                 project={target}
+                projects={projects}
                 tools={tools}
-                onClose={() => onTab('agents')}
                 onTerminal={(terminal) => onTerminal(terminal, target.id)}
               />
             </>

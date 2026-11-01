@@ -1,9 +1,13 @@
-import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { api, type FileContent, type OpenWithApps } from '../api';
 import { t } from '../i18n';
-import { IconEdit, IconExternal, IconEye, IconMore } from './Icons';
+import { IconChat, IconEdit, IconExternal, IconEye, IconMore } from './Icons';
 import { FileIcon } from '../icons';
 import { PdfDoc } from './PdfDoc';
+import { useMarkdownEditing } from './useMarkdownEditing';
+import { MarkdownComments } from './MarkdownComments';
+import { readComments } from '../md-comments';
+import { recall, remember } from '../prefs';
 
 interface Props {
   content: FileContent;
@@ -18,6 +22,7 @@ interface Props {
   onOpenExternal: () => void;
   onLink: (href: string) => void;
   onPdfSaved?: (path: string) => void; // a PDF change was saved, to this file (the same one, or its -edited copy)
+  onCommit?: (text: string) => void; // a .md file's new text, saved at once (its comments: MarkdownComments)
   // "Open with": the programs the system offers, and the one kept in Moki for this type (null = the system's default).
   openWith?: { kept: { id: string; name: string } | null; apps: () => Promise<OpenWithApps | null>; open: (app: OpenWithApps['apps'][number] | null, keep: boolean) => void; reset: () => void };
 }
@@ -128,13 +133,33 @@ function HtmlView({ text, title }: { text: string; title: string }) {
 
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function DocView({ content, project, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onLink, onPdfSaved, openWith }: Props) {
+// A .md file in edit mode: the same / commands and list continuation as the notes (useMarkdownEditing).
+function MarkdownEditor({ value, onChange }: { value: string; onChange: (text: string) => void }) {
+  const editor = useRef<HTMLTextAreaElement>(null);
+  const md = useMarkdownEditing(editor);
+  return (
+    <div className="note-editor-wrap md-editor-wrap">
+      <textarea ref={editor} className="editor" spellCheck value={value} placeholder={t('Type / for commands.')}
+        onChange={(e) => { onChange(e.target.value); md.findSlash(e.target.value, e.target.selectionStart); }}
+        onKeyDown={(e) => { if (!md.slashKey(e)) md.listKey(e); }}
+        onClick={(e) => md.findSlash(value, e.currentTarget.selectionStart)}
+        onBlur={() => setTimeout(() => md.setSlash(null), 150)} />
+      {md.slashList}
+    </div>
+  );
+}
+
+export function DocView({ content, project, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onLink, onPdfSaved, onCommit, openWith }: Props) {
   const editable = (content.kind === 'markdown' || content.kind === 'text') && content.editable;
   const crumbs = content.path.split('/');
   const savedHtml = content.kind === 'markdown' ? content.html : '';
   const [html, setHtml] = useState(savedHtml);
   const [menu, setMenu] = useState<(OpenWithApps & { right: number; top: number }) | null>(null);
   const [keep, setKeep] = useState(false);
+  // The comment column of a .md file, opened or closed from the bar (remembered), as for a PDF.
+  const [commentsOff, setCommentsOffState] = useState(() => recall('qa-md-comments') === 'closed');
+  const setCommentsOff = (off: boolean) => { setCommentsOffState(off); remember('qa-md-comments', off ? 'closed' : 'open'); };
+  const commentCount = content.kind === 'markdown' && onCommit ? readComments(draft).comments.length : 0;
   const kept = openWith?.kept ?? null;
   const ext = content.path.slice(content.path.lastIndexOf('.')).toLowerCase();
   const openTitle = kept ? t('Open with {tool}', { tool: kept.name }) : t('Open with the default program');
@@ -176,6 +201,11 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
               <button type="button" className={mode === 'edit' ? 'on' : ''} aria-pressed={mode === 'edit'} onClick={() => onMode('edit')} title={t('Edit (Ctrl+E)')} aria-label={t('Edit (Ctrl+E)')}><IconEdit size={15} /></button>
             </div>
           )}
+          {commentCount > 0 && mode === 'preview' && (
+            <button type="button" className={`btn btn-ghost btn-sm pdf-rail-toggle${commentsOff ? '' : ' on'}`} aria-pressed={!commentsOff}
+              title={commentsOff ? t('Show the comments beside the text') : t('Hide the comments: the text gets the room')} aria-label={`${t('Comments')} (${commentCount})`}
+              onClick={() => setCommentsOff(!commentsOff)}><IconChat size={14} /><span className="pdf-rail-count">{commentCount}</span></button>
+          )}
           {editable && (dirty || saving) && (
             <button type="button" className="btn btn-sm" onClick={onSave} disabled={saving}>{saving ? t('Saving…') : t('Save')}</button>
           )}
@@ -189,11 +219,13 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
       <div className="doc-body">
         {content.kind === 'markdown' && mode === 'preview' && (
           // HTML comes from the main process renderer, which escapes all markup from the file.
-          <div className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+          onCommit && content.editable
+            ? <MarkdownComments html={html} text={draft} onCommit={onCommit} onClick={onClick} hidden={commentsOff} onShow={() => setCommentsOff(false)} />
+            : <div className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
         )}
         {(content.kind === 'markdown' || content.kind === 'text') && (mode === 'edit' || content.kind === 'text') && (
           content.editable
-            ? <textarea className="editor" spellCheck value={draft} onChange={(e) => onDraft(e.target.value)} />
+            ? (content.kind === 'markdown' ? <MarkdownEditor value={draft} onChange={onDraft} /> : <textarea className="editor" spellCheck value={draft} onChange={(e) => onDraft(e.target.value)} />)
             : <pre className="plain">{content.text}</pre>
         )}
         {content.kind === 'json' && <pre className="plain code-view">{content.text}</pre>}

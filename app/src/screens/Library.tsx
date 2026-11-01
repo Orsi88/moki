@@ -1,14 +1,28 @@
-// Agent library: built-in agents (read-only) and the user's own agents, by
+// Agent library: opens on the list of every agent (built-in, the user's own and the ones in
+// the user folder) with filters; choosing one opens its page. Built-in agents are read-only, by
 // category. A built-in agent is customized by duplicating it; the copy lives in
 // workspace/library/agents/ and can be edited or deleted. Agents created for a
-// project or for every project are listed under those headings.
+// project or for every project are listed under those headings. The tags of an agent say
+// which projects it reaches (none = every project); the list filters by tag. One of your
+// own agents also chooses its skills here.
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { api, type AgentContract, type AgentDetail, type AgentInfo, type Category, type ProjectSummary, type ToolInfo } from '../api';
+import { api, type AgentContract, type AgentDetail, type AgentInfo, type AgentProfile, type Category, type ProjectSummary, type SkillInfo, type ToolInfo } from '../api';
 import { AgentContractFields } from '../components/AgentContractFields';
 import { t } from '../i18n';
-import { IconCopy, IconEdit, IconEye, IconFolder, IconHome, IconTrash, IconX } from '../components/Icons';
+import { IconCopy, IconEdit, IconFolder, IconHome, IconTrash, IconX } from '../components/Icons';
 import { AddButton } from '../components/AddButton';
+import { TagField, TagFilter, matchesTag, useTagCatalog } from '../components/TagField';
+import { SkillsField } from '../components/SkillsField';
+import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from '../components/ListPage';
+
+// The sections every agent's instructions keep (scripts/lib/agents.ts AGENT_SECTIONS).
+const AGENT_SECTIONS = ['Role', 'When to use', 'How to work', 'Boundaries'];
+
+const fromDetail = (d: AgentDetail): AgentProfile => ({
+  description: d.description, body: d.body.replace(/^\n+/, ''), skills: d.skills,
+  contract: { inputs: d.inputs, outputs: d.outputs, outcomes: d.outcomes ?? [], mcps: d.mcps, ai: d.ai },
+});
 
 interface ScopeAgent { name: string; description: string; contract?: AgentContract }
 type Sel = { kind: 'library' | 'project' | 'global'; name: string };
@@ -48,10 +62,21 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  // Inputs, outputs, MCP servers and AI of one of your agents, edited apart from its text.
-  const [contract, setContract] = useState<AgentContract | null>(null);
+  // One of your agents edited on its page (description, instructions, skills, contract), saved at once.
+  const [profile, setProfile] = useState<AgentProfile | null>(null);
   const [mcps, setMcps] = useState<string[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [catalog, reloadCatalog] = useTagCatalog();
+  const [tags, setTags] = useState<Record<string, string[]>>({});
+  const [filter, setFilter] = useState('');
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState<'all' | 'builtin' | 'custom' | 'global'>('all');
+  const [category, setCategory] = useState('');
+  const [skills, setSkills] = useState<SkillInfo[]>([]);
+  useEffect(() => {
+    api.agentTags().then(setTags).catch(() => setTags({}));
+    api.skills().then(setSkills).catch(() => setSkills([]));
+  }, []);
   useEffect(() => {
     api.knownMcps(project?.id).then(setMcps).catch(() => setMcps([]));
     api.integrations().then(setTools).catch(() => setTools([]));
@@ -65,8 +90,7 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
       if (select) return { kind: 'library', name: select };
       if (cur?.kind === 'library' && list.some((a) => a.name === cur.name)) return cur;
       if (cur && cur.kind !== 'library') return cur;
-      const name = (list.find((a) => a.usable) ?? list[0])?.name;
-      return name ? { kind: 'library', name } : null;
+      return null; // the list
     });
   }, []);
 
@@ -84,13 +108,18 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
   useEffect(() => {
     setEditing(false);
     if (!libraryName) { setDetail(null); return; }
-    setContract(null);
-    api.agent(libraryName).then((d) => { setDetail(d); setDraft(d.text); }).catch((e: Error) => setError(e.message));
+    api.agent(libraryName).then((d) => { setDetail(d); setDraft(d.text); setProfile(d.source === 'custom' ? fromDetail(d) : null); }).catch((e: Error) => setError(e.message));
   }, [libraryName]);
 
   const shown: AgentContract | null = detail ? { inputs: detail.inputs, outputs: detail.outputs, outcomes: detail.outcomes ?? [], mcps: detail.mcps, ai: detail.ai } : null;
-  const contractDirty = contract !== null && JSON.stringify(contract) !== JSON.stringify(shown);
-  const dirty = (editing && detail !== null && draft !== detail.text) || contractDirty;
+  const profileDirty = profile !== null && detail !== null && JSON.stringify(profile) !== JSON.stringify(fromDetail(detail));
+  const dirty = (editing && detail !== null && draft !== detail.text) || profileDirty;
+  const missing = profile ? AGENT_SECTIONS.filter((h) => !new RegExp(`^## ${h}\\s*$`, 'm').test(profile.body)) : [];
+  const back = () => {
+    if (creating) { onBrowse?.(); return; }
+    if (dirty && !window.confirm(t('Discard unsaved changes?'))) return;
+    setError(''); setSel(null);
+  };
   const choose = (next: Sel) => {
     if (dirty && !window.confirm(t('Discard unsaved changes?'))) return;
     setError('');
@@ -113,15 +142,16 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
     if (!detail) return;
     await api.saveAgent(detail.name, draft);
     const fresh = await api.agent(detail.name);
-    setDetail(fresh); setDraft(fresh.text); setEditing(false);
+    setDetail(fresh); setDraft(fresh.text); setProfile(fromDetail(fresh)); setEditing(false);
     await load(detail.name);
   });
 
-  const saveContract = () => run(async () => {
-    if (!detail || !contract) return;
-    await api.saveAgentContract(detail.name, contract);
+  const saveProfile = () => run(async () => {
+    if (!detail || !profile) return;
+    await api.saveAgentProfile(detail.name, profile);
     const fresh = await api.agent(detail.name);
-    setDetail(fresh); setDraft(fresh.text); setContract(null);
+    setDetail(fresh); setDraft(fresh.text); setProfile(fromDetail(fresh));
+    await load(detail.name);
   });
 
   const remove = () => run(async () => {
@@ -129,6 +159,17 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
     await api.deleteAgent(detail.name);
     await load(agents.find((a) => a.name !== detail.name)?.name);
   });
+
+  const saveTags = (next: string[]) => run(async () => {
+    if (!detail) return;
+    const kept = await api.setAgentTags(detail.name, next);
+    setTags((m) => ({ ...m, [detail.name]: kept }));
+  });
+
+  const shownAgents = agents.filter((a) => (kind === 'all' || kind === a.source) && (!category || a.category === category)
+    && matchesQuery(query, a.name, a.description) && matchesTag(tags[a.name] ?? [], filter, catalog));
+  const shownGlobal = kind === 'all' || kind === 'global' ? globalAgents.filter((a) => !filter && !category && matchesQuery(query, a.name, a.description)) : [];
+  const tagName = (id: string) => (id.startsWith('project:') ? `📁 ${catalog?.projects.find((p) => p.id === id)?.name ?? id.slice(8)}` : `# ${catalog?.tags.find((tg) => tg.id === id)?.name ?? id}`);
 
   const leave = () => { if (!dirty || window.confirm(t('Discard unsaved changes?'))) onBack(); };
 
@@ -147,63 +188,83 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
       if (!window.confirm(t('Remove the agent "{name}" from all projects? It goes to the trash.', { name: sel.name }))) return;
       await api.removeGlobal('agent', sel.name);
     }
-    setSel(agents[0] ? { kind: 'library', name: agents[0].name } : null);
+    setSel(null);
     loadInstalled();
   });
 
   return (
-    <div className="library">
-      <aside className="home-list">
-        {!embedded && <button type="button" className="btn btn-ghost btn-sm library-back" onClick={leave}><IconHome size={15} /> {backLabel}</button>}
-        <div className="home-list-head">{t('Agents')}</div>
-        {categories.map((c) => {
-          const group = agents.filter((a) => a.category === c.id);
-          if (!group.length) return null;
-          return (
-            <section key={c.id} className="library-group">
-              <div className="library-group-head" title={c.description}>{c.label}</div>
-              <ul>
-                {group.map((a) => (
-                  <li key={a.name}>
-                    <button type="button" className={`library-item${sel?.kind === 'library' && a.name === sel.name ? ' active' : ''}`} onClick={() => choose({ kind: 'library', name: a.name })}>
-                      <span className={`dot ${a.usable ? 'dot-ok' : 'dot-muted'}`} title={statusText(a.status)} />
-                      <span className="library-item-name">{a.name}</span>
-                      {a.source === 'custom' && <span className="chip">{t('yours')}</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          );
-        })}
-        {([
-          ['project', project?.name ?? t('This project'), projectAgents],
-          ['global', t('All projects'), globalAgents],
-        ] as const).map(([kind, label, group]) => group.length > 0 && (
-          <section key={kind} className="library-group">
-            <div className="library-group-head">{label}</div>
-            <ul>
-              {group.map((a) => (
-                <li key={a.name}>
-                  <button type="button" className={`library-item${sel?.kind === kind && a.name === sel.name ? ' active' : ''}`} onClick={() => choose({ kind, name: a.name })}>
-                    <span className="dot dot-ok" />
-                    <span className="library-item-name">{a.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </aside>
-
+    <div className="library library-single">
       <main className="library-main">
         {error && <div className="error-bar">{error}<button type="button" className="icon-btn" onClick={() => setError('')}><IconX size={14} /></button></div>}
-        {creating && create ? <div className="library-detail library-create">{create}</div>
-          : sel && sel.kind !== 'library' && scopeAgent ? (
+        {creating && create ? <div className="library-detail library-create"><BackArrow label={t('Agents')} onBack={back} />{create}</div>
+          : !sel ? (
+            <div className="list-page">
+              {!embedded && <button type="button" className="btn btn-ghost btn-sm library-back" onClick={leave}><IconHome size={15} /> {backLabel}</button>}
+              <ListHead title={t('Agents')} intro={t('Roles with instructions that use skills. Built-in agents come with Moki; duplicate one to make it yours. Tags say which projects each one reaches.')}
+                action={onCreate && <button type="button" className="btn" onClick={onCreate}>{t('Create agent')}</button>} />
+              <ListTabs label={t('Agents')} value={kind} onChange={setKind} tabs={[
+                { id: 'all', label: t('All'), count: agents.length + globalAgents.length },
+                { id: 'builtin', label: t('Built-in'), count: agents.filter((a) => a.source === 'builtin').length },
+                { id: 'custom', label: t('Your own'), count: agents.filter((a) => a.source === 'custom').length },
+                { id: 'global', label: t('In your user folder'), count: globalAgents.length },
+              ]} />
+              <ListTools query={query} onQuery={setQuery} placeholder={t('Search agents')} count={countLabel(shownAgents.length + shownGlobal.length, '1 agent', '{n} agents')}>
+                <TagFilter catalog={catalog} value={filter} onChange={setFilter} />
+                <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label={t('Category')}>
+                  <option value="">{t('All categories')}</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </ListTools>
+              {categories.map((c) => {
+                const group = shownAgents.filter((a) => a.category === c.id);
+                if (!group.length) return null;
+                return (
+                  <section key={c.id} className="list-group">
+                    <h2 className="list-group-head" title={c.description}>{c.label}</h2>
+                    <ul className="list-cards">
+                      {group.map((a) => (
+                        <li key={a.name}>
+                          <button type="button" className="list-card library-item" onClick={() => choose({ kind: 'library', name: a.name })}>
+                            <span className="list-card-title"><span className={`dot ${a.usable ? 'dot-ok' : 'dot-muted'}`} title={statusText(a.status)} />{a.name}</span>
+                            <span className="list-card-desc">{a.description}</span>
+                            <span className="chips">
+                              {a.source === 'custom' && <span className="chip chip-accent">{t('yours')}</span>}
+                              {(tags[a.name] ?? []).length
+                                ? (tags[a.name] ?? []).map((tg) => <span key={tg} className="chip">{tagName(tg)}</span>)
+                                : <span className="chip">{t('Every project')}</span>}
+                              <span className="chip">{a.skills.length === 1 ? t('1 skill') : t('{n} skills', { n: a.skills.length })}</span>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+              {shownGlobal.length > 0 && (
+                <section className="list-group">
+                  <h2 className="list-group-head">{t('In your user folder')}</h2>
+                  <ul className="list-cards">
+                    {shownGlobal.map((a) => (
+                      <li key={a.name}>
+                        <button type="button" className="list-card library-item" onClick={() => choose({ kind: 'global', name: a.name })}>
+                          <span className="list-card-title"><span className="dot dot-ok" />{a.name}</span>
+                          {a.description && <span className="list-card-desc">{a.description}</span>}
+                          <span className="chips"><span className="chip">~/.claude/agents</span></span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {!shownAgents.length && !shownGlobal.length && <p className="list-empty">{t('No agent with these filters.')}</p>}
+            </div>
+          )
+          : sel.kind !== 'library' && scopeAgent ? (
             <div className="library-detail">
               <header className="library-head">
                 <div>
-                  <h1>{scopeAgent.name}</h1>
+                  <div className="title-row"><BackArrow label={t('Agents')} onBack={back} /><h1>{scopeAgent.name}</h1></div>
                   {scopeAgent.description && <p className="muted">{scopeAgent.description}</p>}
                 </div>
                 <div className="row-actions">
@@ -218,53 +279,94 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
               {scopeAgent.contract && <AgentContractFields value={scopeAgent.contract} tools={tools} />}
             </div>
           ) : !detail ? <div className="welcome"><p className="muted">{t('No agents found.')}</p></div> : (
-          <div className="library-detail">
+          <div className="library-detail agent-page">
             <header className="library-head">
               <div>
-                <h1>{detail.name}</h1>
-                <p className="muted">{detail.description}</p>
+                <div className="title-row"><BackArrow label={t('Agents')} onBack={back} /><h1>{detail.name}</h1></div>
+                <div className="agent-badges">
+                  <span className="chip">{categories.find((c) => c.id === detail.category)?.label ?? detail.category}</span>
+                  <span className="chip"><span className={`dot ${detail.usable ? 'dot-ok' : 'dot-muted'}`} /> {statusText(detail.status)}</span>
+                  <span className="chip">{detail.source === 'builtin' ? t('Built-in (read-only)') : detail.basedOn ? t('Yours, based on {agent}', { agent: detail.basedOn }) : t('Yours')}</span>
+                </div>
               </div>
               <div className="row-actions">
                 <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { void duplicate(); }} title={t('Copy to your library to customize it')}><IconCopy size={15} /> {t('Duplicate')}</button>
-                {onCreate && (
-                  <AddButton title={t('Create agent')} pressed={creating} onClick={onCreate} />
-                )}
-                {detail.source === 'custom' && !editing && <button type="button" className="btn btn-ghost btn-sm" disabled={contractDirty} onClick={() => setEditing(true)}><IconEdit size={15} /> {t('Edit')}</button>}
-                {detail.source === 'custom' && editing && <>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(detail.text); setEditing(false); }}><IconEye size={15} /> {t('Cancel')}</button>
-                  <button type="button" className="btn btn-sm" disabled={busy || !dirty} onClick={() => { void save(); }}>{busy ? t('Saving…') : t('Save')}</button>
-                </>}
+                {detail.source === 'custom' && !editing && <button type="button" className="btn btn-ghost btn-sm" disabled={profileDirty} onClick={() => setEditing(true)} title={t('Edit the whole file, frontmatter included')}><IconEdit size={15} /> {t('Edit file')}</button>}
                 {detail.source === 'custom' && <button type="button" className="icon-btn" disabled={busy} onClick={() => { void remove(); }} title={t('Delete this agent')}><IconTrash size={17} /></button>}
+                {onCreate && <AddButton title={t('Create agent')} pressed={creating} onClick={onCreate} />}
               </div>
             </header>
+            {detail.source === 'builtin' && <p className="agent-note muted small">{t('Built-in agents are read-only. Duplicate it to write your own version; its tags can be chosen here.')}</p>}
 
-            <dl className="facts library-facts">
-              <div><dt>{t('Category')}</dt><dd>{categories.find((c) => c.id === detail.category)?.label ?? detail.category}</dd></div>
-              <div><dt>{t('Status')}</dt><dd>{statusText(detail.status)}{detail.usable ? '' : ` — ${t('not available yet')}`}</dd></div>
-              <div><dt>{t('Access')}</dt><dd>{accessLabel(detail.access)}</dd></div>
-              <div><dt>{t('Version')}</dt><dd>{detail.version}</dd></div>
-              <div><dt>{t('Origin')}</dt><dd>{detail.source === 'builtin' ? t('Built-in (read-only)') : detail.basedOn ? t('Yours, based on {agent}', { agent: detail.basedOn }) : t('Yours')}</dd></div>
-              <div><dt>{t('Skills')}</dt><dd className="chips">{detail.skills.map((s) => <span key={s} className="chip">{s}</span>)}</dd></div>
-            </dl>
+            {editing ? (
+              <section className="agent-card">
+                <div className="agent-card-head"><h2>{t('Agent file')}</h2><span className="muted small">{detail.path}</span></div>
+                <textarea className="editor library-editor" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} aria-label={t('Agent file')} />
+                <div className="agent-savebar">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(detail.text); setEditing(false); }}>{t('Cancel')}</button>
+                  <button type="button" className="btn btn-sm" disabled={busy || draft === detail.text} onClick={() => { void save(); }}>{busy ? t('Saving…') : t('Save')}</button>
+                </div>
+              </section>
+            ) : (
+              <div className="agent-layout">
+                <div className="agent-main">
+                  <section className="agent-card">
+                    <div className="agent-card-head"><h2>{t('Description')}</h2></div>
+                    <p className="muted small">{t('When to use this agent. It shows in the lists and helps the AI pick it.')}</p>
+                    {profile
+                      ? <textarea className="agent-description" rows={3} maxLength={1024} value={profile.description} onChange={(e) => setProfile({ ...profile, description: e.target.value })} placeholder={t('e.g. Reviews user stories before development and lists the open questions.')} aria-label={t('Description')} />
+                      : <p>{detail.description}</p>}
+                  </section>
 
-            {shown && (detail.source === 'custom' && !editing
-              ? (
-                <>
-                  <AgentContractFields value={contract ?? shown} onChange={setContract} mcps={mcps} tools={tools} access={detail.access} />
-                  {contractDirty && (
-                    <div className="row-actions contract-actions">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setContract(null)}>{t('Cancel')}</button>
-                      <button type="button" className="btn btn-sm" disabled={busy} onClick={() => { void saveContract(); }}>{busy ? t('Saving…') : t('Save')}</button>
-                    </div>
-                  )}
-                </>
-              )
-              : !editing && <AgentContractFields value={shown} tools={tools} access={detail.access} />)}
+                  <section className="agent-card">
+                    <div className="agent-card-head"><h2>{t('Instructions')}</h2></div>
+                    {profile && <p className="muted small">{t('How the agent works, in Markdown. Keep the sections {sections}.', { sections: AGENT_SECTIONS.map((s) => `## ${s}`).join(', ') })}</p>}
+                    {profile
+                      ? (
+                        <>
+                          <textarea className="agent-notes" value={profile.body} onChange={(e) => setProfile({ ...profile, body: e.target.value })} spellCheck={false}
+                            placeholder={t('Write here how the agent works: its role, when to use it, the steps it follows and what it must not do.')} aria-label={t('Instructions')} />
+                          {missing.length > 0 && <p className="agent-missing small">{t('Missing sections: {sections}', { sections: missing.map((s) => `## ${s}`).join(', ') })}</p>}
+                        </>
+                      )
+                      : <article className="markdown library-body" dangerouslySetInnerHTML={{ __html: detail.html }} />}
+                  </section>
 
-            {editing
-              ? <textarea className="editor library-editor" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
-              : <article className="markdown library-body" dangerouslySetInnerHTML={{ __html: detail.html }} />}
-            <p className="muted small library-path">{detail.path}</p>
+                  <AgentContractFields value={profile?.contract ?? shown!} onChange={profile ? (contract) => setProfile({ ...profile, contract }) : undefined} mcps={mcps} tools={tools} access={detail.access} />
+                </div>
+
+                <aside className="agent-side">
+                  <section className="agent-card">
+                    <div className="agent-card-head"><h2>{t('Skills')}</h2><span className="muted small">{(profile?.skills ?? detail.skills).length}</span></div>
+                    <p className="muted small">{profile ? t('What the agent knows how to do. Search to add one.') : t('Duplicate it to choose other skills.')}</p>
+                    <SkillsField value={profile?.skills ?? detail.skills} skills={skills} onChange={profile ? (next) => setProfile({ ...profile, skills: next }) : undefined} />
+                  </section>
+
+                  <section className="agent-card">
+                    <div className="agent-card-head"><h2>{t('Projects')}</h2></div>
+                    <TagField label="" value={tags[detail.name] ?? []} onChange={(next) => { void saveTags(next); }} catalog={catalog} onCatalog={reloadCatalog} />
+                  </section>
+
+                  <section className="agent-card">
+                    <div className="agent-card-head"><h2>{t('Details')}</h2></div>
+                    <dl className="facts agent-facts">
+                      <div><dt>{t('Access')}</dt><dd>{accessLabel(detail.access)}</dd></div>
+                      <div><dt>{t('Version')}</dt><dd>{detail.version}</dd></div>
+                      <div><dt>{t('Status')}</dt><dd>{statusText(detail.status)}{detail.usable ? '' : ` — ${t('not available yet')}`}</dd></div>
+                    </dl>
+                    <p className="muted small library-path">{detail.path}</p>
+                  </section>
+                </aside>
+              </div>
+            )}
+
+            {profileDirty && (
+              <div className="agent-savebar sticky">
+                <span className="muted small">{t('Unsaved changes')}</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setProfile(fromDetail(detail))}>{t('Cancel')}</button>
+                <button type="button" className="btn btn-sm" disabled={busy || !profile?.description.trim()} onClick={() => { void saveProfile(); }}>{busy ? t('Saving…') : t('Save')}</button>
+              </div>
+            )}
           </div>
         )}
       </main>

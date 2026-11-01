@@ -49,10 +49,17 @@ function table(head, rows) {
 // Small Markdown subset: headings (# and setext), paragraphs, nested lists, tables,
 // blockquotes, code blocks, horizontal rules. Enough for generated reports.
 // options.image: (src) => data: URI or null, for relative image paths (the desktop app reads them inside the project).
-/** @param {string} md @param {{ image?: ((src: string) => string | null) | null }} [options] */
-export function markdownToHtml(md, { image = null } = {}) {
+// options.comments: draw the commented text (app/src/md-comments.ts) as <mark data-c>; otherwise, as
+// in a generated report, nothing of the comments shows. Their block at the end never shows.
+/** @param {string} md @param {{ image?: ((src: string) => string | null) | null, comments?: boolean }} [options] */
+export function markdownToHtml(md, { image = null, comments = false } = {}) {
   resolveImage = image;
-  try { return render(md); } finally { resolveImage = null; }
+  // The marks become private-use characters (kept through escaping and inline formatting), then tags.
+  const source = md.replace(/\n*<!-- moki-comments\n[\s\S]*?\n-->\s*$/, '')
+    .replace(/<!--c:([a-z0-9]+)-->/g, comments ? '\ue100$1\ue101' : '').replace(/<!--\/c:[a-z0-9]+-->/g, comments ? '\ue102' : '');
+  try {
+    return render(source).replace(/\ue100([a-z0-9]+)\ue101/g, '<mark class="md-comment" data-c="$1">').replace(/\ue102/g, '</mark>');
+  } finally { resolveImage = null; }
 }
 
 function render(md) {

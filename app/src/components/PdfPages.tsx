@@ -70,9 +70,10 @@ function Page({ doc, n, scale }: { doc: PDFDocumentProxy; n: number; scale: numb
 // onError: pdf.js could not open the file (the caller falls back to Chromium's viewer).
 // Quads are in the coordinates of the page as displayed (rotation applied), which is what PdfCraft expects.
 // onLoad: page count, title and author once the file is open. pageTools: a bar under each page (Edit mode).
-export function PdfPages({ data, zoom, onSelection, onError, onLoad, pageTools }: {
+// onDoc: the open document, for searching its text.
+export function PdfPages({ data, zoom, onSelection, onError, onLoad, onDoc, pageTools }: {
   data: string; zoom: number; onSelection: (marks: PdfMark[] | null) => void; onError: () => void;
-  onLoad?: (info: { pages: number; title: string; author: string }) => void; pageTools?: (n: number, total: number) => ReactNode;
+  onLoad?: (info: { pages: number; title: string; author: string }) => void; onDoc?: (doc: PDFDocumentProxy | null) => void; pageTools?: (n: number, total: number) => ReactNode;
 }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -86,13 +87,14 @@ export function PdfPages({ data, zoom, onSelection, onError, onLoad, pageTools }
     task.promise.then((d) => {
       if (gone) return;
       setDoc(d);
+      onDoc?.(d);
       void d.getMetadata().then(({ info }) => {
         const i = info as { Title?: unknown; Author?: unknown };
         if (!gone) onLoad?.({ pages: d.numPages, title: typeof i.Title === 'string' ? i.Title : '', author: typeof i.Author === 'string' ? i.Author : '' });
       }, () => { if (!gone) onLoad?.({ pages: d.numPages, title: '', author: '' }); });
     }, () => { if (!gone) onError(); });
-    return () => { gone = true; setDoc(null); void task.destroy(); };
-  }, [data, onError, onLoad]);
+    return () => { gone = true; setDoc(null); onDoc?.(null); void task.destroy(); };
+  }, [data, onError, onLoad, onDoc]);
 
   const onMouseUp = () => {
     const sel = window.getSelection();

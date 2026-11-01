@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/Orsi88/moki/releases/latest"><b>⬇️ Download Moki for Windows</b></a>
   &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/releases/download/v0.2.2/Moki.Setup.0.2.2.exe">Moki.Setup.0.2.2.exe</a>
-  &nbsp;·&nbsp; <a href="#install">how to install</a>
+  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/wiki">documentation</a>
 </p>
 
 Moki is a local app for the AI tool you already use. It keeps a project on your computer — files, confirmed knowledge, skills and the record of each activity — and opens Claude Code, Cursor, Codex, Gemini or a chat with the request ready.
@@ -20,161 +20,53 @@ It started as software quality work: review a story, design tests, look at a fai
 
 ## Install
 
-### Windows
-
 1. Download [Moki.Setup.0.2.2.exe](https://github.com/Orsi88/moki/releases/download/v0.2.2/Moki.Setup.0.2.2.exe) (or the latest file on [Releases](https://github.com/Orsi88/moki/releases)).
 2. If Windows says it protected your PC, choose **More info → Run anyway**. The installer is not digitally signed yet.
-3. Finish. A **Moki** shortcut appears on the desktop and in the Start menu.
+3. Install an AI tool too (Claude Code, Cursor, Codex, Gemini, or a chat you already use).
 
-The first launch creates **Documents\Moki**: the app files and your `workspace/`, where projects live. A newer installer refreshes the app files and leaves `workspace/` and `workspaces/` alone. Uninstalling keeps them too.
+Your projects live in **Documents\Moki**, and a newer installer never touches them. macOS, Linux and running from the source: [Getting started](https://github.com/Orsi88/moki/wiki/Getting-started).
 
-Install an AI tool as well (Claude Code, Cursor, Codex, Gemini, or a chat you already use). Excel, Word and PDF from the built-in activities need [Node.js 22.18+](https://nodejs.org) (LTS). The app itself opens without it.
+## First steps
 
-macOS, Linux, or a checkout of this repository: [From the source](#from-the-source).
+1. Open Moki and choose a **workspace** (a folder of projects, like an Obsidian vault).
+2. Create a **project**: QA context files for a system you test, a blank project the AI plans with you, or a folder you already have.
+3. Drop the stories, logs or documents onto the window: they go to the project's inbox.
+4. Press **play**, choose the activity and your AI tool. The request opens there, ready.
+5. Talk to the AI as usual. Each activity records where it stopped, so you can come back later, in the same tool or another.
 
-## Use it
+## What it does
 
-Open Moki and choose a **workspace**, like a vault in Obsidian. The corner of that screen chooses **English or Portuguese** and a **light or dark** theme.
-
-**Workspaces.** A workspace is a folder with its own projects, tags and settings — for example one per client or company. The `workspace/` you already have is the first one, so nothing moves. On the first screen you can:
-
-- open a workspace from the list (the last one opened is marked);
-- **create a new workspace** — by default in `workspaces/<name>/` inside the Moki folder, or in a folder you choose;
-- **open a folder as a workspace** — a folder you already have; Moki adds a `projects/` folder inside it;
-- rename one, or remove it from the list (its folder stays on the computer).
-
-Switch workspaces at the bottom of the project list, or go back to the list with *Manage workspaces…*. Projects of one workspace never see another one.
-
-**Start screen.** Projects on the left, loose notes under them, the workspace at the bottom. Pin a project to keep it at the top. Hide one and the files stay on the computer; it moves under **Hidden** until you show it again. Pins and hidden projects are kept per workspace; loose notes belong to none.
-
-**Search** (the magnifier, or **Ctrl+Shift+F**) takes the place of the list and looks through the active workspace: project names and descriptions, and the names and text of the project files (Markdown, text, JSON, CSV and the text of Word files). Tags appear there as filters; text and tags combine. A result opens the project with the file.
-
-**Create a project** by typing a name, and optionally its tags:
-
-| Start with | What you get |
+| Activity | What you get |
 |---|---|
-| **QA context files** | Glossary, business rules, modules, flows, permissions and the rest, for a system you test. |
-| **A blank project** | No context yet. You describe the goal; the AI asks what it needs and writes a plan. Context files appear only after you approve it. |
-| **An existing folder** | *Open a project* picks a folder. The project takes its name (you can edit it), links that folder, and opens *Set up &lt;name&gt;*. AI settings in the folder are copied to `.moki-backup/` inside it. Nothing else there changes. |
+| [Review user stories](skills/requirements-review/SKILL.md) | Ambiguities, gaps, one question at a time, a review matrix (Excel) and a final definitions report (PDF) |
+| [Design tests](skills/test-design/SKILL.md) | Scenario map, then — after your OK — manual test cases in Excel |
+| [Failure pre-analysis](skills/failure-analysis/SKILL.md) | A short note for developers, from your description and the log |
+| [Build test evidence](skills/qa-orchestrator/references/workflows/test-evidence.md) | The work item and the Jam recordings, then a spreadsheet and a Word document with the prints |
+| [Project context](skills/project-context/SKILL.md) | Onboarding, updates, and the plan for a blank project |
 
-The create form still says "one project per system you test". A blank project and a linked folder use the same form.
+Agents chain these into **multi-agent operations**, MCP servers give the AI your tools (Playwright, Azure DevOps, Jira…), and the **VS Code extension** brings the project's context to the AI of your editor.
 
-**Inside a project.** A tree of the project: context, inbox, activities, notes. Drop files onto the window and they are copied into the inbox — up to 40 files, 200 MB each. Folders are skipped. Markdown is formatted; **Ctrl+E** edits, **Ctrl+S** saves, **Ctrl+W** closes. Word files are turned into text so any AI can read them. Excel files show their values and PDFs open with selectable text; with PdfCraft installed you can highlight and comment on them, and edit their pages (rotate, move, insert, delete) and their title and author (a file from the inbox, and any page edit, goes to an `-edited.pdf` copy). The button next to them opens either in its own program, and "…" lets you choose it (Excel, Word and PDF). Files the AI saves show up in the tree as they land.
+## Documentation
 
-**Open in your AI tool** (the play button):
+The full documentation is in the [wiki](https://github.com/Orsi88/moki/wiki):
 
-1. Choose the activity.
-2. Optionally choose which inbox files to include, which shared context to keep (when the project has tags, see [Tags](#tags)) and who should do it (an agent).
-3. Add a note and pick the tool.
-
-Claude Code, Codex, Gemini CLI, Antigravity CLI and Cursor Agent open in a terminal tab of the app. Cursor and VS Code open the folder with the request copied. ChatGPT, claude.ai, Gemini web, and *Just show the request*, leave the text on the screen ready to copy. If opening is still running after about 20 seconds, the wizard says so.
-
-Then you talk in that tool as usual. The request names the project, the linked folder, and the skills and agents installed for it.
-
-**Settings** (the gear) has three tabs:
-
-| Tab | What you do there |
+| Guide | What is in it |
 |---|---|
-| **Agents** | Roles that use one or more skills. Duplicate a built-in one, or create your own for this project or for every project. |
-| **Skills** | What is already installed, what ships with Moki, and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry (programming, design, QA, security, docs) or describe one for your AI tool to draft. |
-| **Documents** | Font, colours, header, footer, logo and watermark for the PDF, Word and Excel files activities generate. One style for every project, or a project's own. |
+| [Getting started](https://github.com/Orsi88/moki/wiki/Getting-started) | Install, workspaces, projects, running from the source |
+| [Using Moki](https://github.com/Orsi88/moki/wiki/Using-Moki) | Inside a project, opening the AI tool, settings, tags, coming back later, where things live |
+| [QA skills and agents](https://github.com/Orsi88/moki/wiki/QA-skills-and-agents) | The activities, their status, your own skills |
+| [Agents and operations](https://github.com/Orsi88/moki/wiki/Agents-and-operations) | Agents, contracts and multi-agent operations |
+| [MCP servers](https://github.com/Orsi88/moki/wiki/MCP-servers) | The tools the AI gets, per project |
+| [Moki in the IDE](https://github.com/Orsi88/moki/wiki/Moki-in-the-IDE) | The VS Code extension: install, configure, every way to use it |
+| [Troubleshooting](https://github.com/Orsi88/moki/wiki/Troubleshooting) | Common problems and what to do |
 
-Notes on a project are Markdown files under `notes/` and open in their own window. Loose notes on the start screen stay in the app until you send one to a project.
-
-## Projects
-
-A project is one body of work. Its id is short and lowercase (`billing-portal`), and its folder is `workspace/projects/<id>/` — or `<workspace folder>/projects/<id>/` in another workspace.
-
-A quality project looks like this. A blank project has the same skeleton and gains `context/` only after you approve `plan.json`.
-
-```text
-workspace/projects/billing-portal/
-├── project.json          # name, language, linked folder, who may see data
-├── context/              # confirmed knowledge only
-├── proposed-updates.md   # things the AI noticed, waiting for you
-├── plan.json             # blank projects: the plan, until you approve it
-├── tags.json             # tags of single files
-├── activity-log.md
-├── inbox/                # files you hand to the AI
-├── notes/
-└── runs/<run-id>/        # one folder per activity
-    ├── state.json        # current step, so you can stop and resume
-    ├── inputs/  outputs/  evidence/  logs/
-```
-
-During an activity the AI may notice something that looks like a general rule. It writes that to `proposed-updates.md` and asks you before it becomes context. Confirmed text is the only text it may treat as known.
-
-Deliverables are in **English** unless you set `"deliverableLanguage": "pt-BR"` in `project.json`, or ask for another language in the activity. The conversation follows the language you write in. Quoted messages stay in their original language.
-
-## Tags
-
-Tags connect projects of the same workspace. Give a project or a file a tag (under the project name, or in the bar above an open file); type a new name to create one.
-
-A project with a tag can use, in its activities:
-
-- the **confirmed context** (`context/`) of every other project with that tag — not their inbox, runs or evidence;
-- every **file** tagged with it, in any project.
-
-When you open an activity, a *Which context should the AI consider?* step lists those files, all checked. Uncheck what this activity should not use; files of the project itself can be left out there too. The request then lists exactly the shared files the AI may read. It reads them only, writes nothing in the other projects, says which project each piece came from, and proposes new knowledge in `proposed-updates.md` instead of treating it as confirmed.
-
-The tag catalog is `tags.json` in the workspace folder; a project's tags are in its `project.json`.
-
-## Sharing a project
-
-To share context with a team, put **that project folder** in its own private Git repository. It already ignores `runs/`, `inbox/` and `temporary/`. Project data does not belong in this public repository.
-
-## Skills and agents
-
-A **skill** is the instructions for one activity: steps, rules, output and where to stop for your approval. The AI reads them. An **agent** is a role that uses one or more skills.
-
-The activities that ship with Moki:
-
-| Activity | What you get | Status |
-|---|---|---|
-| [Review user stories](skills/requirements-review/SKILL.md) | Ambiguities, gaps, one question at a time, a review matrix (Excel) and a final definitions report (PDF). | ready |
-| [Design tests](skills/test-design/SKILL.md) | Scenario map, then — after your OK — manual test cases in Excel. | ready |
-| [Failure pre-analysis](skills/failure-analysis/SKILL.md) | A short note for developers, from your description and the log. | ready |
-| [Build test evidence](skills/qa-orchestrator/references/workflows/test-evidence.md) | The work item and the Jam recordings, then a spreadsheet and a Word document with the prints, in your own models when you have them. | ready |
-| [Project context](skills/project-context/SKILL.md) | Onboarding, updates, and the plan for a blank project. | ready |
-| [Automation](skills/automation/SKILL.md) | Build, implement or evolve an automation project. | not available yet |
-| [Documentation](skills/documentation/SKILL.md), [smoke test](skills/smoke-test/SKILL.md) | Planned. The AI will say so and stop. | not available yet |
-
-**Ready** means usable, still being checked across AI tools. Ask in plain language ("review this story", "map the tests", "here is the log"). The built-in ones identify the project, record a run, and stop when they need a decision. "ok", "approved" or "go ahead" accepts the step in front of you. They do not invent requirements, messages or results: a gap becomes a pending item.
-
-Chains such as "review this, and once I approve it, map the tests" go through the orchestrator, which shows the plan and waits at each gate. The definitions are in [skills/qa-orchestrator/references/workflows/](skills/qa-orchestrator/references/workflows/).
-
-Skills you add live with the project (`<linked folder>/.claude/skills/` or `workspace/projects/<id>/skills/`) or for every project (`~/.claude/skills/` and `~/.agents/skills/`). Agents you create follow the same split; a copy of a built-in agent stays in `workspace/library/agents/`. The request names them. Moki does not run a skill by itself. More on agents: [docs/agents.md](docs/agents.md).
-
-## Come back later
-
-Close the session whenever you want. Each activity writes `state.json` as it goes. Ask the AI to continue that run — in the same tool or another — and it reads the file, summarizes where you stopped, and goes on from there. The tools do not share a memory. The files are the memory. In a chat tool, upload `state.json` and the relevant context again.
-
-## Where things live
-
-| What | Where |
-|---|---|
-| The app's library and your projects, after the installer | `Documents/Moki` |
-| Other workspaces | `workspaces/<name>/` in the Moki folder, or the folder you chose; the list is `workspaces/workspaces.json` |
-| One project | `workspace/projects/<id>/` (or `projects/<id>/` in another workspace) |
-| Confirmed knowledge | `.../context/` |
-| One activity | `.../runs/<run-id>/` |
-| Skills and agents for this project | `workspace/projects/<id>/skills` and `agents`, or `<linked folder>/.claude/` |
-| Skills and agents for every project | `~/.claude/skills`, `~/.agents/skills`, `~/.claude/agents` |
-| Copies of built-in agents | `workspace/library/agents/` |
-| Document style | `workspace/document-style.json`, or the same file inside one project |
-| Tags | `workspace/tags.json` (catalog), `project.json` → `tags`, and `tags.json` inside a project (its files) |
+The wiki is published from [docs/](docs/), where the documentation is edited.
 
 ## Privacy
 
-Projects stay on your computer. `workspace/` and `workspaces/` are not part of this Git repository. Projects are separate folders; the AI reads the active one, plus only the shared files of other projects that the request lists because of tags you set. Workspaces never share anything. Passwords and tokens do not belong in any file — refer to an environment variable by name. Sending documents to an online AI is your decision and that provider's policy; record the team's rule in `project.json` → `externalDataSharingAllowed`.
+Projects stay on your computer and are never part of this repository. The AI reads the active project, plus only the shared files the request lists because of tags you set. Passwords and tokens do not belong in any file: refer to an environment variable by name. Details: [Privacy and isolation](https://github.com/Orsi88/moki/wiki/Privacy-and-isolation).
 
-Details: [docs/privacy-and-isolation.md](docs/privacy-and-isolation.md).
-
-## From the source
-
-Use this to run Moki from a checkout, on macOS or Linux, or to change the app. Windows users who installed the `.exe` can skip it.
-
-You need Git and Node.js 22.18 or newer.
+## Contributing
 
 ```bash
 git clone https://github.com/Orsi88/moki.git
@@ -183,43 +75,7 @@ npm run setup
 npm run qa
 ```
 
-`npm run setup` installs the tools, builds the app, creates `workspace/` and turns on the check that blocks commits of project data or secrets. Run it again after `git pull`.
-
-| Command | What it does |
-|---|---|
-| `npm run qa` | Open the app. `npm link` once, and `qa` works from any folder. |
-| `qa --terminal` | The same preparation in a terminal menu, if you prefer that to the window. |
-| `npm run new-project -- <id> "<Name>" [--blank]` | Create a project folder. `--blank` leaves the QA context files out. |
-| `npm run dist:win` / `dist:mac` / `dist:linux` | Build an installer on that system. Output in `release/`. |
-| `npm run vscode:package` | Build the VS Code extension (`release/moki-<version>.vsix`). To try it first: `npm run vscode:build`, then `code --extensionDevelopmentPath="$PWD/ide/vscode"`. See [ide/vscode/README.md](ide/vscode/README.md). |
-| `npm run check` and `npm test` | Validate the repository and run its tests. |
-
-`qa --terminal` is in English and still asks *Which project (system under test)?*. Any project id works.
-
-### Changing Moki
-
-Edit `skills/` and `core/` for behaviour, `app/` and `desktop/` for the window. Then:
-
-```bash
-npm run build
-npm run typecheck
-npm run check
-npm test
-```
-
-Do not edit `.agents/skills/` or `.claude/skills/` by hand; `npm run build` rewrites them. Keep examples synthetic. When this guide changes, update `README.md` and `README.pt-BR.md` together.
-
-How the window is built: [docs/desktop-app.md](docs/desktop-app.md). How a skill is shaped: [docs/skill-standard.md](docs/skill-standard.md).
-
-To understand or plan a change, ask the `moki-consultant` agent: it only reads, and answers with a proposal that shows the code and its impact. To implement it after your approval, use `moki-executor`, which also runs the checks. Both follow the `moki-architecture` and `moki-change` skills ([docs/agents.md](docs/agents.md#framework-agents)).
-
-| Path | What it is |
-|---|---|
-| `AGENTS.md` | What an AI tool reads when this folder is opened: rules and the skill catalog |
-| `skills/`, `agents/`, `core/` | Skills, built-in agents, shared policies — edit here |
-| `app/`, `desktop/` | The window |
-| `ide/vscode/` | The VS Code extension: the same window inside VS Code |
-| `workspace/`, `workspaces/` | Local workspaces and projects — never versioned |
+Before a commit: `npm run build`, `npm run typecheck`, `npm run check` and `npm test`. Documentation changes go in `docs/` (the wiki is generated from it); keep `README.md` and `README.pt-BR.md` in step. More: [Contributing](https://github.com/Orsi88/moki/wiki/Contributing).
 
 ## License
 

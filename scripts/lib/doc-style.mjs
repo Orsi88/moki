@@ -1,16 +1,21 @@
 // Document style: how the PDF, Word and Excel files that activities and agents
 // generate look (font, colours, background, header, footer, logo, watermark).
-// Set in the desktop app (Settings › Documents) for all projects and, optionally,
-// per project. The scripts that write deliverables read it, so every AI tool gets
-// the same result. No dependencies.
+// Templates (Settings > Templates): a list of named styles of the workspace, each with
+// tags saying which projects it applies to (scripts/lib/tags.mjs: none = every project).
+// A project uses the template chosen as its default (project.json "template") when it
+// still applies, else the one without tags, else the first that applies. The scripts that
+// write deliverables read it, so every AI tool gets the same result. No dependencies.
 //
-// Files:  <root>/workspace/document-style.json                (all projects)
-//         <workspace>/projects/<id>/document-style.json  (one project; wins)
+// Files:  <workspace>/templates/<id>.json  {name, tags, style}
+//         Before templates: <workspace>/document-style.json (all projects) and
+//         <workspace>/projects/<id>/document-style.json (one project); the first listing
+//         turns them into templates ("Default", and one per project, its default).
 // Header and footer texts can use {project}, {title}, {date}, {page} and {pages}.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { ROOT, workspaceDir } from './repo.mjs';
+import { appliesTo, cleanTags, projectTag } from './tags.mjs';
 
 export const STYLE_FILE = 'document-style.json';
 
@@ -74,12 +79,110 @@ export function projectOf(path, root = ROOT) {
   return id && /^[\w.-]+$/.test(id) ? id : null;
 }
 
-// The style for a file: --style file > its project's style > the style for all projects > defaults.
-// Also the values for {project} and {title}.
+// ---------------------------------------------------------------- templates
+
+const templatesDir = (root) => join(workspaceDir(root), 'templates');
+const projectsDir = (root) => join(workspaceDir(root), 'projects');
+const projectFile = (project, root) => join(projectsDir(root), project, 'project.json');
+const writeJson = (file, data) => writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
+const slug = (name) => String(name).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+const projectIds = (root) => (existsSync(projectsDir(root)) ? readdirSync(projectsDir(root)).filter((d) => existsSync(projectFile(d, root))).sort() : []);
+
+function readTemplates(root) {
+  const dir = templatesDir(root);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.json')).flatMap((f) => {
+    const t = readJson(join(dir, f));
+    if (!t || typeof t.name !== 'string') return [];
+    return [{ id: f.slice(0, -5), name: t.name.slice(0, 80), tags: cleanTags(t.tags), style: normalizeStyle(t.style) }];
+  }).sort((a, b) => Number(a.tags.length > 0) - Number(b.tags.length > 0) || a.name.localeCompare(b.name));
+}
+
+// The styles saved before templates existed become templates, once.
+function migrate(root) {
+  const dir = templatesDir(root);
+  if (existsSync(dir)) return;
+  mkdirSync(dir, { recursive: true });
+  const global = normalizeStyle(readJson(join(workspaceDir(root), STYLE_FILE)));
+  writeJson(join(dir, 'default.json'), { name: 'Default', tags: [], style: global });
+  const taken = new Set(['default']);
+  for (const project of projectIds(root)) {
+    const own = readJson(join(projectsDir(root), project, STYLE_FILE));
+    if (!own) continue;
+    const data = readJson(projectFile(project, root)) ?? {};
+    const base = slug(data.name ?? project) || project;
+    let id = base;
+    for (let i = 2; taken.has(id); i++) id = `${base}-${i}`;
+    taken.add(id);
+    writeJson(join(dir, `${id}.json`), { name: String(data.name ?? project), tags: [projectTag(project)], style: normalizeStyle(own, global) });
+    writeJson(projectFile(project, root), { ...data, template: id });
+  }
+}
+
+export function listTemplates(root = ROOT) {
+  migrate(root);
+  return readTemplates(root);
+}
+
+export function saveTemplate(raw, root = ROOT) {
+  migrate(root);
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const name = String(r.name ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
+  if (!name) throw new Error('Give the template a name.');
+  const list = readTemplates(root);
+  let id = typeof r.id === 'string' && list.some((t) => t.id === r.id) ? r.id : '';
+  if (!id) {
+    const base = slug(name) || 'template';
+    id = base;
+    for (let i = 2; list.some((t) => t.id === id); i++) id = `${base}-${i}`;
+  }
+  const template = { id, name, tags: cleanTags(r.tags), style: normalizeStyle(r.style) };
+  writeJson(join(templatesDir(root), `${id}.json`), { name, tags: template.tags, style: template.style });
+  return template;
+}
+
+// The last template stays: without one there is nothing to edit (deliverables would still use the defaults).
+export function removeTemplate(id, root = ROOT) {
+  const list = listTemplates(root);
+  if (!list.some((t) => t.id === id)) throw new Error('Unknown template.');
+  if (list.length === 1) throw new Error('Keep at least one template.');
+  rmSync(join(templatesDir(root), `${id}.json`));
+  for (const project of projectIds(root)) {
+    const data = readJson(projectFile(project, root));
+    if (data?.template === id) { delete data.template; writeJson(projectFile(project, root), data); }
+  }
+}
+
+// The template a project uses as its default (null: the automatic choice).
+export function setProjectTemplate(project, id, root = ROOT) {
+  const data = readJson(projectFile(project, root));
+  if (!data) throw new Error('Unknown project.');
+  if (id) {
+    const t = listTemplates(root).find((x) => x.id === id);
+    if (!t) throw new Error('Unknown template.');
+    if (!appliesTo(t.tags, project, root)) throw new Error("This template does not apply to the project: give it the project's tag first.");
+    data.template = id;
+  } else delete data.template;
+  writeJson(projectFile(project, root), data);
+}
+
+// The template a project uses: its default when it still applies, else the one without tags, else the first that applies.
+export function templateFor(project, root = ROOT) {
+  const fits = readTemplates(root).filter((t) => appliesTo(t.tags, project, root));
+  const chosen = readJson(projectFile(project, root))?.template;
+  return fits.find((t) => t.id === chosen) ?? fits.find((t) => !t.tags.length) ?? fits[0] ?? null;
+}
+
+// The style for a file: --style file > its project's template > the template without tags > defaults
+// (before templates existed: its project's style > the style for all projects). Also the values for {project} and {title}.
 export function styleFor(outPath, { root = ROOT, styleFile, title = '' } = {}) {
   const project = outPath ? projectOf(outPath, root) : null;
   const global = normalizeStyle(readJson(join(workspaceDir(root), STYLE_FILE)));
-  let style = project ? normalizeStyle(readJson(join(workspaceDir(root), 'projects', project, STYLE_FILE)), global) : global;
+  let style;
+  if (existsSync(templatesDir(root))) {
+    const general = readTemplates(root).find((t) => !t.tags.length)?.style ?? normalizeStyle({});
+    style = project ? templateFor(project, root)?.style ?? general : general;
+  } else style = project ? normalizeStyle(readJson(join(workspaceDir(root), 'projects', project, STYLE_FILE)), global) : global;
   if (styleFile) style = normalizeStyle(readJson(resolve(styleFile)), style);
   const name = project ? String(readJson(join(workspaceDir(root), 'projects', project, 'project.json'))?.name ?? project) : '';
   return { style, vars: { project: name, title, date: new Date().toLocaleDateString('pt-BR') } };

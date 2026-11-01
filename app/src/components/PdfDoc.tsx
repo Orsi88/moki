@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { api, type PdfChange, type PdfComment, type PdfMark } from '../api';
 import { t } from '../i18n';
-import { IconPlus, IconTrash } from './Icons';
+import { stackCards } from '../pdf-quads';
+import { IconChat, IconHighlight, IconPlus, IconSearch, IconTrash, IconX } from './Icons';
+import { recall, remember } from '../prefs';
 import { PdfPages } from './PdfPages';
 
 const COLORS = ['yellow', 'green', 'blue', 'pink', 'orange', 'red', 'purple'];
+const SWATCH: Record<string, string> = { yellow: '#f5d90a', green: '#46c46a', blue: '#4a8ff0', pink: '#f06ab0', orange: '#f59b2a', red: '#e5484d', purple: '#9b6cf0' };
 const colorName = (c: string) => ({ yellow: t('Yellow'), green: t('Green'), blue: t('Blue'), pink: t('Pink'), orange: t('Orange'), red: t('Red'), purple: t('Purple') })[c] ?? c;
+const CSS_UNITS = 96 / 72; // as PdfPages draws the pages
+const CARD_GAP = 10;
 
 // The panel mode stays when a change opens the -edited copy in a new tab.
 let lastTab: 'comment' | 'edit' = 'comment';
@@ -18,25 +24,45 @@ interface Props {
   onSaved: (path: string) => void; // the file the change was saved to
 }
 
-// A PDF with its comments and page edits: pages drawn by pdf.js (select text, then "Highlight") or
-// Chromium's viewer, and a panel with two modes: highlight and comment (by text; reply, edit, delete),
-// and edit (a bar under each page: rotate, move, insert a blank page, delete; title and author).
-// PdfCraft writes every change.
+interface Placed { id: string; ax: number; ay: number; edge: number; top: number; color: string } // edge: the right side of its page
+
+// A PDF with its comments and page edits. On the left, fixed: the view, zoom, the colour,
+// highlight by search, and the page edits (a bar under each page: rotate, move, insert a blank
+// page, delete; title and author). In the middle the pages drawn by pdf.js: selecting text opens
+// a small box right there to highlight and comment. On the right the comments scroll with the
+// pages, each beside what it comments (PdfCraft's rect), joined to it by a thin line; reply,
+// edit and delete there. PdfCraft writes every change.
 export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [view, setView] = useState<'pages' | 'native'>('pages');
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoomState] = useState(1);
+  const zoomed = useRef(false); // the person chose a zoom: it is no longer fitted to the window
+  const setZoom = (fn: (z: number) => number) => { zoomed.current = true; setZoomState(fn); };
+  const scroller = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [mac, setMac] = useState(false);
   const [comments, setComments] = useState<PdfComment[]>([]);
-  const [marks, setMarks] = useState<PdfMark[] | null>(null);
-  const [form, setForm] = useState({ page: 1, find: '', all: false, contents: '', color: 'yellow' });
+  const [color, setColor] = useState('yellow');
+  // The search field: every match in the document (page, and which match of that page), the one shown.
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<{ page: number; nth: number }[] | null>(null);
+  const [hit, setHit] = useState(0);
+  const pdf = useRef<PDFDocumentProxy | null>(null);
+  const onDoc = useCallback((d: PDFDocumentProxy | null) => { pdf.current = d; setHits(null); }, []);
+  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; mode: 'reply' | 'edit'; text: string } | null>(null);
+  const [active, setActive] = useState('');
+  // The comment column, opened or closed from the bar (remembered); closed, the pages take the room and marks on their edge show where comments are.
+  const [railOff, setRailOffState] = useState(() => recall('qa-pdf-comments') === 'closed');
+  const setRailOff = (off: boolean) => { setRailOffState(off); remember('qa-pdf-comments', off ? 'closed' : 'open'); };
   const [tab, setTabState] = useState(lastTab);
   const setTab = (next: 'comment' | 'edit') => { lastTab = next; setTabState(next); };
   const [info, setInfo] = useState({ pages: 0, title: '', author: '' });
   const [props, setProps] = useState({ title: '', author: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [placed, setPlaced] = useState<{ items: Placed[]; rail: number; railTop: number; height: number }>({ items: [], rail: 0, railTop: 0, height: 0 });
+  const stage = useRef<HTMLDivElement>(null);
+  const rail = useRef<HTMLDivElement>(null);
   const toNative = useCallback(() => setView('native'), []);
   const onLoad = useCallback((i: { pages: number; title: string; author: string }) => { setInfo(i); setProps({ title: i.title, author: i.author }); }, []);
   // The service saves to a "-edited" copy: always for files from the inbox, and for page edits of any file.
@@ -49,6 +75,68 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     api.pdfComments(project, path).then(setComments).catch((e: Error) => setError(e.message));
   }, [available, project, path, data]);
 
+  // Where each card goes: beside its place on its page, pushed down under the card above when they would overlap.
+  const measure = useCallback(() => {
+    const box = stage.current;
+    const column = rail.current; // null while the column is closed: only the marks on the pages' edge
+    if (!box) return;
+    const origin = box.getBoundingClientRect();
+    const px = zoom * CSS_UNITS;
+    const pages = new Map([...box.querySelectorAll<HTMLElement>('.pdf-page')].map((el) => [Number(el.dataset.page), el.getBoundingClientRect()]));
+    const heights = new Map([...(column?.querySelectorAll<HTMLElement>('[data-card]') ?? [])].map((el) => [el.dataset.card ?? '', el.offsetHeight]));
+    const wanted = comments.flatMap((c) => {
+      const page = pages.get(c.page);
+      if (!page) return [];
+      const r = c.rect ?? [0, 0, page.width / px, 0];
+      return [{ id: c.id, ax: page.left - origin.left + r[2] * px, ay: page.top - origin.top + ((r[1] + r[3]) / 2) * px, edge: page.right - origin.left, color: SWATCH[c.color ?? ''] ?? c.color ?? 'var(--accent)' }];
+    });
+    const tops = stackCards(wanted.map((w) => ({ id: w.id, top: w.ay - 18, height: heights.get(w.id) ?? 90 })), CARD_GAP);
+    // The height of the pages, not of the stage: the column and the lines take it, so measuring the stage would grow it each time.
+    const pagesHeight = box.querySelector<HTMLElement>('.pdf-pages')?.offsetHeight ?? 0;
+    const bottom = Math.max(0, ...wanted.map((w) => tops[w.id] + (heights.get(w.id) ?? 90)));
+    // The cards sit in the column, which starts below the stage's top (its margin): their tops are in its coordinates.
+    const railBox = column?.getBoundingClientRect() ?? origin;
+    const railTop = railBox.top - origin.top;
+    const next = { items: wanted.map((w) => ({ ...w, top: Math.max(0, tops[w.id] - railTop) })), rail: railBox.left - origin.left, railTop, height: Math.max(pagesHeight, bottom + 16) };
+    setPlaced((cur) => (JSON.stringify(cur) === JSON.stringify(next) ? cur : next));
+  }, [comments, zoom]);
+  useLayoutEffect(() => { measure(); });
+  // The comments take the place of the project panel on the right (Workspace listens): one open at a time.
+  const sideOn = Boolean(available) && tab === 'comment' && !railOff && view === 'pages';
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('moki:doc-side', { detail: sideOn }));
+    return () => { window.dispatchEvent(new CustomEvent('moki:doc-side', { detail: false })); };
+  }, [sideOn]);
+  useEffect(() => {
+    const close = () => setRailOff(true);
+    window.addEventListener('moki:doc-side-close', close);
+    return () => window.removeEventListener('moki:doc-side-close', close);
+  }, []);
+  // Until the person zooms, the pages fit the room left beside the comment column (never above 100%).
+  useEffect(() => {
+    const box = scroller.current;
+    if (!box || view !== 'pages') return undefined;
+    const fit = () => {
+      const page = box.querySelector<HTMLElement>('.pdf-page');
+      const widthPt = Number(page?.dataset.widthPt) || 612;
+      if (zoomed.current) return;
+      const room = box.clientWidth - 32 - (available && tab === 'comment' && !railOff ? 356 : 0);
+      const next = Math.max(0.5, Math.min(1, Math.floor((room / (widthPt * CSS_UNITS)) * 20) / 20));
+      setZoomState((z) => (z === next ? z : next));
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, [view, available, tab, info.pages, railOff]);
+  useEffect(() => {
+    const box = stage.current;
+    if (!box) return undefined;
+    const watch = new ResizeObserver(() => measure());
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, [measure, view]);
+
   const apply = (change: PdfChange): Promise<boolean> => {
     setBusy(true);
     setError('');
@@ -58,14 +146,82 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
       .finally(() => setBusy(false));
   };
 
-  const highlight = () => {
-    const base = { contents: form.contents.trim() || undefined, color: form.color };
-    void apply(marks ? { op: 'highlight', marks, ...base } : { op: 'highlight', page: form.page, find: form.find, all: form.all, ...base }).then((ok) => {
+  // A selection on the pages opens the box beside it.
+  const onSelection = (marks: PdfMark[] | null) => {
+    const box = stage.current;
+    const sel = window.getSelection();
+    if (!marks || !box || !sel?.rangeCount) { setComposer((c) => (c && !c.text ? null : c)); return; }
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    const origin = box.getBoundingClientRect();
+    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '' });
+  };
+  const highlightSelection = () => {
+    if (!composer) return;
+    void apply({ op: 'highlight', marks: composer.marks, contents: composer.text.trim() || undefined, color }).then((ok) => {
       if (!ok) return;
-      setForm((f) => ({ ...f, find: '', contents: '' }));
-      setMarks(null);
+      setComposer(null);
       window.getSelection()?.removeAllRanges();
     });
+  };
+  // Every match of the field's text in the document, from each page's text (case ignored).
+  const runSearch = async (text: string): Promise<{ page: number; nth: number }[]> => {
+    const doc = pdf.current;
+    const want = text.trim().toLowerCase();
+    if (!doc || !want) return [];
+    const out: { page: number; nth: number }[] = [];
+    for (let n = 1; n <= doc.numPages; n++) {
+      const content = await (await doc.getPage(n)).getTextContent();
+      const hay = content.items.map((i) => ('str' in i ? i.str : '')).join('').toLowerCase();
+      let nth = 0;
+      for (let at = hay.indexOf(want); at >= 0; at = hay.indexOf(want, at + want.length)) out.push({ page: n, nth: nth++ });
+    }
+    return out;
+  };
+  // A match shown: its page scrolled to, the match selected there (so the box to highlight and comment opens).
+  const show = (list: { page: number; nth: number }[], i: number) => {
+    const m = list[i];
+    const box = stage.current;
+    if (!m || !box) return;
+    setHit(i);
+    box.querySelector(`.pdf-page[data-page="${m.page}"]`)?.scrollIntoView({ block: 'center' });
+    const want = query.trim().toLowerCase();
+    let tries = 0;
+    const pick = () => {
+      const spans = [...box.querySelectorAll<HTMLElement>(`.pdf-page[data-page="${m.page}"] .textLayer span`)].filter((s) => s.firstChild instanceof Text);
+      if (!spans.length) { if (++tries < 40) setTimeout(pick, 50); return; } // the page draws its text once it is near the screen
+      const runs = spans.map((s) => ({ node: s.firstChild as Text, text: (s.firstChild as Text).data }));
+      const hay = runs.map((r) => r.text).join('').toLowerCase();
+      let at = -1;
+      for (let k = 0; k <= m.nth; k++) { at = hay.indexOf(want, at + 1); if (at < 0) return; }
+      const place = (offset: number): [Text, number] => {
+        let left = offset;
+        for (const r of runs) { if (left <= r.text.length) return [r.node, left]; left -= r.text.length; }
+        const last = runs[runs.length - 1];
+        return [last.node, last.text.length];
+      };
+      const range = document.createRange();
+      range.setStart(...place(at));
+      range.setEnd(...place(at + want.length));
+      const sel = window.getSelection();
+      sel?.removeAllRanges(); sel?.addRange(range);
+      (range.startContainer.parentElement)?.scrollIntoView({ block: 'center' });
+      box.querySelector('.pdf-pages')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    };
+    pick();
+  };
+  const find = async (step: 1 | -1 = 1) => {
+    if (hits && hits.length) { show(hits, (hit + step + hits.length) % hits.length); return; }
+    const list = await runSearch(query);
+    setHits(list);
+    if (list.length) show(list, 0);
+  };
+  // Every match highlighted at once, page by page, in the chosen colour.
+  const highlightAll = async () => {
+    const pages = [...new Set((hits ?? []).map((m) => m.page))];
+    for (const page of pages) {
+      if (!(await apply({ op: 'highlight', page, find: query.trim(), all: true, color }))) return;
+    }
+    setComposer(null);
   };
 
   const finishEdit = () => {
@@ -73,7 +229,6 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     const change: PdfChange = editing.mode === 'reply' ? { op: 'reply', id: editing.id, text: editing.text } : { op: 'edit', id: editing.id, contents: editing.text };
     void apply(change).then((ok) => { if (ok) setEditing(null); });
   };
-
   const remove = (c: PdfComment) => {
     if (window.confirm(t('Delete this comment?'))) void apply({ op: 'delete', id: c.id });
   };
@@ -94,18 +249,27 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
         onClick={() => { if (window.confirm(t('Delete page {n}?', { n }))) edit({ op: 'delete-pages', pages: [n] }); }}><IconTrash size={15} /></button>
     </div>
   );
-  const canHighlight = !off && (marks ? true : form.find.trim().length > 0 && form.page >= 1);
+
+  const swatches = (
+    <div className="pdf-colors" role="radiogroup" aria-label={t('Color')}>
+      {COLORS.map((c) => (
+        <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)}
+          className={`pdf-color${color === c ? ' on' : ''}`} style={{ background: SWATCH[c] }} onClick={() => setColor(c)} />
+      ))}
+    </div>
+  );
 
   const item = (c: PdfComment, reply = false) => (
-    <li key={c.id} className={reply ? 'pdf-reply' : 'pdf-comment'}>
+    <div className={reply ? 'pdf-reply' : 'pdf-comment-body'}>
       <div className="pdf-comment-head">
-        {!reply && <span className="pdf-swatch" style={{ background: c.color ?? 'transparent' }} />}
+        {!reply && <span className="pdf-swatch" style={{ background: SWATCH[c.color ?? ''] ?? c.color ?? 'transparent' }} />}
         <strong>{c.author || t('Unknown author')}</strong>
-        {!reply && <span className="muted small">{t('page {n}', { n: c.page })}{c.type ? ` · ${c.type}` : ''}</span>}
+        {!reply && <span className="muted small">{t('page {n}', { n: c.page })}</span>}
       </div>
       {editing?.id === c.id ? (
         <div className="pdf-edit">
-          <textarea value={editing.text} autoFocus rows={3} onFocus={(e) => { const end = e.currentTarget.value.length; e.currentTarget.setSelectionRange(end, end); }} onChange={(e) => setEditing({ ...editing, text: e.target.value })} />
+          <textarea value={editing.text} autoFocus rows={3} onFocus={(e) => { const end = e.currentTarget.value.length; e.currentTarget.setSelectionRange(end, end); }} onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+            placeholder={editing.mode === 'reply' ? t('Your reply') : t('Comment')} />
           <div className="pdf-actions">
             <button type="button" className="btn btn-sm" disabled={off || (editing.mode === 'reply' && !editing.text.trim())} onClick={finishEdit}>{t('Save')}</button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(null)}>{t('Cancel')}</button>
@@ -113,7 +277,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
         </div>
       ) : (
         <>
-          {c.contents && <p className="pdf-comment-text">{c.contents}</p>}
+          {c.contents ? <p className="pdf-comment-text">{c.contents}</p> : !reply && <p className="muted small">{t('Highlight without a comment.')}</p>}
           <div className="pdf-actions">
             {!reply && <button type="button" className="link-btn" disabled={off} onClick={() => setEditing({ id: c.id, mode: 'reply', text: '' })}>{t('Reply')}</button>}
             <button type="button" className="link-btn" disabled={off} onClick={() => setEditing({ id: c.id, mode: 'edit', text: c.contents ?? '' })}>{t('Edit')}</button>
@@ -121,80 +285,140 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
           </div>
         </>
       )}
-      {c.replies.length > 0 && <ul className="pdf-replies">{c.replies.map((r) => item(r, true))}</ul>}
-    </li>
+      {c.replies.length > 0 && <div className="pdf-replies">{c.replies.map((r) => <div key={r.id}>{item(r, true)}</div>)}</div>}
+    </div>
   );
+
+  const where = new Map(placed.items.map((p) => [p.id, p]));
+  const notice = !available ? ''
+    : tab === 'edit' ? (view === 'native' ? t('Switch to Pages to edit pages.') : isCopy ? t('Use the bar under each page to rotate, move, insert or delete it ({n} pages).', { n: info.pages })
+      : t('Page edits cannot be undone, so the file is not changed: they go to a copy ending in -edited.pdf beside it.'))
+      : view === 'native' ? t('Switch to Pages to comment on the text.')
+        : copied ? t('Files in the inbox are not changed: changes go to a copy ending in -edited.pdf beside it.') : '';
+  const showRail = Boolean(available) && tab === 'comment' && !railOff;
 
   return (
     <div className="pdf-doc">
-      <div className="pdf-main">
-        <div className="pdf-toolbar">
-          <div className="view-toggle" role="group" aria-label={t('PDF view')}>
-            <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => setView('pages')}>{t('Pages')}</button>
-            <button type="button" className={view === 'native' ? 'on' : ''} aria-pressed={view === 'native'} onClick={() => setView('native')}>{t('Native viewer')}</button>
-          </div>
-          {view === 'pages' && (
-            <div className="pdf-zoom">
-              <button type="button" className="icon-btn" aria-label={t('Zoom out')} title={t('Zoom out')} disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))}>−</button>
-              <span className="small">{Math.round(zoom * 100)}%</span>
-              <button type="button" className="icon-btn" aria-label={t('Zoom in')} title={t('Zoom in')} disabled={zoom >= 3} onClick={() => setZoom((z) => Math.min(3, Math.round((z + 0.25) * 100) / 100))}>+</button>
-            </div>
-          )}
+      <div className="pdf-bar" role="toolbar" aria-label={t('PDF tools')}>
+        <div className="view-toggle" role="group" aria-label={t('PDF view')}>
+          <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => setView('pages')}>{t('Pages')}</button>
+          <button type="button" className={view === 'native' ? 'on' : ''} aria-pressed={view === 'native'} onClick={() => setView('native')}>{t('Native viewer')}</button>
         </div>
-        {view === 'pages'
-          ? <PdfPages data={data} zoom={zoom} onSelection={setMarks} onError={toNative} onLoad={onLoad} pageTools={tab === 'edit' && available ? pageTools : undefined} />
-          : native}
-      </div>
-
-      <aside className="pdf-panel" aria-label={t('Comments')}>
+        {view === 'pages' && (
+          <div className="pdf-zoom">
+            <button type="button" className="icon-btn" aria-label={t('Zoom out')} title={t('Zoom out')} disabled={zoom <= 0.5} onClick={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.25) * 100) / 100))}>−</button>
+            <span className="small">{Math.round(zoom * 100)}%</span>
+            <button type="button" className="icon-btn" aria-label={t('Zoom in')} title={t('Zoom in')} disabled={zoom >= 3} onClick={() => setZoom((z) => Math.min(3, Math.round((z + 0.25) * 100) / 100))}>+</button>
+          </div>
+        )}
+        <span className="pdf-bar-sep" />
         <div className="view-toggle pdf-tabs" role="group" aria-label={t('PDF panel')}>
           <button type="button" className={tab === 'comment' ? 'on' : ''} aria-pressed={tab === 'comment'} onClick={() => setTab('comment')}>{t('Highlight and comment')}</button>
           <button type="button" className={tab === 'edit' ? 'on' : ''} aria-pressed={tab === 'edit'} onClick={() => setTab('edit')}>{t('Edit PDF')}</button>
         </div>
-        {available === false && <p className="notice-bar">{mac
-          // The macOS DMG and ArtCraft Launcher install only PdfCraft.app; the CLI is a separate zip.
-          ? t('Highlighting and commenting need the PdfCraft command line, which the macOS app does not include: download pdfcraft-cli-<version>-macos-universal.zip from github.com/storytold/pdfcraft/releases and put pdfcraft-cli in /usr/local/bin or /opt/homebrew/bin.')
-          : t('Install PdfCraft (from ArtCraft Launcher) to highlight and comment on PDFs.')}</p>}
-        {available && tab === 'comment' && copied && <p className="muted small">{t('Files in the inbox are not changed: changes go to a copy ending in -edited.pdf beside it.')}</p>}
-        {available && tab === 'edit' && !isCopy && <p className="muted small">{t('Page edits cannot be undone, so the file is not changed: they go to a copy ending in -edited.pdf beside it.')}</p>}
-        {tab === 'edit' && (<>
-          {view === 'native' ? <p className="muted small">{t('Switch to Pages to edit pages.')}</p>
-            : available && <p className="muted small">{t('Use the bar under each page to rotate, move, insert or delete it ({n} pages).', { n: info.pages })}</p>}
-          <h3>{t('Document properties')}</h3>
-          <fieldset disabled={off} className="pdf-form">
-            <label>{t('Title')}<input type="text" maxLength={1000} value={props.title} onChange={(e) => setProps({ ...props, title: e.target.value })} /></label>
-            <label>{t('Author')}<input type="text" maxLength={1000} value={props.author} onChange={(e) => setProps({ ...props, author: e.target.value })} /></label>
-            <button type="button" className="btn" disabled={off || (props.title === info.title && props.author === info.author)}
-              onClick={() => edit({ op: 'set-info', ...props })}>{busy ? t('Saving…') : t('Save')}</button>
-          </fieldset>
-        </>)}
-        {tab === 'comment' && <fieldset disabled={off} className="pdf-form">
-          {marks ? (
-            <p className="small">{t('Selected text on {n} page(s) will be highlighted.', { n: marks.length })}</p>
-          ) : (
-            <>
-              {view === 'pages' && available && <p className="muted small">{t('Select text on the pages, or type it below.')}</p>}
-              <label>{t('Page')}<input type="number" min={1} value={form.page} onChange={(e) => setForm({ ...form, page: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></label>
-              <label>{t('Text to highlight')}<input type="text" maxLength={500} value={form.find} onChange={(e) => setForm({ ...form, find: e.target.value })} /></label>
-              <label className="check"><input type="checkbox" checked={form.all} onChange={(e) => setForm({ ...form, all: e.target.checked })} /> {t('Every match on the page')}</label>
-            </>
-          )}
-          <label>{t('Comment')}<textarea rows={3} maxLength={4000} value={form.contents} onChange={(e) => setForm({ ...form, contents: e.target.value })} /></label>
-          <label>{t('Color')}
-            <select value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })}>
-              {COLORS.map((c) => <option key={c} value={c}>{colorName(c)}</option>)}
-            </select>
-          </label>
-          <button type="button" className="btn" disabled={!canHighlight} onClick={highlight}>{busy ? t('Saving…') : t('Highlight')}</button>
-        </fieldset>}
-        {error && <p className="error small" role="alert">{error}</p>}
         {available && tab === 'comment' && (
           <>
-            <h3>{t('Comments')} ({comments.length})</h3>
-            {comments.length ? <ul className="pdf-comments">{comments.map((c) => item(c))}</ul> : <p className="muted small">{t('No comments yet.')}</p>}
+            {swatches}
+            {view === 'pages' && (
+              <div className="pdf-find" role="search">
+                <span className={`pdf-find-field${hits ? ' counted' : ''}`}>
+                  <input type="search" value={query} maxLength={500} placeholder={t('Search in the PDF')} aria-label={t('Search in the PDF')}
+                    onChange={(e) => { setQuery(e.target.value); setHits(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void find(e.shiftKey ? -1 : 1); } }} />
+                  {hits && <span className="muted small pdf-find-count">{hits.length ? t('{n} of {total}', { n: hit + 1, total: hits.length }) : t('Not found')}</span>}
+                  <button type="button" className="pdf-find-go" onClick={() => { void find(1); }} title={t('Search (Enter)')} aria-label={t('Search')}><IconSearch size={14} /></button>
+                </span>
+                {hits && hits.length > 1 && <>
+                  <button type="button" className="icon-btn" title={t('Previous (Shift+Enter)')} aria-label={t('Previous')} onClick={() => { void find(-1); }}>↑</button>
+                  <button type="button" className="icon-btn" title={t('Next (Enter)')} aria-label={t('Next')} onClick={() => { void find(1); }}>↓</button>
+                </>}
+                {hits && hits.length > 0 && <button type="button" className="icon-btn" disabled={off} title={t('Highlight all')} aria-label={t('Highlight all')} onClick={() => { void highlightAll(); }}><IconHighlight size={16} /></button>}
+              </div>
+            )}
+            {view === 'pages' && (
+              <button type="button" className={`btn btn-ghost btn-sm pdf-rail-toggle${railOff ? '' : ' on'}`} aria-pressed={!railOff}
+                title={railOff ? t('Show the comments beside the pages') : t('Hide the comments: the pages get the room')} aria-label={`${t('Comments')} (${comments.length})`} onClick={() => setRailOff(!railOff)}>
+                <IconChat size={14} /><span className="pdf-rail-count">{comments.length}</span>
+              </button>
+            )}
           </>
         )}
-      </aside>
+        {available && tab === 'edit' && (
+          <details className="pdf-drop">
+            <summary className="btn btn-ghost btn-sm">{t('Document properties')}</summary>
+            <fieldset disabled={off} className="pdf-form pdf-drop-body">
+              <label>{t('Title')}<input type="text" maxLength={1000} value={props.title} onChange={(e) => setProps({ ...props, title: e.target.value })} /></label>
+              <label>{t('Author')}<input type="text" maxLength={1000} value={props.author} onChange={(e) => setProps({ ...props, author: e.target.value })} /></label>
+              <button type="button" className="btn btn-sm" disabled={off || (props.title === info.title && props.author === info.author)}
+                onClick={() => edit({ op: 'set-info', ...props })}>{busy ? t('Saving…') : t('Save')}</button>
+            </fieldset>
+          </details>
+        )}
+      </div>
+      {/* One thin line under the bar: what this mode needs to know. */}
+      {(available === false || notice || error) && (
+        <div className={`pdf-note${error ? ' error' : ''}`} role={error ? 'alert' : 'status'}>
+          {error || (available === false ? (mac
+            // The macOS DMG and ArtCraft Launcher install only PdfCraft.app; the CLI is a separate zip.
+            ? t('Highlighting and commenting need the PdfCraft command line, which the macOS app does not include: download pdfcraft-cli-<version>-macos-universal.zip from github.com/storytold/pdfcraft/releases and put pdfcraft-cli in /usr/local/bin or /opt/homebrew/bin.')
+            : t('Install PdfCraft (from ArtCraft Launcher) to highlight and comment on PDFs.')) : notice)}
+        </div>
+      )}
+      <div className="pdf-body">
+
+      {view === 'pages' ? (
+        <div className="pdf-scroll" ref={scroller}>
+          <div className={`pdf-stage${showRail ? ' with-rail' : ''}`} ref={stage}>
+            <PdfPages data={data} zoom={zoom} onSelection={tab === 'comment' && available ? onSelection : () => {}} onError={toNative} onLoad={onLoad} onDoc={onDoc}
+              pageTools={tab === 'edit' && available ? pageTools : undefined} />
+            {showRail && (
+              <>
+                <svg className="pdf-links" width="100%" height={placed.height} aria-hidden="true">
+                  {placed.items.map((p) => {
+                    const cy = placed.railTop + p.top + 18;
+                    const mid = (p.ax + placed.rail) / 2;
+                    return <path key={p.id} className={active === p.id ? 'on' : ''} stroke={p.color} d={`M${p.ax} ${p.ay} C${mid} ${p.ay}, ${mid} ${cy}, ${placed.rail} ${cy}`} />;
+                  })}
+                </svg>
+                <div className="pdf-rail" ref={rail} style={{ height: Math.max(0, placed.height - 32) }} aria-label={t('Comments')}>
+                  {comments.map((c) => (
+                    <div key={c.id} data-card={c.id} className={`pdf-card${active === c.id ? ' on' : ''}`} style={{ top: where.get(c.id)?.top ?? 0, borderLeftColor: where.get(c.id)?.color }}
+                      onMouseEnter={() => setActive(c.id)} onMouseLeave={() => setActive((a) => (a === c.id ? '' : a))}>
+                      {item(c)}
+                    </div>
+                  ))}
+                  {!comments.length && <p className="muted small pdf-rail-empty">{t('No comments yet.')}</p>}
+                </div>
+              </>
+            )}
+            {available && tab === 'comment' && railOff && placed.items.map((p) => {
+              const c = comments.find((x) => x.id === p.id);
+              return (
+                <button key={p.id} type="button" className="pdf-marker" style={{ left: p.edge + 3, top: p.ay - 9, background: p.color }}
+                  title={c?.contents || t('Highlight without a comment.')} aria-label={t('Open the comment: {text}', { text: c?.contents ?? '' })}
+                  onClick={() => { setRailOff(false); setActive(p.id); }} />
+              );
+            })}
+            {composer && available && tab === 'comment' && (
+              <div className="pdf-composer" style={{ left: composer.x, top: composer.y }} role="dialog" aria-label={t('Highlight and comment')}
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setComposer(null); } }}>
+                <div className="pdf-composer-head">
+                  {swatches}
+                  <button type="button" className="icon-btn" onClick={() => setComposer(null)} aria-label={t('Close')} title={t('Close')}><IconX size={14} /></button>
+                </div>
+                <textarea autoFocus rows={3} maxLength={4000} value={composer.text} placeholder={t('Comment (optional)')}
+                  onChange={(e) => setComposer({ ...composer, text: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); highlightSelection(); } }} />
+                <div className="pdf-actions">
+                  <button type="button" className="btn btn-sm" disabled={off} onClick={highlightSelection}>{busy ? t('Saving…') : composer.text.trim() ? t('Add the comment') : t('Highlight')}</button>
+                  <span className="muted small">{t('Ctrl+Enter')}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : <div className="pdf-native">{native}</div>}
+      </div>
     </div>
   );
 }

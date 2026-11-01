@@ -1,0 +1,34 @@
+{
+  "repo": "Orsi88/moki",
+  "intro": "Moki is a local app for the AI tool you already use: it keeps a project on your computer and opens Claude Code, Cursor, Codex, Gemini or a chat with the request ready. These pages are the full documentation; the [README](https://github.com/Orsi88/moki#readme) is the short introduction.",
+  "introPt": "O Moki é um app local para a ferramenta de IA que você já usa: guarda um projeto no seu computador e abre o Claude Code, o Cursor, o Codex, o Gemini ou um chat com o pedido pronto. Os guias de uso também estão em português.",
+  "sections": [
+    { "title": "Start here", "pages": [
+      { "file": "getting-started.md", "page": "Getting started", "pt": { "file": "pt-BR/getting-started.md", "page": "Primeiros passos" } },
+      { "file": "using-moki.md", "page": "Using Moki", "pt": { "file": "pt-BR/using-moki.md", "page": "Usando o Moki" } }
+    ] },
+    { "title": "QA work", "pages": [
+      { "file": "qa-skills.md", "page": "QA skills and agents", "pt": { "file": "pt-BR/qa-skills.md", "page": "Skills de QA e agentes" } },
+      { "file": "agents.md", "page": "Agents and operations" }
+    ] },
+    { "title": "Tools", "pages": [
+      { "file": "mcp-servers.md", "page": "MCP servers" },
+      { "file": "ide.md", "page": "Moki in the IDE", "pt": { "file": "pt-BR/ide.md", "page": "Moki na IDE" } }
+    ] },
+    { "title": "Help", "pages": [
+      { "file": "troubleshooting.md", "page": "Troubleshooting", "pt": { "file": "pt-BR/troubleshooting.md", "page": "Problemas comuns" } },
+      { "file": "privacy-and-isolation.md", "page": "Privacy and isolation" }
+    ] },
+    { "title": "Reference", "pages": [
+      { "file": "desktop-app.md", "page": "Desktop app" },
+      { "file": "compatibility.md", "page": "Compatibility" },
+      { "file": "compatibility-tests.md", "page": "Compatibility tests" }
+    ] },
+    { "title": "Contributing", "pages": [
+      { "file": "contributing.md", "page": "Contributing" },
+      { "file": "testing.md", "page": "Automated tests" },
+      { "file": "test-catalog.md", "page": "Test catalog" },
+      { "file": "skill-standard.md", "page": "Skill standard" }
+    ] }
+  ]
+}

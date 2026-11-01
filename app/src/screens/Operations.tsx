@@ -1,4 +1,5 @@
-// Settings › Operations: multi-agent operations. Agents are cards on a board,
+// Settings › Operations: multi-agent operations, listed like the other tabs (ListPage);
+// opening one shows its editor. Agents are cards on a board,
 // linked by arrows: an arrow passes the files one agent delivers to the next,
 // right away or after the user's approval, and says which output answers each
 // input of the next agent (the rest is asked when the operation starts). This
@@ -13,14 +14,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { api, type Operation, type OperationAgent, type OperationCheck, type OperationDraft, type OperationLane, type OperationLink, type ToolInfo } from '../api';
 import { t } from '../i18n';
 import { recall, remember } from '../prefs';
-import { AddButton } from '../components/AddButton';
-import { IconTrash, IconX } from '../components/Icons';
+import { IconAgent, IconCollapse, IconExpand, IconLanes, IconTrash, IconX } from '../components/Icons';
+import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from '../components/ListPage';
+import { arrowPath, BOARD_H, BOARD_W, CARD_H, CARD_W, cardHeight, dotOffset, dotsFor, LANE_HEAD } from '../components/opsBoard';
 
-const CARD_W = 210;
-const CARD_H = 92;
-const BOARD_W = 1600;
-const BOARD_H = 720;
-const LANE_HEAD = 40; // the lane names, above the cards
 const BOARD_MIN = 180; // px: the board's height can be dragged between this and what leaves room for the panels below
 const PANELS_MIN = 220; // px: the panels below the board keep at least this
 const LANE_COLORS = ['#f1d27c', '#8fbf7f', '#7fb2e5', '#e8935a', '#c79be0', '#6cc5c0', '#e5675b', '#a8a196'];
@@ -55,6 +52,8 @@ export function Operations({ tools }: Props) {
   const [sel, setSel] = useState<Selection>(null);
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
+  const [find, setFind] = useState(''); // the search bar of the list
+  const [kind, setKind] = useState<'all' | 'ready' | 'warn' | 'err'>('all');
   const [linking, setLinking] = useState<{ from: string; when: string; x: number; y: number } | null>(null);
   const [painting, setPainting] = useState<string | null>(null); // the lane whose colour is being chosen
   const [busy, setBusy] = useState(false);
@@ -66,6 +65,9 @@ export function Operations({ tools }: Props) {
   // The board's height, dragged on the bar below it (remembered); the two panels share the rest, never less than PANELS_MIN.
   const [wanted, setWanted] = useState(() => Math.max(Number(recall('qa-ops-board-h')) || 360, BOARD_MIN));
   const [room, setRoom] = useState(Number.POSITIVE_INFINITY); // the most the board can take in this window
+  // Expanded: the board covers the whole window, its tools float over it as icons, and the
+  // details of what is selected open on the right (CSS .ops-editor.expanded).
+  const [expanded, setExpanded] = useState(false);
   const measure = useCallback(() => {
     const e = editor.current;
     const b = scroller.current;
@@ -85,6 +87,18 @@ export function Operations({ tools }: Props) {
     setWanted(next);
     remember('qa-ops-board-h', String(next));
   };
+  // Escape leaves the expanded view only (caught first, so Settings does not close too).
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.key !== 'Escape' || el?.closest('.ops-palette')) return;
+      e.stopPropagation();
+      if (sel) setSel(null); else setExpanded(false); // first the details, then the expanded view
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [expanded, sel]);
   const startSplit = (e: ReactPointerEvent) => {
     e.preventDefault();
     const start = { y: e.clientY, h: boardH };
@@ -118,14 +132,10 @@ export function Operations({ tools }: Props) {
   const update = (fn: (d: OperationDraft) => OperationDraft) => setDraft((d) => (d ? fn(d) : d));
   const agentOf = (stepId: string) => agents.find((a) => a.key === draft?.steps.find((s) => s.id === stepId)?.agent);
   const stepName = (stepId: string) => agentOf(stepId)?.name ?? stepId;
-  // The dots of a card: one per result of its agent and "otherwise" (when ''), or a single one.
-  const dotsOf = (stepId: string): string[] => { const o = agentOf(stepId)?.outcomes ?? []; return o.length ? [...o, ''] : ['']; };
-  const heightOf = (stepId: string) => Math.max(CARD_H, 26 + dotsOf(stepId).length * 24);
-  const dotY = (stepId: string, when: string) => {
-    const dots = dotsOf(stepId);
-    const i = Math.max(dots.findIndex((w) => w.toLowerCase() === when.toLowerCase()), 0);
-    return Math.round(((i + 1) * heightOf(stepId)) / (dots.length + 1));
-  };
+  const outcomesOf = (stepId: string) => agentOf(stepId)?.outcomes ?? [];
+  const dotsOf = (stepId: string) => dotsFor(outcomesOf(stepId));
+  const heightOf = (stepId: string) => cardHeight(outcomesOf(stepId));
+  const dotY = (stepId: string, when: string) => dotOffset(outcomesOf(stepId), when);
 
   // An arrow, with the outputs that answer the next agent's inputs suggested by name.
   const link = async (from: string, to: string, toAgent?: string, when = '') => {
@@ -258,55 +268,51 @@ export function Operations({ tools }: Props) {
   const aiName = (id: string) => (id ? tools.find((x) => x.id === id)?.label.replace(/ \(.*\)$/, '') ?? id : t('Chosen when it runs'));
   const selectedLink = sel?.kind === 'link' ? draft?.links[sel.i] : undefined;
   const linkIndex = sel?.kind === 'link' ? sel.i : -1;
-  // An arrow from the dot of its result to the middle of the next card; one going back curves under the cards.
   const curve = (l: OperationLink) => {
     const a = pos(l.from);
     const b = pos(l.to);
-    if (!a || !b) return null;
-    const x1 = a.x + CARD_W; const y1 = a.y + dotY(l.from, l.when ?? ''); const x2 = b.x - 2; const y2 = b.y + heightOf(l.to) / 2;
-    const back = x2 < x1 + 30;
-    const bend = Math.max(40, Math.abs(x2 - x1) / 2);
-    const low = Math.max(a.y + heightOf(l.from), b.y + heightOf(l.to)) + 70;
-    const [c1x, c1y, c2x, c2y] = back ? [x1 + 90, low, x2 - 90, low] : [x1 + bend, y1, x2 - bend, y2];
-    const mid = { x: (x1 + 3 * c1x + 3 * c2x + x2) / 8, y: (y1 + 3 * c1y + 3 * c2y + y2) / 8 };
-    return { d: `M${x1} ${y1} C${c1x} ${c1y} ${c2x} ${c2y} ${x2} ${y2}`, mid };
+    return a && b ? arrowPath({ ...a, outcomes: outcomesOf(l.from) }, l.when ?? '', { ...b, outcomes: outcomesOf(l.to) }) : null;
   };
   const otherwise = (stepId: string) => ((agentOf(stepId)?.outcomes ?? []).length ? t('otherwise') : '');
   const selectedStep = sel?.kind === 'step' ? steps.find((s) => s.id === sel.id) : undefined;
+  const stateOf = (op: Operation) => (op.check.errors.length ? 'err' : op.check.warnings.length ? 'warn' : 'ready');
+  const listed = list.filter((op) => (kind === 'all' || stateOf(op) === kind) && matchesQuery(find, op.name, op.description));
+  const back = () => { if (leave()) { setDraft(null); setSaved(''); setError(''); setNotice(''); setExpanded(false); } };
 
   return (
-    <div className="library operations">
-      <aside className="home-list">
-        <div className="home-list-head with-action">
-          <span>{t('Operations')}</span>
-          <AddButton size="sm" title={t('New operation')} onClick={() => open(null)} />
-        </div>
-        {!list.length && <p className="muted small home-empty">{t('No operations yet. Create one with the +.')}</p>}
-        <ul>
-          {list.map((op) => (
-            <li key={op.id}>
-              <button type="button" className={`library-item${draft?.id === op.id ? ' active' : ''}`} onClick={() => open(op)}>
-                <span className={`dot ${op.check.errors.length ? 'dot-err' : op.check.warnings.length ? 'dot-warn' : 'dot-ok'}`} />
-                <span className="library-item-name">{op.name}</span>
-                <span className="muted small">{op.steps.length}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-
+    <div className="library library-single operations">
       <main className="library-main">
         {!draft ? (
-          <div className="welcome ops-welcome">
-            <h1>{t('Multi-agent operations')}</h1>
-            <p className="muted">{t('Link your agents with arrows to build an operation: each agent is a step, and an arrow passes the files one delivers to the next. Then use it in your projects.')}</p>
-            <button type="button" className="btn" onClick={() => open(null)}>{t('New operation')}</button>
+          <div className="list-page">
+            <ListHead title={t('Operations')} intro={t('Link your agents with arrows to build an operation: each agent is a step, and an arrow passes the files one delivers to the next. Then use it in your projects.')}
+              action={<button type="button" className="btn" onClick={() => open(null)}>{t('New operation')}</button>} />
+            <ListTabs label={t('Operations')} value={kind} onChange={setKind} tabs={([
+              ['all', t('All')], ['ready', t('Ready ones')], ['warn', t('With warnings')], ['err', t('With errors')],
+            ] as const).map(([id, label]) => ({ id, label, count: list.filter((op) => id === 'all' || stateOf(op) === id).length }))} />
+            <ListTools query={find} onQuery={setFind} placeholder={t('Search operations')} count={countLabel(listed.length, '1 operation', '{n} operations')} />
+            {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
+            <ul className="list-cards">
+              {listed.map((op) => (
+                <li key={op.id}>
+                  <button type="button" className="list-card library-item" onClick={() => open(op)}>
+                    <span className="list-card-title"><span className={`dot ${stateOf(op) === 'err' ? 'dot-err' : stateOf(op) === 'warn' ? 'dot-warn' : 'dot-ok'}`} />{op.name}</span>
+                    {op.description && <span className="list-card-desc">{op.description}</span>}
+                    <span className="chips">
+                      <span className="chip">{countLabel(op.steps.length, '1 step', '{n} steps')}</span>
+                      {stateOf(op) !== 'ready' && <span className="chip">{stateOf(op) === 'err' ? t('With errors') : t('With warnings')}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {!listed.length && <p className="list-empty">{list.length ? t('No operation with these filters.') : t('No operations yet. Create the first one with New operation.')}</p>}
           </div>
         ) : (
-          <div className="ops-editor" ref={editor}>
+          <div className={`ops-editor${expanded ? ' expanded' : ''}`} ref={editor}>
             {error && <div className="error-bar">{error}<button type="button" className="icon-btn" onClick={() => setError('')}><IconX size={14} /></button></div>}
             {notice && !dirty && <div className="error-bar info-bar" role="status">{notice}<button type="button" className="icon-btn" onClick={() => setNotice('')}><IconX size={14} /></button></div>}
             <header className="ops-head">
+              <BackArrow label={t('Operations')} onBack={back} />
               <div className="ops-titles">
                 <input className="ops-name" value={draft.name} maxLength={80} onChange={(e) => update((d) => ({ ...d, name: e.target.value }))}
                   placeholder={t('Name of the operation, e.g. Review and tests')} aria-label={t('Name of the operation')} />
@@ -323,7 +329,9 @@ export function Operations({ tools }: Props) {
 
             <div className="ops-toolbar">
               <div className="ops-add">
-                <button type="button" className="btn btn-ghost btn-sm" aria-expanded={adding} onClick={() => setAdding((v) => !v)}>+ {t('Add agent')}</button>
+                <button type="button" className="btn btn-ghost btn-sm ops-tool" aria-expanded={adding} onClick={() => setAdding((v) => !v)} title={t('Add agent')} aria-label={`+ ${t('Add agent')}`}>
+                  <IconAgent size={15} /><span className="ops-tool-label">{t('Add agent')}</span>
+                </button>
                 {adding && (
                   <div className="ops-palette" role="dialog" aria-label={t('Add agent')}>
                     <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search your agents')} aria-label={t('Search your agents')}
@@ -342,16 +350,28 @@ export function Operations({ tools }: Props) {
                   </div>
                 )}
               </div>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={addLane} disabled={draft.lanes.length >= 12}>+ {t('Add lane')}</button>
-              <label className="ops-rounds small">
-                {t('Each step runs at most')}
+              <button type="button" className="btn btn-ghost btn-sm ops-tool" onClick={addLane} disabled={draft.lanes.length >= 12} title={t('Add lane')} aria-label={`+ ${t('Add lane')}`}>
+                <IconLanes size={15} /><span className="ops-tool-label">{t('Add lane')}</span>
+              </button>
+              <label className="ops-rounds small" title={t('Times a step may run')}>
+                <span className="ops-tool-label">{t('Each step runs at most')}</span>
                 <input type="number" min={1} max={10} value={draft.maxRounds ?? 3} aria-label={t('Times a step may run')}
                   onChange={(e) => update((d) => ({ ...d, maxRounds: Math.min(Math.max(Math.round(Number(e.target.value) || 1), 1), 10) }))} />
-                {t('times (loops)')}
+                <span className="ops-tool-label">{t('times (loops)')}</span>
               </label>
-              <span className="muted small">{t('Drag a card to move it. Drag from its dot to another card to pass its work there. Drag the empty board to move around.')}</span>
+              {expanded && (
+                <button type="button" className="btn btn-ghost btn-sm ops-tool ops-expand" aria-pressed onClick={() => { setExpanded(false); setAdding(false); }}
+                  title={t('Back to the normal size (Esc)')} aria-label={t('Collapse')}><IconCollapse size={15} /></button>
+              )}
+              {expanded && (
+                <button type="button" className="btn btn-sm ops-float-save" disabled={busy || !dirty || !draft.name.trim() || Boolean(check?.errors.length)} onClick={() => { void save(); }}>
+                  {busy ? t('Saving…') : t('Save')}
+                </button>
+              )}
+              <span className="muted small ops-tool-label ops-hint">{t('Drag a card to move it. Drag from its dot to another card to pass its work there. Drag the empty board to move around.')}</span>
             </div>
 
+            <div className="ops-board-frame">
             <div className="ops-board-scroll" ref={scroller} style={{ height: boardH }}>
               <div className="ops-board" ref={board} style={{ width: BOARD_W, height: BOARD_H }} onPointerDown={startPan}>
                 {draft.lanes.map((lane, i) => {
@@ -428,6 +448,11 @@ export function Operations({ tools }: Props) {
                 })}
               </div>
             </div>
+            {!expanded && (
+              <button type="button" className="icon-btn ops-board-expand" onClick={() => { setExpanded(true); setAdding(false); }}
+                title={t('Use the whole window for the board')} aria-label={t('Expand')}><IconExpand size={15} /></button>
+            )}
+            </div>
 
             <div className="ops-splitter" role="separator" aria-orientation="horizontal" aria-label={t('Board height')} tabIndex={0}
               aria-valuenow={boardH} aria-valuemin={BOARD_MIN} title={t('Drag to make the board taller or shorter')}
@@ -436,7 +461,7 @@ export function Operations({ tools }: Props) {
             </div>
 
             <div className="ops-panels">
-              <section className="ops-panel ops-inspector" aria-label={t('Selected')}>
+              <section className={`ops-panel ops-inspector${sel ? ' has-sel' : ''}`} aria-label={t('Selected')}>
                 {selectedLink ? (() => {
                   const a = agentOf(selectedLink.from);
                   const b = agentOf(selectedLink.to);

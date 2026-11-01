@@ -1,18 +1,43 @@
 {
   "name": "moki",
   "displayName": "Moki",
-  "description": "QA skills for AI tools inside VS Code: projects, runs, evidence and the AI tools of the Moki framework.",
+  "description": "Moki light: start QA activities, use your project's agents, choose the context and follow the runs of your Moki project, with Claude Code or the chat of VS Code, and Moki's MCP servers.",
   "version": "0.2.2",
   "publisher": "orsi88",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/Orsi88/moki" },
-  "icon": "dist/ui/icon.png",
-  "engines": { "vscode": "^1.96.0" },
+  "icon": "dist/icon.png",
+  "engines": { "vscode": "^1.101.0" },
   "categories": ["Testing", "AI"],
   "type": "module",
   "main": "./dist/extension.cjs",
-  "activationEvents": [],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
-    "commands": [{ "command": "moki.open", "title": "Open Moki", "category": "Moki" }]
+    "mcpServerDefinitionProviders": [{ "id": "moki", "label": "Moki" }],
+    "icons": {
+      "moki-cat": { "description": "Moki", "default": { "fontPath": "dist/moki-icons.woff", "fontCharacter": "\\E000" } }
+    },
+    "viewsContainers": {
+      "activitybar": [{ "id": "moki", "title": "Moki", "icon": "resources/moki-activitybar.svg" }]
+    },
+    "views": {
+      "moki": [{ "type": "webview", "id": "moki.panel", "name": "Moki" }]
+    },
+    "commands": [
+      { "command": "moki.chooseProject", "title": "Choose Project", "category": "Moki", "icon": "$(project)" },
+      { "command": "moki.refresh", "title": "Refresh", "category": "Moki", "icon": "$(refresh)" },
+      { "command": "moki.connectClaude", "title": "Connect Claude Code (.mcp.json)", "category": "Moki", "icon": "$(plug)" },
+      { "command": "moki.syncCursor", "title": "Sync MCP Servers to Cursor", "category": "Moki" },
+      { "command": "moki.showActivity", "title": "Show What the AI Read", "category": "Moki", "icon": "$(history)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "moki.chooseProject", "when": "view == moki.panel", "group": "navigation@1" },
+        { "command": "moki.refresh", "when": "view == moki.panel", "group": "navigation@2" },
+        { "command": "moki.connectClaude", "when": "view == moki.panel", "group": "more@1" },
+        { "command": "moki.syncCursor", "when": "view == moki.panel", "group": "more@2" },
+        { "command": "moki.showActivity", "when": "view == moki.panel", "group": "more@3" }
+      ]
+    }
   }
 }

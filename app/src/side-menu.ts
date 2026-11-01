@@ -79,6 +79,12 @@ export const saveLooseNote = (note: { id?: string | null; title: string; text: s
   return saved;
 };
 
+// A project note that was deleted: out of the recent list and the favorites.
+export const forgetNote = (project: string, path: string): void => {
+  remember(NOTES_KEY(), JSON.stringify(recentNotes().filter((n) => !(n.project === project && n.path === path))));
+  remember(FAVORITES_KEY(), JSON.stringify(favoriteNotes().filter((n) => !(n.project === project && n.path === path))));
+};
+
 export const removeLooseNote = (id: string): void => {
   remember(LOOSE, JSON.stringify(looseNotes().filter((n) => n.id !== id)));
   remember(LOOSE_FAVORITES, JSON.stringify(favoriteLooseIds().filter((x) => x !== id)));

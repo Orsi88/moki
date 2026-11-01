@@ -1,0 +1,53 @@
+name: wiki
+
+# Publishes docs/ to the GitHub wiki (scripts/build-wiki.mjs). docs/ is the source: the wiki is
+# replaced on each run. A push to main publishes main; running it by hand from another branch
+# publishes that branch, with a note that it is in development.
+# The wiki repository exists only after its first page is saved in the browser (Wiki › Create the first page).
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', 'scripts/build-wiki.mjs', '.github/workflows/wiki.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Build the wiki from docs/
+        run: node scripts/build-wiki.mjs --out wiki-build --ref "${{ github.ref_name }}" --sha "${{ github.sha }}"
+      - name: Get the wiki repository
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The token goes in a header (as actions/checkout does), never in the URL.
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$AUTH"
+          if ! git -c http.extraheader="$AUTH" clone --depth 1 "https://github.com/${{ github.repository }}.wiki.git" wiki-repo; then
+            echo "::error::The wiki has no repository yet. Open the repository's Wiki tab, create the first page in the browser, then run this workflow again."
+            exit 1
+          fi
+          git -C wiki-repo config http.extraheader "$AUTH"
+      - name: Publish
+        run: |
+          find wiki-repo -maxdepth 1 -name '*.md' -delete
+          cp wiki-build/*.md wiki-repo/
+          cd wiki-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "The wiki is up to date."; exit 0; fi
+          git commit -m "Publish docs/ from ${{ github.ref_name }} (${{ github.sha }})"
+          git push

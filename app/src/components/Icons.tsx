@@ -7,6 +7,21 @@ const base = (size = 20) => ({
   strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true,
 });
 
+export const IconHighlight = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M15 4l5 5-8 8H7v-5z" /><path d="M4 20h8" /></svg>
+);
+export const IconLanes = ({ size }: IconProps) => (
+  <svg {...base(size)}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d="M15 4v16" /></svg>
+);
+export const IconExpand = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M14 4h6v6" /><path d="M10 20H4v-6" /><path d="M20 4l-7 7" /><path d="M4 20l7-7" /></svg>
+);
+export const IconCollapse = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M20 10h-6V4" /><path d="M4 14h6v6" /><path d="M14 10l7-7" /><path d="M10 14l-7 7" /></svg>
+);
+export const IconArrowLeft = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M19 12H5" /><path d="M11 6l-6 6 6 6" /></svg>
+);
 export const IconLink = ({ size }: IconProps) => (
   <svg {...base(size)}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
 );

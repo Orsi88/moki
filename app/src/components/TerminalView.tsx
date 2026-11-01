@@ -1,5 +1,8 @@
 // A terminal tab: xterm.js drawing a pseudo-terminal of the main process
-// (desktop/terminals.ts). Hidden tabs stay mounted so their output is kept.
+// (desktop/terminals.ts). Hidden tabs stay mounted so their output is kept. The
+// terminal outlives this view: unmounted (the project left), it keeps running in
+// the main process; mounted again, it draws what it printed meanwhile and goes on.
+// Closing its tab (Workspace) is what stops it.
 
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
@@ -34,7 +37,10 @@ export function TerminalView({ id, project, active, onExit }: Props) {
     fit.fit();
     view.current = { term, fit };
 
-    const offData = bridge.on('data', (tid, data) => { if (tid === id) term.write(String(data)); });
+    // Until we know whether it already runs, output is held: what it printed so far comes whole with attach.
+    let held = true;
+    let gone = false;
+    const offData = bridge.on('data', (tid, data) => { if (tid === id && !held) term.write(String(data)); });
     const offExit = bridge.on('exit', (tid, code) => {
       if (tid !== id) return;
       term.write(`\r\n\x1b[2m[${t('process exited with code {code}', { code: String(code) })}]\x1b[0m\r\n`);
@@ -42,16 +48,24 @@ export function TerminalView({ id, project, active, onExit }: Props) {
     });
     const input = term.onData((data) => bridge.input(id, data));
     const resize = term.onResize(({ cols, rows }) => bridge.resize(id, cols, rows));
-    void bridge.start(id, term.cols, term.rows, project).then((error) => { if (error) { term.write(`\x1b[31m${error}\x1b[0m\r\n`); exitRef.current(-1); } });
+    const begin = () => bridge.start(id, term.cols, term.rows, project).then((error) => { if (error && !gone) { term.write(`\x1b[31m${error}\x1b[0m\r\n`); exitRef.current(-1); } });
+    void (bridge.attach ? bridge.attach(id) : Promise.resolve(null)).then((printed) => {
+      if (gone) return undefined;
+      held = false; // what came while waiting was printed before attach answered: it is in `printed`
+      if (printed === null) return begin();
+      term.write(printed);
+      bridge.resize(id, term.cols, term.rows);
+      return undefined;
+    });
 
     // Follow the size of the tab; a hidden tab has no size, so it is skipped.
     const observer = new ResizeObserver(() => { if (box.current?.offsetParent) fit.fit(); });
     observer.observe(box.current);
 
     return () => {
+      gone = true;
       observer.disconnect(); input.dispose(); resize.dispose(); offData(); offExit();
-      bridge.kill(id);
-      term.dispose();
+      term.dispose(); // the terminal itself keeps running: its tab may come back
       view.current = null;
     };
   }, [id]);

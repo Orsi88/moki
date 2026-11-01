@@ -22,6 +22,7 @@ import { FileIcon } from '../icons';
 import { IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconLink, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
 import { ToolCatalog } from './ToolCatalog';
 import { TagPicker } from './TagPicker';
+import { TABLE_ICON, useMarkdownEditing } from './useMarkdownEditing';
 
 interface Props {
   project: string | null; // null: a loose note, which can be sent to a project from here
@@ -40,7 +41,6 @@ const IMAGE_MAX = 1200; // px, longest side, before the image goes into the note
 const words = (text: string) => (text.replace(/!\[[^\]]*\]\(data:[^)]*\)/g, ' ').match(/[\p{L}\p{N}]+/gu) ?? []).length;
 const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 const toolName = (tool: ToolInfo) => t(tool.label).replace(/ \(.*\)$/, '');
-const TABLE_ICON = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" /><path d="M3.5 10h17M3.5 14.5h17M9.5 10v9M15 10v9" /></svg>;
 const IMAGE_ICON = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M20.5 16l-5-5-9 8.5" /></svg>;
 
 // Every file of the project tree, for @ mentions.
@@ -227,81 +227,13 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       .catch((e: Error) => { setError(e.message); setSending(false); });
   };
 
-  // ---------- editing helpers (through the browser, so Ctrl+Z undoes them) ----------
-  const replace = (from: number, to: number, value: string, selFrom: number, selTo: number) => {
-    const el = editor.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(from, to);
-    document.execCommand('insertText', false, value);
-    el.setSelectionRange(selFrom, selTo);
-  };
-  const insert = (value: string, select?: [number, number]) => {
-    const el = editor.current;
-    if (!el) return;
-    const s = el.selectionStart;
-    replace(s, el.selectionEnd, value, select ? s + select[0] : s + value.length, select ? s + select[1] : s + value.length);
-  };
-
-  // The helpers read the editor itself, not `text`: a / command runs right after removing what was typed.
-  // **bold**, *italic*, `code`: wraps the selection, or removes the marks when already there.
-  const wrap = (mark: string) => {
-    const el = editor.current;
-    if (!el) return;
-    const { selectionStart: s, selectionEnd: e, value } = el;
-    const n = mark.length;
-    if (value.slice(s - n, s) === mark && value.slice(e, e + n) === mark) replace(s - n, e + n, value.slice(s, e), s - n, e - n);
-    else replace(s, e, mark + value.slice(s, e) + mark, s + n, e + n);
-  };
-
-  // Applies fn to every line the selection touches (titles, lists, quotes).
-  const lines = (fn: (line: string, i: number, all: string[]) => string) => {
-    const el = editor.current;
-    if (!el) return;
-    const { value } = el;
-    const from = value.lastIndexOf('\n', el.selectionStart - 1) + 1;
-    const end = value.indexOf('\n', el.selectionEnd);
-    const to = end === -1 ? value.length : end;
-    const all = value.slice(from, to).split('\n');
-    const block = all.map((l, i) => fn(l, i, all)).join('\n');
-    replace(from, to, block, from, from + block.length);
-  };
-  const toggleLines = (test: RegExp, add: (i: number) => string) =>
-    lines((l, _i, all) => (all.every((x) => test.test(x)) ? l.replace(test, '') : `${add(_i)}${l.replace(test, '')}`));
-  const heading = (level: number) => {
-    const mark = `${'#'.repeat(level)} `;
-    lines((l) => { const bare = l.replace(/^#{1,6} /, ''); return l === mark + bare ? bare : mark + bare; });
-  };
-  const bullets = () => toggleLines(/^- (?!\[[ xX]\] )/, () => '- ');
-  const numbers = () => toggleLines(/^\d+\. /, (i) => `${i + 1}. `);
-  const checks = () => toggleLines(/^- \[[ xX]\] /, () => '- [ ] ');
-  const quote = () => toggleLines(/^> /, () => '> ');
-  const code = () => {
-    const el = editor.current;
-    if (!el) return;
-    const { selectionStart: s, selectionEnd: e } = el;
-    const sel = el.value.slice(s, e);
-    if (sel.includes('\n')) replace(s, e, `\`\`\`\n${sel}\n\`\`\``, s + 4, s + 4 + sel.length);
-    else wrap('`');
-  };
-  const link = () => {
-    const el = editor.current;
-    if (!el) return;
-    const { selectionStart: s, selectionEnd: e } = el;
-    const label = el.value.slice(s, e);
-    const url = 'https://';
-    if (label) replace(s, e, `[${label}](${url})`, s + label.length + 3, s + label.length + 3 + url.length);
-    else { const word = t('link text'); replace(s, e, `[${word}](${url})`, s + 1, s + 1 + word.length); }
-  };
-  const lineStart = () => { const el = editor.current; return !el || el.selectionStart === 0 || el.value[el.selectionStart - 1] === '\n'; };
-  const table = () => {
-    const cols = [t('Column 1'), t('Column 2'), t('Column 3')];
-    const block = `${lineStart() ? '' : '\n'}| ${cols.join(' | ')} |\n| --- | --- | --- |\n|  |  |  |\n`;
-    const first = block.indexOf(cols[0]);
-    insert(block, [first, first + cols[0].length]);
-  };
-  const divider = () => insert(`${lineStart() ? '' : '\n'}\n---\n\n`);
-  const codeBlock = () => insert(`${lineStart() ? '' : '\n'}\`\`\`\n\n\`\`\`\n`, [lineStart() ? 4 : 5, lineStart() ? 4 : 5]);
+  // ---------- editing: formatting, / commands and lists (useMarkdownEditing), plus an image and an @ mention ----------
+  const md = useMarkdownEditing(editor, ({ insert: put }) => [
+    { id: 'image', label: t('Image'), glyph: IMAGE_ICON, words: 'picture foto imagem', run: () => picker.current?.click() },
+    { id: 'mention', label: t('Mention a project file'), glyph: '@', words: 'file arquivo mencionar', run: () => put('@') },
+  ]);
+  const { replace, insert, wrap, heading, bullets, numbers, checks, quote, code, link, table, divider, lineStart } = md;
+  const { setSlash, findSlash, openSlash } = md;
 
   // ---------- images ----------
   const addImages = async (list: File[]) => {
@@ -346,78 +278,16 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     setMention(null);
   };
 
-  // ---------- / commands (like Notion): the formatting bar, typed ----------
-  // line: formats the current line (the caret goes to its end afterwards).
-  const commands: { id: string; label: string; glyph: ReactNode; words: string; run: () => void; line?: boolean }[] = [
-    { id: 'checklist', label: t('Checklist'), glyph: <span className="note-check-glyph" aria-hidden="true">✓</span>, words: 'checkbox todo task tarefa caixa', run: checks, line: true },
-    { id: 'h1', label: t('Large title'), glyph: 'H1', words: 'heading title titulo', run: () => heading(1), line: true },
-    { id: 'h2', label: t('Medium title'), glyph: 'H2', words: 'heading title titulo', run: () => heading(2), line: true },
-    { id: 'h3', label: t('Small title'), glyph: 'H3', words: 'heading title titulo', run: () => heading(3), line: true },
-    { id: 'list', label: t('List'), glyph: '•', words: 'bullet lista marcadores', run: bullets, line: true },
-    { id: 'numbered', label: t('Numbered list'), glyph: '1.', words: 'number ordered numerada', run: numbers, line: true },
-    { id: 'quote', label: t('Quote'), glyph: '❝', words: 'citacao', run: quote, line: true },
-    { id: 'code', label: t('Code block'), glyph: <IconCode size={15} />, words: 'codigo', run: codeBlock },
-    { id: 'table', label: t('Table'), glyph: TABLE_ICON, words: 'tabela', run: table },
-    { id: 'divider', label: t('Divider'), glyph: '—', words: 'line separator linha divisor', run: divider },
-    { id: 'link', label: t('Link'), glyph: <IconLink size={15} />, words: 'url', run: link },
-    { id: 'image', label: t('Image'), glyph: IMAGE_ICON, words: 'picture foto imagem', run: () => picker.current?.click() },
-    { id: 'mention', label: t('Mention a project file'), glyph: '@', words: 'file arquivo mencionar', run: () => insert('@') },
-  ];
-  const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  const [slash, setSlash] = useState<{ start: number; query: string; index: number } | null>(null);
-  const slashMatches = slash ? commands.filter((c) => fold(`${c.label} ${c.id} ${c.words}`).includes(fold(slash.query))) : [];
-  // A / at the start of a line or after a space opens the list; what follows it filters the list.
-  const findSlash = (value: string, caret: number) => {
-    const m = value.slice(0, caret).match(/(^|\s)\/([\p{L}\p{N}]*)$/u);
-    setSlash(m ? { start: caret - m[2].length - 1, query: m[2], index: 0 } : null);
-  };
-  const pickSlash = (command: { run: () => void; line?: boolean }) => {
-    const el = editor.current;
-    if (!el || !slash) return;
-    replace(slash.start, el.selectionStart, '', slash.start, slash.start); // the typed /command goes away
-    setSlash(null);
-    // After React keeps the removal (a second edit in the same event is undone). Line formats leave the line
-    // selected, as the bar does; typed, the caret goes to its end so writing continues.
-    setTimeout(() => {
-      command.run();
-      if (command.line && editor.current) editor.current.setSelectionRange(editor.current.selectionEnd, editor.current.selectionEnd);
-    }, 0);
-
-  };
-  const openSlash = () => {
-    const el = editor.current;
-    const before = el ? el.value[el.selectionStart - 1] : undefined;
-    insert(!before || /\s/.test(before) ? '/' : ' /');
-  };
-
   // Enter continues a list; Enter on an empty item ends it. Arrows / Enter / Tab drive the @ and / lists.
   const onEditorKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (slash) {
-      const n = slashMatches.length;
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setSlash(null); return; }
-      if (n && e.key === 'ArrowDown') { e.preventDefault(); setSlash({ ...slash, index: (slash.index + 1) % n }); return; }
-      if (n && e.key === 'ArrowUp') { e.preventDefault(); setSlash({ ...slash, index: (slash.index - 1 + n) % n }); return; }
-      if (n && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); pickSlash(slashMatches[slash.index]); return; }
-    }
+    if (md.slashKey(e)) return;
     if (mention && matches.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setMention({ ...mention, index: (mention.index + 1) % matches.length }); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setMention({ ...mention, index: (mention.index - 1 + matches.length) % matches.length }); return; }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(matches[mention.index]); return; }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setMention(null); return; }
     }
-    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.metaKey) return;
-    const el = e.currentTarget;
-    if (el.selectionStart !== el.selectionEnd) return;
-    const caret = el.selectionStart;
-    const from = text.lastIndexOf('\n', caret - 1) + 1;
-    const line = text.slice(from, caret);
-    const m = line.match(/^(\s*)(- \[[ xX]\] |[-*] |\d+\. |> )/);
-    if (!m) return;
-    e.preventDefault();
-    if (line.trim() === m[2].trim()) { replace(from, caret, '', from, from); return; } // empty item: end the list
-    const num = m[2].match(/^(\d+)\. $/);
-    const next = num ? `${Number(num[1]) + 1}. ` : m[2].startsWith('- [') ? '- [ ] ' : m[2];
-    insert(`\n${m[1]}${next}`);
+    md.listKey(e);
   };
 
   // ---------- reading view: tick boxes and open @ mentions ----------
@@ -615,17 +485,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
                 onBlur={() => setTimeout(() => { setMention(null); setSlash(null); }, 150)}
                 onPaste={onPaste} onDrop={onDrop}
                 placeholder={t('Write your note (Markdown). Type / for commands and @ to mention a project file; paste or drop images.')} />
-              {slash && (
-                <div className="note-mention" role="listbox" aria-label={t('Commands')}>
-                  {!slashMatches.length ? <p className="muted small">{t('No command matches "{q}".', { q: slash.query })}</p>
-                    : slashMatches.map((c, i) => (
-                      <button key={c.id} type="button" role="option" aria-selected={i === slash.index} className={i === slash.index ? 'on' : ''}
-                        onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}>
-                        <span className="note-slash-glyph" aria-hidden="true">{c.glyph}</span><span className="note-mention-name">{c.label}</span>
-                      </button>
-                    ))}
-                </div>
-              )}
+              {md.slashList}
               {mention && (
                 <div className="note-mention" role="listbox" aria-label={t('Project files')}>
                   {!target ? <p className="muted small">{t('Send the note to a project to mention its files.')}</p>

@@ -23,4 +23,5 @@ Never record credentials here. Reference them by environment variable or secret 
 
 ## Test tools
 
-<!-- Test management, automation framework, MCP servers, CI. -->
+<!-- Test management, automation framework, CI. MCP servers are configured in Moki (Settings › MCP servers, docs/mcp-servers.md):
+     name them here by id; never write their credentials. -->

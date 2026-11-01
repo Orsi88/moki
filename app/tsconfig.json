@@ -14,5 +14,5 @@
     "noUnusedParameters": true,
     "types": []
   },
-  "include": ["src", "vite.config.ts", "../ide/vscode/webview-bridge.ts"]
+  "include": ["src", "vite.config.ts", "vite.companion.config.ts"]
 }

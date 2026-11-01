@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('qa', {
     input: (id: string, data: string) => ipcRenderer.send('qa:term-input', id, data),
     resize: (id: string, cols: number, rows: number) => ipcRenderer.send('qa:term-resize', id, cols, rows),
     kill: (id: string) => ipcRenderer.send('qa:term-kill', id),
+    list: (project: string) => ipcRenderer.invoke('qa:term-list', project),
+    attach: (id: string) => ipcRenderer.invoke('qa:term-attach', id),
     on: (event: 'data' | 'exit', callback: (id: string, payload: string | number) => void) => {
       const listener = (_e: IpcRendererEvent, id: string, payload: string | number) => callback(id, payload);
       ipcRenderer.on(`qa:term-${event}`, listener);

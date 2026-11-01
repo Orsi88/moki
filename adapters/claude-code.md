@@ -13,6 +13,16 @@ What loads automatically:
 
 Keep this repository as the working folder and add the target repository as an extra directory, e.g. `claude --add-dir ../my-system`, or `/add-dir ../my-system` inside a session. Results still go to `workspace/projects/<project-id>/`.
 
+## Moki MCP server
+
+In a system's repository linked to a Moki project, Claude Code can read the project's context, agents and skills through the read-only Moki MCP server. Add it to the repository's `.mcp.json`:
+
+```json
+{ "mcpServers": { "moki": { "command": "node", "args": ["<moki folder>/ide/mcp/server.ts", "--project", "<project-id>"] } } }
+```
+
+See `ide/vscode/README.md` for the tools. When the Moki desktop app starts Claude Code, it passes this server and the project's MCP servers with `--mcp-config` by itself (`docs/mcp-servers.md`).
+
 ## Running
 
 - Natural language: "Review the user story in workspace/projects/acme-library/inbox/us-101.md".

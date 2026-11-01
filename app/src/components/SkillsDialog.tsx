@@ -1,7 +1,9 @@
-// Skills: "Already installed" lists what this project has and what is global,
+// Skills: "Already installed" lists what each project has and what is global,
 // each row saying where it lives. "Add a skill" searches the SkillMD registry
-// or asks the AI tool to draft a proposal. "Plugins" turns caveman or superpowers on for this
-// project only (ponytail and rtk are always on). Agents are not created here.
+// or asks the AI tool to draft a proposal. Embedded (Settings › Skills › Add a skill, see
+// SkillsPage) it is only the add part, installing for every project in the user folder; the
+// dialog opened from a project also offers that project. "Plugins" turns caveman or superpowers on per project (ponytail and
+// rtk are always on). Agents are not created here.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type InstallResult, type ProjectSummary, type RegistrySkill, type SkillScope, type SkillSearchPage, type TerminalRef, type ToolInfo } from '../api';
@@ -26,10 +28,12 @@ interface Props {
   /** Renders inside Settings, without the modal frame. */
   embedded?: boolean;
   initialTab?: Tab;
+  /** Every project of the workspace (Settings): listed in "Already installed" and "Plugins". */
+  projects?: ProjectSummary[];
 }
 
 const tabList = (): { id: Tab; label: string; intro: string }[] => [
-  { id: 'installed', label: t('Already installed'), intro: t('Skills you already have, for this project and for all projects. Each one shows where it lives.') },
+  { id: 'installed', label: t('Already installed'), intro: t('Skills you already have, in each project and for all projects. Each one shows where it lives.') },
   { id: 'library', label: t('Native and created'), intro: t('The skills that come with Moki and the ones you created, installed or not.') },
   { id: 'add', label: t('Add a skill'), intro: t('Search the public SkillMD registry or describe a skill for your AI tool to draft.') },
   { id: 'plugins', label: t('Plugins'), intro: t('Plugins the app loads in the Claude Code and Codex sessions it opens. Sessions started outside the app are not affected.') },
@@ -43,14 +47,17 @@ export const pluginList = (): { name: string; text: string; optional: boolean }[
   { name: 'superpowers', text: t('Development workflow skills: brainstorming, plans, test-driven development, systematic debugging, code review.'), optional: true },
 ];
 
-function PluginsPanel({ project }: { project: ProjectSummary }) {
-  const [on, setOn] = useState(project.plugins);
+function PluginsPanel({ projects }: { projects: ProjectSummary[] }) {
+  const [on, setOn] = useState<Record<string, string[]>>(() => Object.fromEntries(projects.map((p) => [p.id, p.plugins])));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const toggle = async (name: string) => {
+  const toggle = async (project: string, name: string) => {
+    const now = on[project] ?? [];
     setBusy(true); setError('');
-    try { setOn((await api.setProjectPlugins(project.id, on.includes(name) ? on.filter((p) => p !== name) : [...on, name])).plugins); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try {
+      const saved = (await api.setProjectPlugins(project, now.includes(name) ? now.filter((p) => p !== name) : [...now, name])).plugins;
+      setOn((m) => ({ ...m, [project]: saved }));
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   return (<>
     {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
@@ -60,18 +67,24 @@ function PluginsPanel({ project }: { project: ProjectSummary }) {
           <div className="skill-card-head">
             <span className="choice-title">{p.name}</span>
             <span className="statusbar-spacer" />
-            {p.optional ? (
-              <label className="field inline">
-                <input type="checkbox" checked={on.includes(p.name)} disabled={busy} onChange={() => { void toggle(p.name); }} />
-                <span>{t('Use in {name}', { name: project.name })}</span>
-              </label>
-            ) : <span className="chip">{t('Always on')}</span>}
+            {!p.optional && <span className="chip">{t('Always on')}</span>}
           </div>
           <p className="skill-desc small">{p.text}</p>
+          {p.optional && (
+            <div className="plugin-projects" role="group" aria-label={t('Use {plugin} in', { plugin: p.name })}>
+              <span className="muted small">{t('Use in:')}</span>
+              {projects.map((pr) => (
+                <label key={pr.id} className="check-chip">
+                  <input type="checkbox" checked={(on[pr.id] ?? []).includes(p.name)} disabled={busy} onChange={() => { void toggle(pr.id, p.name); }} />
+                  <span>{pr.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </li>
       ))}
     </ul>
-    <p className="muted small">{t('A change applies to the next session opened from this project.')}</p>
+    <p className="muted small">{t('A change applies to the next session opened from that project.')}</p>
   </>);
 }
 
@@ -92,14 +105,16 @@ const audit = (v: string | null): { label: string; cls: string } => ({
 // The skill's public page (description, files, audit); slugs are validated owner/name pairs.
 const skillPage = (slug: string) => `https://skillmd.com/skills/${slug}`;
 
-export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTerminal, embedded = false, initialTab = 'installed' }: Props) {
+export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTerminal, embedded = false, initialTab = 'installed', projects: given }: Props) {
+  const projects = given?.length ? given : [project];
   const tabs = tabList();
   const canCreate = Boolean(tools && onTerminal);
   const [tab, setTab] = useState<Tab>(initialQuery ? 'add' : initialTab);
   const [addMode, setAddMode] = useState<AddMode>('find');
   const [query, setQuery] = useState(initialQuery.slice(0, 200));
   const [preset, setPreset] = useState('');
-  const [scope, setScope] = useState<SkillScope>(recall('qa-skill-scope') === 'global' ? 'global' : 'project');
+  const [chosen, setScope] = useState<SkillScope>(recall('qa-skill-scope') === 'global' ? 'global' : 'project');
+  const scope: SkillScope = embedded ? 'global' : chosen; // Settings is for the whole workspace: no project to choose
   const [criteria, setCriteria] = useState({ query: '', category: '' }); // of the results shown, for paging
   const [results, setResults] = useState<SkillSearchPage | null>(null);
   const listTop = useRef<HTMLDivElement>(null);
@@ -158,15 +173,14 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
           <button type="button" className="icon-btn" onClick={onClose} title={t('Close (Esc)')}><IconX size={18} /></button>
         </header>
         )}
-        {embedded && <p className="muted small skills-intro">{current.intro}</p>}
 
-        <div className="dialog-tabs" role="tablist" aria-label={t('Skills')}>
+        {!embedded && <div className="dialog-tabs" role="tablist" aria-label={t('Skills')}>
           {tabs.map((tb) => (
             <button key={tb.id} type="button" role="tab" aria-selected={tab === tb.id} className={`dialog-tab${tab === tb.id ? ' on' : ''}`} onClick={() => openTab(tb.id)}>
               {tb.label}
             </button>
           ))}
-        </div>
+        </div>}
         {tab === 'add' && canCreate && (
           <div className="dialog-tabs" role="tablist" aria-label={t('Add a skill')}>
             <button type="button" role="tab" aria-selected={addMode === 'find'} className={`dialog-tab${addMode === 'find' ? ' on' : ''}`} onClick={() => setAddMode('find')}>{t('Find skills')}</button>
@@ -175,7 +189,9 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
         )}
 
         <div className="modal-body" role="tabpanel">
-          {tab === 'add' && <div className="field inline">
+          {embedded && <p className="muted small skills-intro">{current.intro}</p>}
+          {embedded && (tab === 'add' || tab === 'library') && <p className="muted small">{t('Installed for every project, in your user folder: every AI tool finds it.')}</p>}
+          {!embedded && tab === 'add' && <div className="field inline">
             <span className="label">{t('Install for')}</span>
             <div className="choice-grid scope-grid">
               {([
@@ -191,8 +207,8 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
             </div>
           </div>}
 
-          {tab === 'installed' ? <InstalledSkills project={project} />
-            : tab === 'plugins' ? <PluginsPanel project={project} />
+          {tab === 'installed' ? <InstalledSkills projects={projects} />
+            : tab === 'plugins' ? <PluginsPanel projects={projects} />
             : tab === 'library' ? <SkillLibrary project={project} scope={scope} />
             : tab === 'add' && addMode === 'create' && canCreate && tools && onTerminal ? <SkillForm project={project} scope={scope} tools={tools} onTerminal={onTerminal} /> : (<>
           <form className="skill-search" onSubmit={submit}>

@@ -19,6 +19,8 @@ await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'boot.ts')], outf
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'main.ts')], outfile: join(out, 'main.mjs'), format: 'esm' });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'preload.ts')], outfile: join(out, 'preload.cjs'), format: 'cjs' });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'run-tool.ts')], outfile: join(out, 'run-tool.mjs'), format: 'esm' });
+// Moki's MCP server for the AI tools the app starts (desktop/service.ts mokiServer).
+await esbuild({ ...common, entryPoints: [join(ROOT, 'ide', 'mcp', 'server.ts')], outfile: join(out, 'mcp.mjs'), format: 'esm' });
 
 // Identifies this build, so an installed app refreshes its framework files once per build.
 mkdirSync(out, { recursive: true });

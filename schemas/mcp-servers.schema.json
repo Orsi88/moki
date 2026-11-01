@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Orsi88/moki/schemas/mcp-servers.schema.json",
+  "title": "MCP servers (MCP Manager)",
+  "description": "workspace/mcp-servers.json: the MCP servers of the workspace, each global or for the projects it lists. Written by scripts/lib/mcp.ts. Values never hold credentials: they are ${VARIABLE} references read from the environment when a server starts. See docs/mcp-servers.md.",
+  "type": "object",
+  "required": ["servers"],
+  "properties": {
+    "servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "transport", "access", "enabled", "projects"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "description": "Stable (a rename keeps it) and unique in the whole workspace. Agents name it in their mcps contract." },
+          "name": { "type": "string", "maxLength": 60 },
+          "description": { "type": "string", "maxLength": 300 },
+          "transport": { "enum": ["stdio", "http"] },
+          "command": { "type": "string", "description": "stdio: a program name or absolute path, started without a shell." },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "url": { "type": "string", "description": "http: the server's endpoint (http:// or https://)." },
+          "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "stdio: environment variables; credentials as ${VARIABLE}." },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "http: request headers; credentials as ${VARIABLE}." },
+          "access": { "enum": ["read", "execute"], "description": "execute: it changes things outside Moki; operation steps that use it wait for approval." },
+          "enabled": { "type": "boolean", "description": "Off: kept in the list, given to no project." },
+          "projects": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" }, "description": "Where it applies: [] = every project of the workspace (global); otherwise only these project ids." }
+        }
+      }
+    }
+  }
+}
