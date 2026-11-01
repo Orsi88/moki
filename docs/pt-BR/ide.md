@@ -34,7 +34,13 @@ Cadastrar uma ferramenta no Moki, em vez de direto na IDE, faz com que os agente
 
 ## Instalação
 
-**A partir de um pacote.** Na raiz do repositório:
+**Pela release.** Baixe o [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) da [release mais recente](https://github.com/Orsi88/moki/releases/latest) e rode:
+
+```bash
+code --install-extension moki-0.3.0.vsix --force
+```
+
+**A partir do código.** Na raiz do repositório:
 
 ```bash
 npm install
