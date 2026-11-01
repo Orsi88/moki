@@ -89,7 +89,7 @@ Playwright opens the built Electron app (`npm run test:ui` builds it first). Eac
 | What the person sees or clicks | An interface test in `tests/ui/app.spec.ts`, in the block of its screen |
 | A text of the app | A pt-BR translation (`i18n.test.ts` fails without it) |
 
-Then run `npm run test-catalog`: it adds the scenario to the catalog, and stops if a new test file has no rule in `scripts/test-catalog.mjs` (give it its area and kind there). Add the scenario's Portuguese title to `docs/pt-BR/test-scenarios.json`: until then the Portuguese catalog shows it in English, and the script says which ones are missing.
+Then run `npm run test-catalog`: it adds the scenario to the catalog, and stops if a new test file has no rule in `scripts/catalog-tests.mjs` (give it its area and kind there). Add the scenario's Portuguese title to `docs/pt-BR/test-scenarios.json`: until then the Portuguese catalog shows it in English, and the script says which ones are missing.
 
 Before a commit: `npm run typecheck`, `npm run check`, `npm test`, and `npm run test:ui` when the window changed.
 

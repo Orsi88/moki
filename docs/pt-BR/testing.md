@@ -89,7 +89,7 @@ O Playwright abre o app Electron compilado (o `npm run test:ui` compila antes). 
 | O que a pessoa vê ou clica | Um teste de interface em `tests/ui/app.spec.ts`, no bloco da tela |
 | Um texto do app | A tradução em pt-BR (o `i18n.test.ts` falha sem ela) |
 
-Depois rode o `npm run test-catalog`: ele acrescenta o cenário ao catálogo e para se um arquivo de teste novo não tiver regra em `scripts/test-catalog.mjs` (dê a área e o tipo dele lá). Acrescente o título do cenário em português em `docs/pt-BR/test-scenarios.json`: até lá o catálogo em português mostra o cenário em inglês, e o script avisa quais faltam.
+Depois rode o `npm run test-catalog`: ele acrescenta o cenário ao catálogo e para se um arquivo de teste novo não tiver regra em `scripts/catalog-tests.mjs` (dê a área e o tipo dele lá). Acrescente o título do cenário em português em `docs/pt-BR/test-scenarios.json`: até lá o catálogo em português mostra o cenário em inglês, e o script avisa quais faltam.
 
 Antes de um commit: `npm run typecheck`, `npm run check`, `npm test` e, quando a janela mudou, `npm run test:ui`.
 
