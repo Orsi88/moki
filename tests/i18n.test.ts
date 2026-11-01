@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { ACTIVITIES, LANGUAGES } from '../scripts/lib/core.ts';
+import { LANGUAGES } from '../scripts/lib/core.ts';
+import { listActivities } from '../scripts/lib/activities.ts';
 
 const SRC = join(ROOT, 'app', 'src');
 const pt: Record<string, string> = JSON.parse(readFileSync(join(SRC, 'i18n', 'pt-BR.json'), 'utf8'));
@@ -30,7 +31,7 @@ function serviceMessages(): string[] {
 test('every text of the app has a pt-BR translation', () => {
   const dynamic = [
     ...serviceMessages(),
-    ...Object.values(ACTIVITIES).flatMap((a) => [a.label, 'hint' in a ? a.hint : '']),
+    ...listActivities(ROOT).filter((a) => a.source !== 'library').flatMap((a) => [a.label, a.description]), // the ones that come with Moki
     ...LANGUAGES,
   ].filter((k): k is string => Boolean(k));
   const missing = [...keysInApp(), ...dynamic].filter((k) => !Object.hasOwn(pt, k));

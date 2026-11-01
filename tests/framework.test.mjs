@@ -15,7 +15,8 @@ import { buildDocx, inspectDocx } from '../scripts/docx.mjs';
 import { unzip } from '../scripts/lib/zip.mjs';
 import { checkPreAnalysis, checkMissingInfo, checkTestCases, checkReviewMatrix } from '../scripts/check-output.mjs';
 import { markdownToHtml } from '../scripts/pdf.mjs';
-import { ACTIVITIES, buildPrompt, cleanPath, copyToInbox, isUsable } from '../scripts/lib/core.ts';
+import { buildPrompt, cleanPath, copyToInbox, isUsable } from '../scripts/lib/core.ts';
+import { listActivities } from '../scripts/lib/activities.ts';
 import { claudeSubagent } from '../scripts/lib/agents.ts';
 
 // A temporary copy of the framework with one skill, to mutate safely.
@@ -227,7 +228,10 @@ test('output checks', () => {
 });
 
 test('qa assistant: activities, prompts, paths, inbox copies', () => {
-  for (const a of Object.values(ACTIVITIES)) assert.ok(existsSync(join(ROOT, 'skills', a.skill, 'SKILL.md')), a.skill);
+  for (const a of listActivities(ROOT)) {
+    const skill = a.target.kind === 'workflow' ? 'qa-orchestrator' : a.target.name;
+    assert.ok(existsSync(join(ROOT, 'skills', skill, 'SKILL.md')), `${a.id}: ${skill}`);
+  }
   assert.equal(isUsable('requirements-review'), true);
   assert.equal(isUsable('automation'), false);
 

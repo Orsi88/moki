@@ -8,9 +8,11 @@ import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_pr
 import { createRequire } from 'node:module';
 import { ROOT, SLUG, readJson, workspaceDir, workspaceLabel } from './repo.mjs';
 import { parseFrontmatter } from './frontmatter.mjs';
-import { contractLines, type AgentContract } from './agents.ts';
+import { contractLines, isUsableAgent, listAgents, type AgentContract } from './agents.ts';
+import { activityRequest, getActivity, listActivities, type ActivityDef } from './activities.ts';
 
-export type ActivityKey = 'open' | 'review' | 'tests' | 'review-then-tests' | 'failure' | 'evidence' | 'context' | 'setup' | 'plan' | 'automation' | 'resume';
+// Activities are scripts/lib/activities.ts: the app's own actions in code, the others in activities/ and the workspace library.
+export type ActivityKey = string;
 // How a new project starts: 'qa' copies the QA context files; 'blank' leaves context/ out and plans it with the AI.
 export type Starter = 'qa' | 'blank';
 export const STARTERS: Starter[] = ['qa', 'blank'];
@@ -18,7 +20,7 @@ export const STARTERS: Starter[] = ['qa', 'blank'];
 export const PROJECT_PLUGINS = ['caveman', 'superpowers'];
 export type ToolKey = 'claude' | 'codex' | 'cursor-agent' | 'gemini' | 'antigravity' | 'cursor' | 'vscode' | 'chat' | 'print';
 
-export interface Activity { label: string; hint?: string; skill: string; needsFiles: boolean }
+
 export interface Tool {
   label: string;
   hint?: string;
@@ -29,19 +31,6 @@ export interface Tool {
   print?: boolean;
 }
 
-export const ACTIVITIES: Record<ActivityKey, Activity> = {
-  open: { label: 'Just open the project', hint: 'loads the context and asks what you need', skill: 'project-context', needsFiles: false },
-  review: { label: 'Review user stories', hint: 'ambiguities, gaps, interview, matrix, report', skill: 'requirements-review', needsFiles: true },
-  tests: { label: 'Design tests', hint: 'scenario mapping, then test cases', skill: 'test-design', needsFiles: true },
-  'review-then-tests': { label: 'Review, then design tests', hint: 'workflow with approval in between', skill: 'qa-orchestrator', needsFiles: true },
-  failure: { label: 'Failure pre-analysis', hint: 'from your description and the log', skill: 'failure-analysis', needsFiles: false },
-  evidence: { label: 'Build test evidence', hint: 'work item + Jam recordings, then spreadsheet and Word document', skill: 'qa-orchestrator', needsFiles: false },
-  context: { label: 'Project context', hint: 'onboarding, questions, updates', skill: 'project-context', needsFiles: false },
-  setup: { label: 'Prepare the project', hint: 'adapts the context to the project description', skill: 'project-context', needsFiles: false },
-  plan: { label: 'Plan the project with the AI', hint: 'interview, then a plan you review in the app', skill: 'project-context', needsFiles: false },
-  automation: { label: 'Automation', skill: 'automation', needsFiles: false },
-  resume: { label: 'Resume a run', skill: 'qa-orchestrator', needsFiles: false },
-};
 
 export const TOOLS: Record<ToolKey, Tool> = {
   // "--": the prompt is never taken by an option before it (--mcp-config and --plugin-dir take several values).
@@ -58,8 +47,18 @@ export const TOOLS: Record<ToolKey, Tool> = {
 
 export const LANGUAGES = ['English', 'Portuguese (pt-BR)', 'Spanish'];
 
-export const isActivity = (v: string): v is ActivityKey => Object.hasOwn(ACTIVITIES, v);
+export const isActivity = (v: string, root = ROOT): boolean => listActivities(root).some((a) => a.id === v);
 export const isTool = (v: string): v is ToolKey => Object.hasOwn(TOOLS, v);
+
+// Why an activity cannot run from a request ('' = it can): its skill not ready, its agent missing, or an operation (the app starts those).
+export function activityProblem(a: ActivityDef, root = ROOT): string {
+  if (a.id === 'resume') return '';
+  if (a.target.kind === 'operation') return 'an operation: start it from the app';
+  if (a.target.kind === 'agent') return listAgents(root).some((x) => x.name === a.target.name && isUsableAgent(x)) ? '' : `agent ${a.target.name} not available`;
+  const skill = a.target.kind === 'workflow' ? 'qa-orchestrator' : a.target.name;
+  if (!existsSync(join(root, 'skills', skill, 'SKILL.md'))) return ''; // a skill the person installed
+  return isUsable(skill, root) ? '' : `not available yet: ${skillStatus(skill, root)}`;
+}
 
 // ---------------------------------------------------------------- skills
 
@@ -408,10 +407,11 @@ export interface Request {
   available?: { skills: string[]; agents: string[] }; // what the plan activity may recommend (global skills, usable agents)
   shared?: { tag: string; project: string; paths: string[] }[]; // other projects' files shared through tags and kept by the user
   excluded?: string[]; // this project's context files the user left out of the activity
+  root?: string; // the framework whose activities/ and workspace library hold the activity (tests use another)
   workspace?: string; // workspaceLabel: "workspace", or the folder of another workspace
 }
 
-export function buildPrompt({ project, activity, files = [], note = '', run = '', language = 'English', agent, repository = '', skills = [], agents = [], description = '', globalSkills = [], available, shared = [], excluded = [], workspace = 'workspace' }: Request): string {
+export function buildPrompt({ project, activity, files = [], note = '', run = '', language = 'English', agent, repository = '', skills = [], agents = [], description = '', globalSkills = [], available, shared = [], excluded = [], root = ROOT, workspace = 'workspace' }: Request): string {
   const list = files.length ? files.join(', ') : '';
   const parts = [`Follow AGENTS.md. Project: ${project}.`];
   if (workspace !== 'workspace') {
@@ -424,23 +424,6 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
     case 'open':
       parts.push('Use the project-context skill to load this project\'s context, summarize in a few lines what is known and what is missing, and ask me what I need.');
       if (list) parts.push(`Files available for this session: ${list}.`);
-      break;
-    case 'review':
-      parts.push(`Use the requirements-review skill to review the user stories in: ${list}.`);
-      break;
-    case 'tests':
-      parts.push(`Use the test-design skill to map the test scenarios for: ${list}.`);
-      break;
-    case 'review-then-tests':
-      parts.push(`Use the qa-orchestrator with the requirements-to-tests workflow: review the user stories in ${list} and, once the review is approved, map the test scenarios.`);
-      break;
-    case 'failure':
-      parts.push(list
-        ? `Use the failure-analysis skill with the input in: ${list}.`
-        : 'Use the failure-analysis skill. I will paste the filled input template next.');
-      break;
-    case 'evidence':
-      parts.push(`Use the qa-orchestrator with the test-evidence workflow: collect the work item and the Jam recordings, then build the evidence spreadsheet and the Word document.${list ? ` Inputs and models: ${list}.` : ' I will give you the work item and the Jam links next.'}`);
       break;
     case 'context':
       parts.push('Use the project-context skill: load the project context, show what is known and what is missing, and continue the onboarding if needed.');
@@ -464,14 +447,16 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
       if (list) parts.push(`Documents to use: ${list}.`);
       break;
     }
-    case 'automation':
-      parts.push(`Use the automation skill.${list ? ` Inputs: ${list}.` : ''}`);
-      break;
     case 'resume':
       parts.push(`Resume run ${run}: read ${workspace}/projects/${project}/runs/${run}/state.json first, summarize where we stopped and continue from the current step.`);
       break;
-    default:
-      throw new Error(`Unknown activity "${String(activity)}"`);
+    default: {
+      // A builtin or library activity: its own text (activities.ts).
+      const def = getActivity(activity, root);
+      if (!def || def.target.kind === 'moki') throw new Error(`Unknown activity "${String(activity)}"`);
+      if (def.target.kind === 'operation') throw new Error(`The activity "${def.label}" starts the operation ${def.target.name}: start it from the Operations panel of the project.`);
+      parts.push(activityRequest(def, files, project));
+    }
   }
   if (skills.length) parts.push(`Skills installed for this project (read ${folderLabel(project, repository, 'skills', workspace)}/<name>/SKILL.md when one fits the task): ${skills.join(', ')}.`);
   if (globalSkills.length) parts.push(`Global skills linked to this project (read the SKILL.md when one fits the task): ${globalSkills.map((s) => `${s.name} (${s.path})`).join(', ')}.`);

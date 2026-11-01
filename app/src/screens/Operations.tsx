@@ -16,6 +16,7 @@ import { t } from '../i18n';
 import { recall, remember } from '../prefs';
 import { IconAgent, IconCollapse, IconExpand, IconLanes, IconTrash, IconX } from '../components/Icons';
 import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from '../components/ListPage';
+import { StarButton, useFavorites } from '../components/Favorites';
 import { arrowPath, BOARD_H, BOARD_W, CARD_H, CARD_W, cardHeight, dotOffset, dotsFor, LANE_HEAD } from '../components/opsBoard';
 
 const BOARD_MIN = 180; // px: the board's height can be dragged between this and what leaves room for the panels below
@@ -44,6 +45,7 @@ type Selection = { kind: 'step'; id: string } | { kind: 'link'; i: number } | nu
 interface Props { tools: ToolInfo[] }
 
 export function Operations({ tools }: Props) {
+  const fav = useFavorites('operations');
   const [list, setList] = useState<Operation[]>([]);
   const [agents, setAgents] = useState<OperationAgent[]>([]);
   const [draft, setDraft] = useState<OperationDraft | null>(null);
@@ -292,8 +294,8 @@ export function Operations({ tools }: Props) {
             <ListTools query={find} onQuery={setFind} placeholder={t('Search operations')} count={countLabel(listed.length, '1 operation', '{n} operations')} />
             {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
             <ul className="list-cards">
-              {listed.map((op) => (
-                <li key={op.id}>
+              {fav.first(listed, (op) => op.id).map((op) => (
+                <li key={op.id} className="fav-item">
                   <button type="button" className="list-card library-item" onClick={() => open(op)}>
                     <span className="list-card-title"><span className={`dot ${stateOf(op) === 'err' ? 'dot-err' : stateOf(op) === 'warn' ? 'dot-warn' : 'dot-ok'}`} />{op.name}</span>
                     {op.description && <span className="list-card-desc">{op.description}</span>}
@@ -302,6 +304,7 @@ export function Operations({ tools }: Props) {
                       {stateOf(op) !== 'ready' && <span className="chip">{stateOf(op) === 'err' ? t('With errors') : t('With warnings')}</span>}
                     </span>
                   </button>
+                  <StarButton on={fav.has(op.id)} name={op.name} onToggle={() => fav.toggle(op.id)} />
                 </li>
               ))}
             </ul>

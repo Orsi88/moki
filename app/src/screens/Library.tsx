@@ -15,6 +15,7 @@ import { AddButton } from '../components/AddButton';
 import { TagField, TagFilter, matchesTag, useTagCatalog } from '../components/TagField';
 import { SkillsField } from '../components/SkillsField';
 import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from '../components/ListPage';
+import { StarButton, useFavorites } from '../components/Favorites';
 
 // The sections every agent's instructions keep (scripts/lib/agents.ts AGENT_SECTIONS).
 const AGENT_SECTIONS = ['Role', 'When to use', 'How to work', 'Boundaries'];
@@ -52,6 +53,7 @@ export const accessLabel = (access: string): string => ({
 const statusText = (status: string): string => ({ stable: t('Stable'), draft: t('Draft'), 'pending-migration': t('Pending migration'), planned: t('Planned') } as Record<string, string>)[status] ?? status;
 
 export function Library({ onBack, backLabel, embedded = false, onCreate, creating = false, onBrowse, create, project = null, installedTick = 0 }: Props) {
+  const fav = useFavorites('agents'); // an agent of the user folder is starred as ~<name>
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sel, setSel] = useState<Sel | null>(null);
@@ -222,8 +224,8 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
                   <section key={c.id} className="list-group">
                     <h2 className="list-group-head" title={c.description}>{c.label}</h2>
                     <ul className="list-cards">
-                      {group.map((a) => (
-                        <li key={a.name}>
+                      {fav.first(group, (a) => a.name).map((a) => (
+                        <li key={a.name} className="fav-item">
                           <button type="button" className="list-card library-item" onClick={() => choose({ kind: 'library', name: a.name })}>
                             <span className="list-card-title"><span className={`dot ${a.usable ? 'dot-ok' : 'dot-muted'}`} title={statusText(a.status)} />{a.name}</span>
                             <span className="list-card-desc">{a.description}</span>
@@ -235,6 +237,7 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
                               <span className="chip">{a.skills.length === 1 ? t('1 skill') : t('{n} skills', { n: a.skills.length })}</span>
                             </span>
                           </button>
+                          <StarButton on={fav.has(a.name)} name={a.name} onToggle={() => fav.toggle(a.name)} />
                         </li>
                       ))}
                     </ul>
@@ -245,13 +248,14 @@ export function Library({ onBack, backLabel, embedded = false, onCreate, creatin
                 <section className="list-group">
                   <h2 className="list-group-head">{t('In your user folder')}</h2>
                   <ul className="list-cards">
-                    {shownGlobal.map((a) => (
-                      <li key={a.name}>
+                    {fav.first(shownGlobal, (a) => `~${a.name}`).map((a) => (
+                      <li key={a.name} className="fav-item">
                         <button type="button" className="list-card library-item" onClick={() => choose({ kind: 'global', name: a.name })}>
                           <span className="list-card-title"><span className="dot dot-ok" />{a.name}</span>
                           {a.description && <span className="list-card-desc">{a.description}</span>}
                           <span className="chips"><span className="chip">~/.claude/agents</span></span>
                         </button>
+                        <StarButton on={fav.has(`~${a.name}`)} name={a.name} onToggle={() => fav.toggle(`~${a.name}`)} />
                       </li>
                     ))}
                   </ul>

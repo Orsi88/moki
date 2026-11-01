@@ -29,7 +29,15 @@ export interface Plan {
 export interface SkillInfo { name: string; status: string; description: string }
 export type ToolKind = 'terminal' | 'editor' | 'chat' | 'print';
 export interface ToolInfo { id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean }
-export interface ActivityInfo { id: string; label: string; hint: string; skill: string; needsFiles: boolean; available: boolean; status: string }
+// An activity (scripts/lib/activities.ts): the app's own (moki), one that comes with Moki (builtin) or the person's (library).
+export type ActivityTarget = { kind: 'moki' | 'skill' | 'agent' | 'workflow' | 'operation'; name: string };
+export interface ActivityInfo {
+  id: string; label: string; hint: string; skill: string; needsFiles: boolean; available: boolean; status: string;
+  category: string; source: 'moki' | 'builtin' | 'library'; target: ActivityTarget; files: 'required' | 'optional' | 'none'; note: string; tags: string[]; favorite: boolean;
+}
+export interface ActivityDetail extends ActivityInfo { template: string; path: string }
+export type FavoriteKind = 'activities' | 'agents' | 'operations' | 'templates' | 'skills';
+export interface ActivityDraft { id?: string; label: string; description: string; category: string; kind: string; target: string; files: string; note: string; tags: string[]; template: string }
 // "Open with" (Excel, Word and PDF files): the programs the system offers; dialog = the system shows its own list instead (Windows).
 export interface OpenWithApps { dialog: boolean; apps: { id: string; name: string; isDefault: boolean }[] }
 // PDF comments and page edits, written by PdfCraft (desktop/pdfcraft.ts). Quads: 8 numbers, points from the page's top-left.
@@ -257,7 +265,17 @@ export const api = {
   contextChoice: (project: string) => call<ContextChoice>('contextChoice', project),
   pickFolder: () => call<{ folder: string; name: string } | null>('pickFolder'),
   skills: () => call<SkillInfo[]>('skills'),
-  activities: () => call<{ activities: ActivityInfo[]; languages: string[] }>('activities'),
+  // Favorites first (a stable sort keeps the order of the rest).
+  activities: (project?: string) => call<{ activities: ActivityInfo[]; languages: string[] }>('activities', project)
+    .then((r) => ({ ...r, activities: [...r.activities].sort((a, b) => Number(b.favorite) - Number(a.favorite)) })),
+  activity: (id: string) => call<ActivityDetail>('activity', id),
+  favorites: () => call<Record<FavoriteKind, string[]>>('favorites'),
+  setFavorite: (kind: FavoriteKind, id: string, on: boolean) => call<string[]>('setFavorite', kind, id, on),
+  activityTargets: () => call<{ skills: string[]; agents: string[]; workflows: string[]; operations: { id: string; name: string }[] }>('activityTargets'),
+  saveActivity: (draft: ActivityDraft) => call<ActivityInfo>('saveActivity', draft),
+  duplicateActivity: (id: string) => call<ActivityInfo>('duplicateActivity', id),
+  deleteActivity: (id: string) => call<boolean>('deleteActivity', id),
+  setActivityFavorite: (id: string, on: boolean) => call<string[]>('setActivityFavorite', id, on),
   integrations: () => call<ToolInfo[]>('integrations'),
   tree: (project: string) => call<TreeNode[]>('tree', project),
   readFile: (project: string, path: string) => call<FileContent>('readFile', project, path),

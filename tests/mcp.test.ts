@@ -31,6 +31,7 @@ before(() => {
   for (const s of ['project-context', 'test-design']) cpSync(join(ROOT, 'skills', s), join(root, 'skills', s), { recursive: true });
   cpSync(join(ROOT, 'templates'), join(root, 'templates'), { recursive: true });
   cpSync(join(ROOT, 'agents'), join(root, 'agents'), { recursive: true });
+  cpSync(join(ROOT, 'activities'), join(root, 'activities'), { recursive: true });
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '9.9.9' }));
   createProject('acme', 'Acme', root);
   createProject('beta', 'Beta', root);

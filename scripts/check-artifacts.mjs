@@ -12,7 +12,7 @@ import { git } from './lib/repo.mjs';
 // Every versioned path must live under one of these. Anything else is
 // suspicious by default; extend the list deliberately when the repo grows.
 const ALLOWED_ROOT_FILES = ['AGENTS.md', 'CLAUDE.md', 'README.md', 'README.pt-BR.md', 'CONTRIBUTING.md', 'LICENSE', 'package.json', 'package-lock.json', 'tsconfig.json', '.gitignore', '.gitattributes', 'workspace/README.md'];
-const ALLOWED_ROOT_DIRS = ['app/', 'desktop/', 'ide/', 'agents/', 'claude-agents/', 'core/', 'skills/', '.agents/skills/', '.claude/skills/', '.claude/agents/', 'adapters/', 'templates/', 'schemas/', 'examples/', 'docs/', 'scripts/', 'tests/', '.githooks/', '.github/'];
+const ALLOWED_ROOT_DIRS = ['app/', 'desktop/', 'ide/', 'activities/', 'agents/', 'claude-agents/', 'core/', 'skills/', '.agents/skills/', '.claude/skills/', '.claude/agents/', 'adapters/', 'templates/', 'schemas/', 'examples/', 'docs/', 'scripts/', 'tests/', '.githooks/', '.github/'];
 const ARTIFACT_EXTENSIONS = /\.(pdf|xlsx?|xlsm|docx?|pptx?|odt|ods|png|jpe?g|gif|webp|bmp|mp4|webm|mov|zip|7z|rar|tar|gz|har|trace|db|sqlite|pcap)$/i;
 // Binary templates/images are only legitimate as skill assets, app artwork or doc images.
 const BINARY_ALLOWED = [/^app\/public\//,/^skills\/[^/]+\/assets\//, /^\.agents\/skills\/[^/]+\/assets\//, /^\.claude\/skills\/[^/]+\/assets\//, /^docs\/assets\//];

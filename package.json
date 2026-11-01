@@ -113,6 +113,10 @@
         "to": "framework/agents"
       },
       {
+        "from": "activities",
+        "to": "framework/activities"
+      },
+      {
         "from": ".agents",
         "to": "framework/.agents"
       },

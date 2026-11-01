@@ -16,8 +16,9 @@ import { DocumentStyleForm } from '../components/DocumentStyleForm';
 import { SkillsPage } from '../components/SkillsPage';
 import { Operations } from './Operations';
 import { McpManager } from '../components/McpManager';
+import { ActivitiesPage } from '../components/ActivitiesPage';
 
-export type SettingsTab = 'agents' | 'operations' | 'skills' | 'mcp' | 'documents';
+export type SettingsTab = 'agents' | 'activities' | 'operations' | 'skills' | 'mcp' | 'documents';
 
 interface Props {
   tab: SettingsTab;
@@ -63,6 +64,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
         {onBack && <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}>{backLabel}</button>}
         <div className="dialog-tabs settings-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === 'agents'} className={`dialog-tab${tab === 'agents' ? ' on' : ''}`} onClick={() => onTab('agents')}>{t('Agents')}</button>
+          <button type="button" role="tab" aria-selected={tab === 'activities'} className={`dialog-tab${tab === 'activities' ? ' on' : ''}`} onClick={() => onTab('activities')}>{t('Activities')}</button>
           <button type="button" role="tab" aria-selected={tab === 'operations'} className={`dialog-tab${tab === 'operations' ? ' on' : ''}`} onClick={() => onTab('operations')}>{t('Operations')}</button>
           <button type="button" role="tab" aria-selected={tab === 'skills'} className={`dialog-tab${tab === 'skills' ? ' on' : ''}`} onClick={() => onTab('skills')}>{t('Skills')}</button>
           <button type="button" role="tab" aria-selected={tab === 'mcp'} className={`dialog-tab${tab === 'mcp' ? ' on' : ''}`} onClick={() => onTab('mcp')}>{t('MCP servers')}</button>
@@ -73,6 +75,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
         {tab === 'documents' ? <DocumentStyleForm />
           : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} projects={projects} />
           : tab === 'operations' ? <Operations tools={tools} />
+          : tab === 'activities' ? <ActivitiesPage />
           : tab === 'agents'
           ? (
             <Library
@@ -107,22 +110,16 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
               ) : <p className="muted">{t('Create a project before installing skills or agents.')}</p>}
             />
           )
-          : !target ? (
-            <div className="settings-skills">
-              <h1>{t('Skills')}</h1>
-              <p className="muted">{t('Create a project before installing skills or agents.')}</p>
-            </div>
-          ) : (
-            <>
-              <SkillsPage
-                key={skillsTab}
-                startOnAdd={skillsTab === 'add'}
-                project={target}
-                projects={projects}
-                tools={tools}
-                onTerminal={(terminal) => onTerminal(terminal, target.id)}
-              />
-            </>
+          : (
+            // Without a project the list still shows (the skills of Moki, the installed ones, the plugins); only adding needs one.
+            <SkillsPage
+              key={skillsTab}
+              startOnAdd={skillsTab === 'add' && Boolean(target)}
+              project={target}
+              projects={projects}
+              tools={tools}
+              onTerminal={(terminal) => { if (target) onTerminal(terminal, target.id); }}
+            />
           )}
       </div>
     </div>

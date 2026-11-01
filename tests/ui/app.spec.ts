@@ -37,6 +37,7 @@ function fixture(): string {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.0.0-test' }));
   cpSync(join(ROOT, 'skills'), join(root, 'skills'), { recursive: true });
   cpSync(join(ROOT, 'agents'), join(root, 'agents'), { recursive: true });
+  cpSync(join(ROOT, 'activities'), join(root, 'activities'), { recursive: true });
   cpSync(join(ROOT, 'templates'), join(root, 'templates'), { recursive: true });
   addProject(root, 'acme', 'Acme Library');
   return root;
@@ -99,7 +100,7 @@ test.describe.serial('Moki settings', () => {
     await page.getByRole('tab', { name: 'Templates' }).click();
     await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
     await expect(page.locator('.ds-card-item')).toHaveCount(1); // the list first: every template of the workspace
-    await page.getByRole('button', { name: 'Default' }).click();
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
     const form = page.locator('.ds-form');
     const room = await form.evaluate((el) => el.scrollHeight - el.clientHeight);
     expect(room).toBeGreaterThan(40);
@@ -1063,5 +1064,138 @@ test.describe.serial('Moki PDF comments', () => {
     await pdfPage.locator('.md-card').getByRole('button', { name: 'Excluir' }).click();
     await expect(pdfPage.locator('.md-card')).toHaveCount(0);
     await expect.poll(() => readFileSync(file, 'utf8')).toBe(REVIEW_MD);
+  });
+});
+
+// Activities: ready-made requests, configured in Settings like agents and skills; favorites come first.
+test.describe.serial('Moki activities', () => {
+  let actApp: ElectronApplication;
+  let actPage: Page;
+  const dirs: string[] = [];
+  let library = '';
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    library = join(root, 'workspace', 'library', 'activities');
+    ({ app: actApp, page: actPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await actApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('a new activity is created in Settings, starred, and comes first when opening the AI tool', async () => {
+    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('tab', { name: 'Atividades' }).click();
+    await expect(actPage.locator('.activity-item .list-card-title').getByText('Desenhar testes', { exact: true })).toBeVisible(); // one that comes with Moki
+    await actPage.getByRole('button', { name: 'Nova atividade' }).click();
+    await actPage.getByRole('textbox', { name: 'Nome' }).fill('Checar smoke');
+    await actPage.getByRole('combobox', { name: 'O que ela usa' }).selectOption('test-design');
+    await actPage.getByRole('textbox', { name: 'Pedido enviado à IA' }).fill('Use the test-design skill to list smoke checks for: {files}.');
+    await actPage.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(actPage.getByRole('heading', { name: 'Checar smoke', level: 1 })).toBeVisible();
+    await expect.poll(() => existsSync(join(library, 'checar-smoke.md'))).toBe(true);
+    expect(readFileSync(join(library, 'checar-smoke.md'), 'utf8')).toContain('uses: skill:test-design');
+
+    await actPage.getByRole('button', { name: 'Favorita: Checar smoke' }).click();
+    await expect(actPage.getByRole('button', { name: 'Favorita: Checar smoke' })).toHaveAttribute('aria-pressed', 'true');
+    await actPage.getByRole('button', { name: 'Voltar para Atividades' }).click();
+    await actPage.getByRole('tab', { name: /^Favoritas/ }).click();
+    await expect(actPage.locator('.activity-item .list-card-title')).toHaveText(['Checar smoke']);
+
+    // In the project, the starred activity is the first one offered.
+    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('button', { name: 'Abrir na sua ferramenta de IA' }).click();
+    await expect(actPage.locator('.answer-list .answer').first()).toContainText('Checar smoke');
+  });
+});
+
+// A workspace with no project: Settings keeps every list in its layout; only what needs a project waits for one.
+test.describe.serial('Moki settings without a project', () => {
+  let emptyApp: ElectronApplication;
+  let emptyPage: Page;
+  const dirs: string[] = [];
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    ({ app: emptyApp, page: emptyPage } = await openApp(root, userData, null));
+  });
+
+  test.afterAll(async () => {
+    await emptyApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('Skills lists the skills of Moki; only Add a skill waits for a project', async () => {
+    await emptyPage.getByRole('button', { name: 'Criar' }).click();
+    await emptyPage.getByPlaceholder('ex.: Cliente X').fill('Vazio');
+    await emptyPage.getByRole('button', { name: 'Criar workspace' }).click();
+    await expect(emptyPage.getByText('Nenhum projeto ainda.')).toBeVisible();
+    await emptyPage.getByRole('button', { name: 'Configurações' }).click();
+    await emptyPage.getByRole('tab', { name: 'Skills' }).click();
+    await expect(emptyPage.getByRole('heading', { name: 'Skills', level: 1 })).toBeVisible();
+    await expect(emptyPage.locator('.list-card-title').getByText('test-design', { exact: true })).toBeVisible();
+    await expect(emptyPage.getByRole('button', { name: 'Adicionar skill' })).toBeDisabled();
+    await emptyPage.getByRole('tab', { name: 'Atividades' }).click();
+    await expect(emptyPage.locator('.activity-item .list-card-title').getByText('Desenhar testes', { exact: true })).toBeVisible();
+  });
+});
+
+// Favorites: a star on the cards of Agents, Operations, Templates and Skills; starred ones come first.
+test.describe.serial('Moki favorites', () => {
+  let favApp: ElectronApplication;
+  let favPage: Page;
+  const dirs: string[] = [];
+  let favFile = '';
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    mkdirSync(join(root, 'workspace', 'library', 'operations'), { recursive: true });
+    for (const [id, name] of [['alfa', 'Alfa'], ['beta', 'Beta']]) {
+      writeFileSync(join(root, 'workspace', 'library', 'operations', `${id}.json`), JSON.stringify({
+        schemaVersion: 1, id, name, description: '', lanes: [],
+        steps: [{ id: 's1', agent: 'library:test-designer', x: 20, y: 60 }], links: [],
+      }));
+    }
+    favFile = join(root, 'workspace', 'library', 'favorites.json');
+    ({ app: favApp, page: favPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await favApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('agents, operations, templates and skills are starred from their cards and come first', async () => {
+    const saved = () => { try { return JSON.parse(readFileSync(favFile, 'utf8')) as Record<string, string[]>; } catch { return {}; } };
+    await favPage.getByRole('button', { name: 'Configurações' }).click();
+
+    await favPage.getByRole('tab', { name: 'Agentes' }).click();
+    await favPage.getByRole('button', { name: 'Favorita: test-designer' }).click();
+    await expect(favPage.getByRole('button', { name: 'Favorita: test-designer' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(favPage.locator('.list-group').first().locator('.fav-item .list-card-title').first()).toHaveText('test-designer');
+
+    await favPage.getByRole('tab', { name: 'Operações' }).click();
+    await expect(favPage.locator('.fav-item .list-card-title')).toHaveText(['Alfa', 'Beta']);
+    await favPage.getByRole('button', { name: 'Favorita: Beta' }).click();
+    await expect(favPage.locator('.fav-item .list-card-title')).toHaveText(['Beta', 'Alfa']);
+
+    await favPage.getByRole('tab', { name: 'Templates' }).click();
+    await favPage.getByRole('button', { name: 'Favorita: Default' }).click();
+    await expect(favPage.getByRole('button', { name: 'Favorita: Default' })).toHaveAttribute('aria-pressed', 'true');
+
+    await favPage.getByRole('tab', { name: 'Skills' }).click();
+    await favPage.getByRole('button', { name: 'Favorita: test-design' }).click();
+    await expect(favPage.locator('.fav-item .list-card-title').first()).toHaveText('test-design');
+
+    await expect.poll(() => saved().skills).toEqual(['test-design']);
+    expect(saved()).toMatchObject({ agents: ['test-designer'], operations: ['beta'], templates: ['default'] });
   });
 });

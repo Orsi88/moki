@@ -12,6 +12,7 @@ import { skillCat } from '../icons/cats';
 import { CatIcon } from './CatIcon';
 import { IconFolder } from './Icons';
 import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from './ListPage';
+import { StarButton, useFavorites } from './Favorites';
 import { SkillCat } from './SkillCat';
 import { SkillsDialog, pluginList } from './SkillsDialog';
 
@@ -27,7 +28,7 @@ interface Skill {
 }
 
 interface Props {
-  project: ProjectSummary; // where Create skill opens its terminal
+  project: ProjectSummary | null; // where Create skill opens its terminal (none: the list shows, adding waits for a project)
   projects: ProjectSummary[];
   tools: ToolInfo[];
   onTerminal: (terminal: TerminalRef) => void;
@@ -38,6 +39,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const READY = new Set(['stable', 'draft']);
 
 export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = false }: Props) {
+  const fav = useFavorites('skills');
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [plugins, setPlugins] = useState<Record<string, string[]>>(() => Object.fromEntries(projects.map((p) => [p.id, p.plugins])));
   const [kind, setKind] = useState<Kind>('all');
@@ -130,7 +132,7 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
     </>
   );
 
-  if (adding) {
+  if (adding && project) {
     return (
       <div className="skills-add">
         <div className="list-back"><BackArrow label={t('Skills')} onBack={() => { setAdding(false); void load(); }} /><span className="list-back-title">{t('Add a skill')}</span></div>
@@ -212,7 +214,7 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
   return (
     <div className="list-page">
       <ListHead title={t('Skills')} intro={t('What your agents and activities know how to do: the skills that come with Moki, the ones you created and the ones installed in each project or for all of them.')}
-        action={<button type="button" className="btn" onClick={() => setAdding(true)}>{t('Add a skill')}</button>} />
+        action={<button type="button" className="btn" disabled={!project} title={project ? '' : t('Create a project before installing skills or agents.')} onClick={() => setAdding(true)}>{t('Add a skill')}</button>} />
       <ListTabs label={t('Skills')} value={kind} onChange={setKind} tabs={[
         { id: 'all', label: t('All'), count: all.length },
         { id: 'native', label: t('Native skills'), count: all.filter((s) => ofKind(s, 'native')).length },
@@ -229,13 +231,14 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
       </ListTools>
       {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
       <ul className="list-cards">
-        {shown.map((s) => (
-          <li key={s.name}>
+        {fav.first(shown, (s) => s.name).map((s) => (
+          <li key={s.name} className="fav-item">
             <button type="button" className={`list-card skill-item${s.plugin ? ' is-plugin' : ''}`} onClick={() => setOpen(s.name)}>
               <span className="list-card-title"><CatIcon id={skillCat(s.name)} size={26} />{s.name}</span>
               <span className="list-card-desc">{s.description}</span>
               <span className="chips">{badges(s)}</span>
             </button>
+            <StarButton on={fav.has(s.name)} name={s.name} onToggle={() => fav.toggle(s.name)} />
           </li>
         ))}
       </ul>

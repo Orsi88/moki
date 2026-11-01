@@ -40,7 +40,7 @@ test('another branch gets the in-development note; a broken link stops the build
     cpSync(join(root, 'docs'), join(copy, 'docs'), { recursive: true });
     cpSync(join(root, 'ide', 'vscode', 'README.md'), join(copy, 'ide', 'vscode', 'README.md'));
     cpSync(join(root, 'ide', 'mcp', 'server.ts'), join(copy, 'ide', 'mcp', 'server.ts'));
-    for (const d of ['skills', 'agents', 'core', 'templates', 'schemas', 'scripts', 'desktop', 'app', 'adapters', 'examples', 'tests']) cpSync(join(root, d), join(copy, d), { recursive: true, filter: (s) => !s.includes('node_modules') && !s.includes(join('app', 'dist')) });
+    for (const d of ['skills', 'agents', 'core', 'templates', 'schemas', 'scripts', 'desktop', 'app', 'adapters', 'examples', 'tests', 'activities']) cpSync(join(root, d), join(copy, d), { recursive: true, filter: (s) => !s.includes('node_modules') && !s.includes(join('app', 'dist')) });
     cpSync(join(root, 'LICENSE'), join(copy, 'LICENSE'));
     buildWiki(copy); // the copy builds
     writeFileSync(join(copy, 'docs', 'troubleshooting.md'), '# T\n\n[gone](nowhere.md)\n');
