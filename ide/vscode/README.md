@@ -12,13 +12,25 @@ A light version of [Moki](https://github.com/Orsi88/moki) in the side bar of VS 
 | **Activities** | Pick one (Design tests, Review user stories, Failure pre-analysis…), choose inbox files, an agent, a note and the language |
 | **Agents** | The agents this project uses, with what they do; pick one to work with it |
 | **Context** | Switch each context file, note or shared file on or off for the AI; the star gives it to the AI first |
-| **Runs** | Activities to resume, and the operations running (run them step by step in the app) |
+| **Runs** | Activities to resume; multi-agent operations to start and follow step by step (see below) |
 
 3. Then:
    - **Open in Claude Code** opens Claude Code in a VS Code terminal with the request ready and the project's MCP servers (`--mcp-config`), like the app does.
    - **Copy for the chat** copies the same request and puts the cursor in the Claude Code chat (or opens Copilot Chat with it): paste and send.
 
 A file switched off stays out of the requests and of what the AI can read through Moki's MCP server. Choices are saved per project in `workspace/projects/<id>/companion.json`.
+
+## Operations
+
+A multi-agent operation linked to the project (the project's Operations panel in the app) runs from **Runs › Start an operation**: choose the AI of each step, fill what the agents need (text and inbox files) and what you want, then **Start the operation**. Each step opens in its own VS Code terminal (**Moki · <AI>**). The extension moves the run on by itself whenever the project's files change, even with the panel closed: a step is done when it writes its summary (`handoff/<slot>.md`) and its outputs, and the next one starts. Open the run to:
+
+- **answer** a step's question (typed into its terminal when it is open, otherwise the step reopens with your answer);
+- **approve**, **send back with notes** or **end** a step that waits for approval (approval arrows, and steps that execute through an MCP);
+- **try again** a step whose terminal closed before its summary, with the same or another AI;
+- **choose the path** when no arrow fits a result, or a step would run too many times;
+- **pause**, **cancel** (its terminal is closed) and **show its terminal**.
+
+Operations are the same as in the app (same engine and run folder, `workspace/projects/<id>/runs/`), so a run started here can be followed there and the other way round. Editing operations and linking them to a project stay in the app.
 
 ## MCP servers
 

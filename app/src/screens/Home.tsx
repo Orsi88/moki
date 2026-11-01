@@ -1,7 +1,7 @@
 // Start screen: pick a project (system under test) or create one — like
 // Obsidian's vault switcher.
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { api, type ProjectSummary, type Starter, type Tag, type TerminalRef, type ToolInfo, type WorkspaceInfo } from '../api';
 import { recall, remember } from '../prefs';
 import { t } from '../i18n';
@@ -12,7 +12,7 @@ import { SearchPanel } from '../components/SearchPanel';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog';
 import { IconCheck, IconChevron, IconExternal, IconEye, IconEyeOff, IconOpenProject, IconPin, IconStar, IconTrash, IconX } from '../components/Icons';
 import { NoteDialog } from '../components/NoteDialog';
-import { favoriteLooseIds, favoriteNotes, forgetProject, hiddenIds, hideProject, noteTitle, setFavorite, type NoteRef, looseNotes, pinnedIds, recentNotes, showProject, togglePin } from '../side-menu';
+import { favoriteLooseIds, favoriteNotes, forgetNote, forgetProject, hiddenIds, hideProject, looseNotes, type NoteRef, noteTitle, pinnedIds, recentNotes, removeLooseNote, setFavorite, showProject, togglePin } from '../side-menu';
 import { Settings, type SettingsTab } from './Settings';
 
 interface Props {
@@ -39,6 +39,8 @@ const onboarding = (status: string): string => ({
   'not-started': t('Context not started'), partial: t('Context in progress'), complete: t('Context complete'),
 } as Record<string, string>)[status] ?? status;
 
+interface MenuItem { label: string; icon: ReactNode; run: () => void; danger?: boolean }
+
 export function Home({ projects, tools, version, onOpen, onCreate, settings, onSettings, onBack, backLabel, project, onTerminal, workspace, onWorkspace, search = false, onSearch, onFound, onDeleted }: Props) {
   const [switching, setSwitching] = useState<WorkspaceInfo[] | null>(null); // the workspace menu, open
   const openSwitcher = () => { api.workspaces().then((r) => setSwitching(r.list)).catch(() => setSwitching([])); };
@@ -58,11 +60,19 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
   // A note opened here, inside the app ({ loose: null }: a new loose note). The icon beside it opens the notebook window.
   const [openNote, setOpenNote] = useState<NoteRef | { loose: null } | null>(null);
-  const notebookBtn = (ref: NoteRef, className = '') => (
-    <button type="button" className={`home-pin ${className}`} title={t('Open in the notebook')} aria-label={t('Open in the notebook')} onClick={() => { void api.openNoteWindow(ref); }}>
-      <IconExternal size={13} />
-    </button>
-  );
+  // The actions of a row (pin, hide, open in the notebook, delete…) show only on a right click.
+  const [rowMenu, setRowMenu] = useState<{ left: number; top: number; items: MenuItem[] } | null>(null);
+  const menuOn = (items: MenuItem[]) => (e: MouseEvent) => { e.preventDefault(); setRowMenu({ left: e.clientX, top: e.clientY, items }); };
+  const notebookItem = (ref: NoteRef): MenuItem => ({ label: t('Open in the notebook'), icon: <IconExternal size={15} />, run: () => { void api.openNoteWindow(ref); } });
+  // A loose note leaves this computer; a project note goes to the trash.
+  const deleteNoteItem = (ref: NoteRef, title: string): MenuItem => ({
+    label: t('Delete the note'), icon: <IconTrash size={15} />, danger: true,
+    run: () => {
+      if (!window.confirm(t('Delete the note "{title}"?', { title }))) return;
+      if ('loose' in ref) { removeLooseNote(ref.loose); setNoteTick((n) => n + 1); return; }
+      api.deleteNote(ref.project, ref.path).then(() => { forgetNote(ref.project, ref.path); setNoteTick((n) => n + 1); }).catch((e: Error) => setError(e.message));
+    },
+  });
   const [catalog, setCatalog] = useState<Tag[]>([]);
   const [newTags, setNewTags] = useState<string[]>([]);
   useEffect(() => { api.tags().then(setCatalog).catch(() => setCatalog([])); }, []);
@@ -102,7 +112,10 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
   };
 
   const projectRow = (p: ProjectSummary, pinnedRow: boolean) => (
-    <li key={p.id} className="home-row">
+    <li key={p.id} className="home-row" onContextMenu={menuOn([
+      { label: pinnedRow ? t('Unpin') : t('Pin'), icon: <IconPin size={15} />, run: () => setPins(togglePin(p.id)) },
+      { label: t('Hide from Moki'), icon: <IconEyeOff size={15} />, run: () => hide(p) },
+    ])}>
       <button type="button" className="home-project" onClick={() => onOpen(p.id)}>
         <span className="home-project-name">{p.name}</span>
         <span className="home-project-meta">
@@ -110,13 +123,6 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
           {p.openRuns > 0 && <span className="dot dot-warn" title={t('{n} open', { n: p.openRuns })} />}
         </span>
         <IconChevron size={16} />
-      </button>
-      <button type="button" className={`home-pin${pinnedRow ? ' on' : ''}`} title={pinnedRow ? t('Unpin') : t('Pin')} aria-pressed={pinnedRow}
-        onClick={() => setPins(togglePin(p.id))}>
-        <IconPin size={13} />
-      </button>
-      <button type="button" className="home-pin home-hide" title={t('Hide from Moki')} aria-label={t('Hide from Moki')} onClick={() => hide(p)}>
-        <IconEyeOff size={13} />
       </button>
     </li>
   );
@@ -163,21 +169,16 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
               <summary className="home-list-head">{t('Hidden ({n})', { n: hiddenProjects.length })}</summary>
               <ul>
                 {hiddenProjects.map((p) => (
-                  <li key={p.id} className="home-row">
+                  <li key={p.id} className="home-row" onContextMenu={menuOn([
+                    { label: t('Show in the list'), icon: <IconEye size={15} />, run: () => setHidden(showProject(p.id)) },
+                    { label: t('Delete for good'), icon: <IconTrash size={15} />, danger: true, run: () => setDeleting(p) },
+                  ])}>
                     <button type="button" className="home-project" onClick={() => { setHidden(showProject(p.id)); onOpen(p.id); }}>
                       <span className="home-project-name">{p.name}</span>
                       <span className="home-project-meta">
                         {onboarding(p.onboardingStatus)} · {p.runs} {p.runs === 1 ? t('activity') : t('activities')}
                       </span>
                       <IconChevron size={16} />
-                    </button>
-                    <button type="button" className="home-pin home-show" title={t('Show in the list')} aria-label={t('Show in the list')}
-                      onClick={() => setHidden(showProject(p.id))}>
-                      <IconEye size={13} />
-                    </button>
-                    <button type="button" className="home-pin home-delete" title={t('Delete for good')} aria-label={t('Delete for good')}
-                      onClick={() => setDeleting(p)}>
-                      <IconTrash size={13} />
                     </button>
                   </li>
                 ))}
@@ -189,16 +190,15 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
             <div className="home-list-head">{t('Favorites')}</div>
             <ul className="home-favorites">
               {favorites.map((f) => (
-                <li key={f.kind === 'loose' ? f.id : `${f.project}:${f.path}`} className="home-row">
+                <li key={f.kind === 'loose' ? f.id : `${f.project}:${f.path}`} className="home-row" onContextMenu={menuOn([
+                  notebookItem(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path }),
+                  { label: t('Remove from favorites'), icon: <IconStar size={15} />, run: () => unstar(f) },
+                ])}>
                   <button type="button" className="home-project" onClick={() => setOpenNote(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path })}>
                     <span className="home-project-name">{f.title}</span>
                     {f.kind === 'project' && <span className="home-project-meta">{projects.find((p) => p.id === f.project)?.name}</span>}
                     <IconChevron size={16} />
                   </button>
-                  <button type="button" className="home-pin star-btn on" aria-pressed title={t('Remove from favorites')} aria-label={t('Remove from favorites')} onClick={() => unstar(f)}>
-                    <IconStar size={13} />
-                  </button>
-                  {notebookBtn(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path }, 'home-hide')}
                 </li>
               ))}
             </ul>
@@ -211,17 +211,30 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
           {notesShown.length === 0 && <p className="muted small home-empty">{t('No loose notes yet.')}</p>}
           <ul>
             {notesShown.map((n) => (
-              <li key={n.kind === 'loose' ? n.id : `${n.project}:${n.path}`} className="home-row">
+              <li key={n.kind === 'loose' ? n.id : `${n.project}:${n.path}`} className="home-row" onContextMenu={menuOn([
+                notebookItem(n.kind === 'loose' ? { loose: n.id } : { project: n.project, path: n.path }),
+                deleteNoteItem(n.kind === 'loose' ? { loose: n.id } : { project: n.project, path: n.path }, n.title),
+              ])}>
                 <button type="button" className="home-project" onClick={() => setOpenNote(n.kind === 'loose' ? { loose: n.id } : { project: n.project, path: n.path })}>
                   <span className="home-project-name">{n.title}</span>
                   {n.kind === 'project' && <span className="home-project-meta">{projects.find((p) => p.id === n.project)?.name}</span>}
                   <IconChevron size={16} />
                 </button>
-                {notebookBtn(n.kind === 'loose' ? { loose: n.id } : { project: n.project, path: n.path })}
               </li>
             ))}
           </ul>
         </div>
+        {rowMenu && (
+          <div className="menu-backdrop" onMouseDown={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }}>
+            <ul className="term-menu item-menu" role="menu" style={{ left: rowMenu.left, top: rowMenu.top }} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') setRowMenu(null); }}>
+              {rowMenu.items.map((item, i) => (
+                <li key={item.label}>
+                  <button type="button" role="menuitem" autoFocus={i === 0} className={item.danger ? 'danger' : ''} onClick={() => { setRowMenu(null); item.run(); }}>{item.icon} {item.label}</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {workspace && onWorkspace && (
           <div className="ws-switch">
             {switching && (

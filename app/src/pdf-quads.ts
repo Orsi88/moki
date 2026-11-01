@@ -24,3 +24,16 @@ export function selectionMarks(rects: Box[], pages: DrawnPage[]): { page: number
   }
   return [...out].map(([page, quads]) => ({ page, quads }));
 }
+
+// The comment cards in the column beside the pages: each wants the height of what it comments;
+// sorted by that, a card that would overlap the one above goes just under it. Pure.
+export function stackCards(cards: { id: string; top: number; height: number }[], gap: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  let floor = -Infinity;
+  for (const c of [...cards].sort((a, b) => a.top - b.top)) {
+    const top = Math.max(c.top, floor);
+    out[c.id] = top;
+    floor = top + c.height + gap;
+  }
+  return out;
+}

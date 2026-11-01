@@ -10,7 +10,7 @@ import { launchInTerminal, pluginArgs, scriptFor, windowsStartArgs, type LaunchR
 import type { TermSpec } from '../desktop/terminals.ts';
 import { parseGioMime } from '../desktop/open-with.ts';
 import { parsePdfChange, pdfcraftCandidates, pdfScript, toComments, type PdfChange, type PdfStep } from '../desktop/pdfcraft.ts';
-import { selectionMarks } from '../app/src/pdf-quads.ts';
+import { selectionMarks, stackCards } from '../app/src/pdf-quads.ts';
 import { docxToMarkdown, readableInputs } from '../scripts/lib/docx.ts';
 import { frameworkTarget, syncFramework } from '../desktop/framework.ts';
 import { noteKey, noteQuery, parseNoteRequest } from '../desktop/notes.ts';
@@ -159,6 +159,15 @@ test('notes: the section is always listed and new notes get unique names', () =>
   assert.equal(service.createNote('acme', 'Ideias de teste', 'b'), 'notes/ideias-de-teste-2.md');
   assert.equal((service.readFile('acme', 'notes/ideias-de-teste-2.md') as Extract<FileContent, { kind: 'markdown' }>).text, 'b');
   assert.throws(() => service.createNote('acme', '../..', 'x'), /title/);
+});
+
+test('notes: one is deleted from the start screen; nothing outside notes/ is', async () => {
+  const rel = service.createNote('acme', 'Para apagar', 'x');
+  assert.equal(await service.deleteNote('acme', rel), true);
+  assert.ok(!existsSync(join(root, 'workspace', 'projects', 'acme', rel)));
+  await assert.rejects(service.deleteNote('acme', rel), /no longer exists/);
+  await assert.rejects(service.deleteNote('acme', 'project.json'), /Only notes/);
+  await assert.rejects(service.deleteNote('acme', 'notes/../project.json'), /Only notes|outside/i);
 });
 
 test('MCPs: the last section lists the servers configured where the AI tools start', () => {
@@ -321,8 +330,14 @@ test('PDF changes from the UI are checked', () => {
   ]) assert.throws(() => parsePdfChange(bad), Error, JSON.stringify(bad));
   assert.deepEqual(parsePdfChange({ op: 'rotate-pages', pages: [3, 1], degrees: 270 }), { op: 'rotate-pages', pages: [3, 1], degrees: 270 });
   assert.deepEqual(parsePdfChange({ op: 'set-info', title: '', author: 'Ana' }), { op: 'set-info', title: '', author: 'Ana' });
-  assert.deepEqual(toComments({ comments: [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', extra: 1, replies: [{ id: 'r', page: 2, contents: 'ok' }] }, { no: 'id' }] }),
-    [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', replies: [{ id: 'r', page: 2, type: '', author: null, contents: 'ok', color: null, replies: [] }] }]);
+  assert.deepEqual(toComments({ comments: [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', rect: [10, 20, 110, 32], extra: 1, replies: [{ id: 'r', page: 2, contents: 'ok', rect: [1, 'x'] }] }, { no: 'id' }] }),
+    [{ id: 'c', page: 2, type: 'highlight', author: 'ana', contents: 'x', color: '#ff0', rect: [10, 20, 110, 32], replies: [{ id: 'r', page: 2, type: '', author: null, contents: 'ok', color: null, rect: null, replies: [] }] }]);
+});
+
+test('the comment cards beside a PDF: each at its place, pushed down when it would overlap the one above', () => {
+  assert.deepEqual(stackCards([{ id: 'b', top: 100, height: 80 }, { id: 'a', top: 40, height: 50 }, { id: 'c', top: 150, height: 30 }], 8),
+    { a: 40, b: 100, c: 188 });
+  assert.deepEqual(stackCards([{ id: 'a', top: 10, height: 100 }, { id: 'b', top: 20, height: 10 }], 8), { a: 10, b: 118 });
 });
 
 test('a selection on drawn pages becomes quads in points', () => {
@@ -523,6 +538,23 @@ test('agents in operations: inputs, outputs, MCP servers and AI are read, valida
   assert.throws(() => service.saveAgentContract(copy.name, { mcps: [{ name: 'jira', mode: 'execute' }] }), /cannot execute/);
   assert.equal(service.saveAgentContract(copy.name, { inputs: ['Log'], mcps: [{ name: 'jira', mode: 'read' }] }), true);
   service.deleteAgent(copy.name);
+
+  // The page of one of your agents saves description, instructions, skills and contract at once.
+  const mine = service.duplicateAgent('test-designer');
+  const page = service.agent(mine.name);
+  assert.throws(() => service.saveAgentProfile('test-designer', { description: 'x', body: page.body, skills: page.skills, contract: {} }), /cannot be edited/);
+  const body = `${page.body.trim()}\n\nExtra line.\n`;
+  assert.equal(service.saveAgentProfile(mine.name, { description: '"Quoted" start', body, skills: ['project-context', 'requirements-review'], contract: { inputs: ['Stories'], outputs: ['cases.json'], mcps: [], ai: '' } }), true);
+  const after = service.agent(mine.name);
+  assert.equal(after.description, '"Quoted" start');
+  assert.deepEqual(after.skills, ['project-context', 'requirements-review']);
+  assert.deepEqual(after.inputs, ['Stories']);
+  assert.match(after.body, /Extra line\.\n$/);
+  assert.match(after.text, /^---\nname: test-designer-custom\ndescription: "\"Quoted\" start"\n/);
+  assert.throws(() => service.saveAgentProfile(mine.name, { description: 'x', body: '# No sections', skills: ['project-context'], contract: {} }), /missing section "## Role"/);
+  assert.throws(() => service.saveAgentProfile(mine.name, { description: ' ', body, skills: ['project-context'], contract: {} }), /Write a description/);
+  assert.throws(() => service.saveAgentProfile(mine.name, { description: 'x', body, skills: ['nope'], contract: {} }), /Unknown skills: nope/);
+  service.deleteAgent(mine.name);
 
   // Agents created for a project carry the same fields in their file.
   mkdirSync(join(root, 'workspace', 'projects', 'acme', 'skills', 'my-skill'), { recursive: true });
@@ -801,6 +833,205 @@ test('operations branch on the result of an agent, loop back up to a limit, and 
   for (const a of [reviewer.name, fixer.name]) service.deleteAgent(a);
 });
 
+test('operations: a step whose terminal closes fails until tried again, a rejected step goes back with the reasons, cancelling closes the terminal', async () => {
+  const { validateSchema } = await import('../scripts/lib/schema.mjs');
+  const runSchema = JSON.parse(readFileSync(join(ROOT, 'schemas', 'execution-state.schema.json'), 'utf8'));
+  let n = 0;
+  const killed: string[] = [];
+  const svc = createService(root, {
+    ...noLaunch,
+    launch: () => ({ opened: true, message: '', terminal: { id: `t${++n}`, title: 'claude' } }),
+    detectTools: () => ({ claude: true }) as never,
+    killTerminal: (id) => { killed.push(id); },
+  });
+  const base = {
+    description: '', lanes: [{ id: 'l1', name: 'Análise', color: '#7fb2e5', width: 300 }],
+    steps: [{ id: 's1', agent: 'library:requirements-analyst', x: 20, y: 60 }, { id: 's2', agent: 'library:test-designer', x: 320, y: 60 }],
+    links: [{ from: 's1', to: 's2', gate: 'approval', map: {} }],
+  };
+  const op = svc.saveOperation({ ...base, name: 'Revisa e testa' });
+  const tight = svc.saveOperation({ ...base, name: 'Uma volta só', maxRounds: 1 });
+  svc.setProjectOperations('acme', [op.id, tight.id]);
+  const tools = { tools: { s1: 'claude', s2: 'claude' } };
+  const deliver = (dir: string, slot: string) => {
+    mkdirSync(join(dir, 'outputs', slot), { recursive: true });
+    for (const f of ['review-matrix.json', 'Matriz.xlsx', 'Relatório.pdf']) writeFileSync(join(dir, 'outputs', slot, f), 'x');
+    writeFileSync(join(dir, 'handoff', `${slot}.md`), 'Revisei.');
+  };
+
+  const run = svc.startOperation('acme', op.id, tools);
+  const dir = join(root, 'workspace', 'projects', 'acme', 'runs', run.id);
+  assert.deepEqual(run.steps.map((s) => [s.x, s.y]), [[20, 60], [320, 60]], 'the board as it was when the run started');
+  assert.deepEqual(run.lanes?.map((l) => l.name), ['Análise']);
+
+  // Its terminal closes before the summary: the step failed, the run is blocked, nothing starts until it is tried again.
+  svc.startOperationStep('acme', run.id, 's1', 'English');
+  assert.equal(svc.operationStepExited('acme', 't9'), false, 'a terminal of no step');
+  assert.equal(svc.operationStepExited('acme', 't1'), true);
+  let state = svc.operationRun('acme', run.id);
+  assert.equal(state.status, 'blocked');
+  assert.equal(state.visits[0].status, 'failed');
+  assert.match(state.visits[0].error ?? '', /terminal closed before it wrote its summary/);
+  assert.deepEqual(svc.advanceOperations('acme'), []);
+  assert.throws(() => svc.startOperationStep('acme', run.id, 's1', 'English'), /cannot start now/);
+  assert.throws(() => svc.approveOperationStep('acme', run.id), /Nothing is waiting/);
+  assert.equal(svc.retryOperationStep('acme', run.id), 's1');
+  assert.throws(() => svc.retryOperationStep('acme', run.id), /Nothing failed/);
+  assert.deepEqual(svc.advanceOperations('acme'), [{ run: run.id, step: 's1' }]);
+  svc.startOperationStep('acme', run.id, 's1', 'English');
+  assert.equal(svc.operationRun('acme', run.id).visits[0].attempts, 1);
+
+  // Its terminal closes after it delivered everything: done, and the run moves on.
+  deliver(dir, 's1');
+  assert.equal(svc.operationStepExited('acme', 't2'), true);
+  state = svc.operationRun('acme', run.id);
+  assert.equal(state.status, 'awaiting-approval');
+  assert.equal(state.canRedo, true);
+
+  // Rejected and sent back: the step before runs again with the reasons; the rejected visit stays, cancelled.
+  svc.rejectOperationStep('acme', run.id, 'Falta a regra de senha.', true);
+  state = svc.operationRun('acme', run.id);
+  assert.deepEqual(state.visits.map((v) => `${v.slot}:${v.status}`), ['s1:done', 's2:cancelled', 's1-2:ready']);
+  assert.equal(state.visits[2].notes, 'Falta a regra de senha.');
+  assert.deepEqual(state.approvals.map((a) => [a.step, a.decision, a.notes]), [['s2', 'rejected', 'Falta a regra de senha.']]);
+  assert.deepEqual(svc.advanceOperations('acme'), [{ run: run.id, step: 's1-2' }]);
+  const again = svc.startOperationStep('acme', run.id, 's1-2', 'English').prompt;
+  assert.match(again, /The user rejected what came after your earlier work and asked: Falta a regra de senha\./);
+  assert.match(again, new RegExp(`Your earlier work in this run: workspace/projects/acme/runs/${run.id}/outputs/s1/`));
+  assert.doesNotMatch(again, /The step before/, 'it reads what it read the first time');
+
+  // Rejected again, without sending back: the operation ends, cancelled.
+  deliver(dir, 's1-2');
+  svc.advanceOperations('acme');
+  const ended = svc.rejectOperationStep('acme', run.id, '', false);
+  assert.equal(ended.status, 'cancelled');
+  assert.equal(ended.ended, true);
+  assert.deepEqual(validateSchema(runSchema, JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8'))), [], 'still a valid run for the framework');
+  const events = svc.operationRun('acme', run.id).events ?? [];
+  for (const e of ['s1 failed', 's1 tried again', 's2 rejected: s1-2 runs again', 's2-2 rejected: ended']) assert.ok(events.some((x) => x.includes(e)), e);
+
+  // At the limit of rounds, rejecting can only end the operation.
+  const short = svc.startOperation('acme', tight.id, tools);
+  const shortDir = join(root, 'workspace', 'projects', 'acme', 'runs', short.id);
+  svc.startOperationStep('acme', short.id, 's1', 'English');
+  deliver(shortDir, 's1');
+  svc.advanceOperations('acme');
+  assert.equal(svc.operationRun('acme', short.id).canRedo, false);
+  assert.throws(() => svc.rejectOperationStep('acme', short.id, 'x', true), /already ran as many times/);
+
+  // Cancelling closes the terminal of the step that runs.
+  const other = svc.startOperation('acme', op.id, tools);
+  svc.startOperationStep('acme', other.id, 's1', 'English');
+  assert.equal(svc.cancelOperation('acme', other.id).status, 'cancelled');
+  assert.deepEqual(killed, [`t${n}`]);
+  assert.equal(svc.operationRun('acme', other.id).visits[0].status, 'cancelled');
+  assert.equal(svc.operationStepExited('acme', `t${n}`), false, 'a cancelled run is left as it is');
+
+  svc.setProjectOperations('acme', []);
+  for (const o of [op.id, tight.id]) svc.deleteOperation(o);
+  for (const id of [run.id, short.id, other.id]) rmSync(join(root, 'workspace', 'projects', 'acme', 'runs', id), { recursive: true });
+});
+
+test('operations: the question of a step is answered from Moki, in its terminal or by reopening it when its terminal is gone', () => {
+  let n = 0;
+  const alive = new Set<string>();
+  const typed: [string, string][] = [];
+  const killed: string[] = [];
+  const svc = createService(root, {
+    ...noLaunch,
+    launch: () => { const id = `t${++n}`; alive.add(id); return { opened: true, message: '', terminal: { id, title: 'claude' } }; },
+    detectTools: () => ({ claude: true }) as never,
+    terminalAlive: (id) => alive.has(id),
+    writeTerminal: (id, data) => { typed.push([id, data]); },
+    killTerminal: (id) => { killed.push(id); alive.delete(id); },
+  });
+  const op = svc.saveOperation({
+    name: 'Pergunta e responde', description: '', lanes: [],
+    steps: [{ id: 's1', agent: 'library:requirements-analyst', x: 20, y: 60 }, { id: 's2', agent: 'library:test-designer', x: 320, y: 60 }],
+    links: [{ from: 's1', to: 's2', gate: 'approval', map: {} }],
+  });
+  svc.setProjectOperations('acme', [op.id]);
+  const run = svc.startOperation('acme', op.id, { tools: { s1: 'claude', s2: 'claude' } });
+  const dir = join(root, 'workspace', 'projects', 'acme', 'runs', run.id);
+  assert.throws(() => svc.answerOperationStep('acme', run.id, 'x'), /No step is waiting for an answer/);
+
+  // Its terminal is open: the answer is typed there, on one line, and the run goes on as before.
+  svc.startOperationStep('acme', run.id, 's1', 'English');
+  writeFileSync(join(dir, 'waiting', 's1.md'), 'Qual ambiente\ndevo considerar?');
+  svc.advanceOperations('acme');
+  assert.equal(svc.operationRun('acme', run.id).visits[0].live, true);
+  assert.throws(() => svc.answerOperationStep('acme', run.id, '  '), /Write your answer/);
+  assert.deepEqual(svc.answerOperationStep('acme', run.id, 'Homologação,\nnão produção'), { sent: 'terminal' });
+  assert.deepEqual(typed, [['t1', 'Homologação, não produção\r']]);
+  assert.equal(svc.operationRun('acme', run.id).visits[0].status, 'running');
+
+  // Moki restarted: its terminal is gone. Answering reopens the step in a new terminal, with the question and the answer.
+  alive.clear();
+  assert.equal(svc.operationRun('acme', run.id).visits[0].live, false);
+  assert.deepEqual(svc.answerOperationStep('acme', run.id, 'Produção'), { sent: 'reopened' });
+  let v = svc.operationRun('acme', run.id).visits[0];
+  assert.equal(v.status, 'ready');
+  assert.deepEqual(v.resume, { question: 'Qual ambiente devo considerar?', answer: 'Produção' });
+  assert.ok(!existsSync(join(dir, 'waiting', 's1.md')), 'the old question is answered');
+  assert.equal(typed.length, 1, 'nothing typed into a terminal that is gone');
+  assert.deepEqual(svc.advanceOperations('acme'), [{ run: run.id, step: 's1' }]);
+  const prompt = svc.startOperationStep('acme', run.id, 's1', 'English').prompt;
+  assert.match(prompt, /You were waiting for the user: Qual ambiente devo considerar\? The user's answer: Produção/);
+  assert.match(prompt, new RegExp(`Continue from what you already delivered in workspace/projects/acme/runs/${run.id}/outputs/s1/`));
+
+  // Reopening a step whose terminal is still open closes that one first.
+  assert.equal(svc.reopenOperationStep('acme', run.id), 's1');
+  assert.deepEqual(killed, ['t2']);
+  v = svc.operationRun('acme', run.id).visits[0];
+  assert.equal(v.status, 'ready');
+  assert.equal(v.attempts, 2);
+  assert.ok((svc.operationRun('acme', run.id).events ?? []).some((e) => e.includes('s1 reopened with your answer')));
+
+  svc.setProjectOperations('acme', []);
+  svc.deleteOperation(op.id);
+  rmSync(dir, { recursive: true });
+});
+
+test('operations: a step whose AI tool cannot open fails once (no retry loop) and is tried again with another AI', () => {
+  const installed = { claude: true, codex: false };
+  const svc = createService(root, {
+    ...noLaunch,
+    // As the launcher does when the command is missing.
+    launch: (tool) => (tool === 'codex' ? { opened: false, message: 'OpenAI Codex CLI is not installed on this computer (command "codex" not found).' } : { opened: true, message: '' }),
+    detectTools: () => installed as never,
+  });
+  const op = svc.saveOperation({
+    name: 'Sem codex', description: '', lanes: [],
+    steps: [{ id: 's1', agent: 'library:requirements-analyst', x: 20, y: 60 }, { id: 's2', agent: 'library:test-designer', x: 320, y: 60 }],
+    links: [{ from: 's1', to: 's2', gate: 'approval', map: {} }],
+  });
+  svc.setProjectOperations('acme', [op.id]);
+  installed.codex = true; // installed when the run started, gone since
+  const run = svc.startOperation('acme', op.id, { tools: { s1: 'codex', s2: 'claude' } });
+  installed.codex = false;
+  const dir = join(root, 'workspace', 'projects', 'acme', 'runs', run.id);
+
+  assert.equal(svc.startOperationStep('acme', run.id, 's1', 'English').opened, false);
+  let state = svc.operationRun('acme', run.id);
+  assert.equal(state.visits[0].status, 'failed');
+  assert.match(state.visits[0].error ?? '', /Codex CLI is not installed/);
+  assert.equal(state.status, 'blocked');
+  assert.deepEqual(svc.advanceOperations('acme'), [], 'a step that could not open is not started again by itself');
+
+  assert.throws(() => svc.retryOperationStep('acme', run.id, 'codex'), /not installed on this computer/);
+  assert.throws(() => svc.retryOperationStep('acme', run.id, 'made-up'), /Choose an AI tool/);
+  assert.equal(svc.retryOperationStep('acme', run.id, 'claude'), 's1');
+  state = svc.operationRun('acme', run.id);
+  assert.equal(state.steps.find((s) => s.id === 's1')?.ai, 'claude', 'from now on in this run');
+  assert.deepEqual(svc.advanceOperations('acme'), [{ run: run.id, step: 's1' }]);
+  assert.equal(svc.startOperationStep('acme', run.id, 's1', 'English').opened, true);
+  assert.equal(svc.operationRun('acme', run.id).visits[0].status, 'running');
+
+  svc.setProjectOperations('acme', []);
+  svc.deleteOperation(op.id);
+  rmSync(dir, { recursive: true });
+});
+
 test('operations: the first time, an example in the app language; deleted, it does not come back', () => {
   const dir = join(root, 'workspace', 'library', 'operations');
   rmSync(dir, { recursive: true, force: true });
@@ -822,9 +1053,10 @@ test('agents per project: enabled list in project.json gates the launch', () => 
   assert.ok(all.includes('requirements-analyst') && !all.includes('automation-engineer'), 'absent list = every usable agent');
   assert.throws(() => service.setProjectAgents('acme', ['automation-engineer']), /Unknown or unavailable/);
   assert.deepEqual(service.setProjectAgents('acme', ['requirements-analyst']), ['requirements-analyst']);
-  const stored = JSON.parse(readFileSync(join(root, 'workspace', 'projects', 'acme', 'project.json'), 'utf8')) as { agents: string[]; project: string };
-  assert.deepEqual(stored.agents, ['requirements-analyst']);
-  assert.equal(stored.project, 'acme');
+  // Kept as tags (workspace/library/agent-tags.json): the other agents now reach every project but acme.
+  const tags = (JSON.parse(readFileSync(join(root, 'workspace', 'library', 'agent-tags.json'), 'utf8')) as { agents: Record<string, string[]> }).agents;
+  assert.ok(!tags['requirements-analyst'], 'still in every project: no tag');
+  assert.ok(tags['failure-analyst'].every((t) => t.startsWith('project:')) && !tags['failure-analyst'].includes('project:acme'));
 
   const base = { project: 'acme', activity: 'review', tool: 'print', files: ['us-1.md'], language: 'English', note: '' };
   assert.throws(() => service.launch({ ...base, agent: 'failure-analyst' }), /not enabled in this project/);

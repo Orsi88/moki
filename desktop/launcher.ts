@@ -134,8 +134,8 @@ export function launchInTerminal(tool: ToolKey, prompt: string, root: string, pr
   if (!which(t.command)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
   const args = [...pluginArgs(tool, root, plugins), ...extra, ...(prompt ? t.args(cleanPrompt(prompt)) : [])];
   const id = prepare(process.platform === 'win32'
-    ? { file: which('node') ?? process.execPath, args: [runToolPath(), requestFile(tool, args, root, t.label)], cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
-    : { file: t.command, args, cwd: root });
+    ? { file: which('node') ?? process.execPath, args: [runToolPath(), requestFile(tool, args, root, t.label)], cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, title: t.label }
+    : { file: t.command, args, cwd: root, title: t.label });
   return { opened: true, message: `${t.label} opened in a terminal tab${prompt ? ' with your request' : ''}.`, terminal: { id, title: t.label } };
 }
 

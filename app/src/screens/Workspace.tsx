@@ -61,6 +61,17 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   // The right panel is open or collapsed to a thin rail; the choice is remembered.
   const [panelRail, setPanelRail] = useState(() => recall('qa-panel') === 'rail');
   const togglePanel = () => setPanelRail((v) => { remember('qa-panel', v ? 'open' : 'rail'); return !v; });
+  // A document with its own column on the right (a PDF's comments) takes the panel's place: one open at a time.
+  const [docSide, setDocSide] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setDocSide(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener('moki:doc-side', on);
+    return () => window.removeEventListener('moki:doc-side', on);
+  }, []);
+  const toggleSide = () => {
+    if (docSide) { window.dispatchEvent(new Event('moki:doc-side-close')); setPanelRail(false); return; }
+    togglePanel();
+  };
   const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean } | null>(launchOnOpen ? { activity: 'open' } : null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState('');
@@ -175,6 +186,14 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
       .catch((e: Error) => { update(path, { saving: false }); setError(e.message); });
   }, [project.id]);
 
+  // A change made by Moki itself (a comment in a .md): the new text is saved at once, edits not saved yet included.
+  const commit = useCallback((path: string, text: string) => {
+    update(path, { draft: text, saving: true });
+    api.writeFile(project.id, path, text)
+      .then((content) => update(path, { content, draft: textOf(content), saving: false }))
+      .catch((e: Error) => { update(path, { saving: false }); setError(e.message); });
+  }, [project.id]);
+
   const close = useCallback((path: string) => {
     const tab = tabsRef.current.find((t) => t.path === path);
     if (tab && isDirty(tab) && !window.confirm(t('Discard unsaved changes in {file}?', { file: path.split('/').pop() ?? path }))) return;
@@ -187,6 +206,15 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   }, []);
 
   const addTerminal = useCallback((t: TerminalRef) => { setTerms((all) => (all.some((x) => x.id === t.id) ? all : [...all, { ...t, running: true }])); setGraphFocus(false); setActiveTerm(t.id); }, []);
+
+  // Terminals outlive the project's screen: the ones still running for it come back as tabs, with what they printed meanwhile.
+  useEffect(() => {
+    void api.term()?.list?.(project.id).then((running) => {
+      if (!running.length) return;
+      setTerms((all) => [...all, ...running.filter((r) => !all.some((x) => x.id === r.id)).map((r) => ({ ...r, running: true }))]);
+      setActiveTerm((cur) => cur ?? running[running.length - 1].id);
+    }).catch(() => { /* no terminals to bring back */ });
+  }, [project.id]);
 
   // Operations move on when a step's files are there: the next step starts in a terminal tab (or waits for approval).
   const advancing = useRef(false);
@@ -233,9 +261,11 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
     setTermMenu({ left: r.left, top: r.bottom + 4 });
   };
 
-  // Closing the tab stops what runs in it (TerminalView kills it when unmounted).
+  // Closing the tab stops what runs in it (leaving the project does not: the terminal comes back when it opens again).
+  // When it ran a step of an operation, the main process tells the run.
   const closeTerm = (id: string) => {
     if (terms.find((t) => t.id === id)?.running && !window.confirm(t('Close this terminal? What is running in it will stop.'))) return;
+    api.term()?.kill(id);
     setTerms((all) => {
       const i = all.findIndex((t) => t.id === id);
       const next = all.filter((t) => t.id !== id);
@@ -278,9 +308,8 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
     api.copyPath(project.id, path).then((full) => setNotice(t('Path copied: {path}', { path: full }))).catch((e: Error) => setError(e.message));
   };
 
-  // Leaving the workspace closes its terminals.
-  const canLeave = () => !(tabsRef.current.some(isDirty) && !window.confirm(t('There are unsaved changes. Leave anyway?')))
-    && !(terms.some((t) => t.running) && !window.confirm(t('Terminals are still running in this project. Leaving closes them. Leave anyway?')));
+  // Leaving the workspace keeps its terminals running (they come back with it); only unsaved changes ask first.
+  const canLeave = () => !(tabsRef.current.some(isDirty) && !window.confirm(t('There are unsaved changes. Leave anyway?')));
 
   const goHome = () => { if (canLeave()) onHome(); };
   const hideThis = () => {
@@ -377,7 +406,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
 
   return (
     <div
-      className={`workspace${panelRail && !settings ? ' panel-rail' : ''}${settings ? ' is-settings' : ''}${dropping ? ' dropping' : ''}`}
+      className={`workspace${(panelRail || docSide) && !settings ? ' panel-rail' : ''}${settings ? ' is-settings' : ''}${dropping ? ' dropping' : ''}`}
       onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
     >
       <Ribbon
@@ -505,6 +534,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
             onDraft={(draft) => update(tab.path, { draft })}
             onMode={(mode) => update(tab.path, { mode })}
             onSave={() => save(tab.path)}
+            onCommit={(text) => commit(tab.path, text)}
             onOpenExternal={() => openExternal(tab.path)}
             onLink={onLink}
             onPdfSaved={(path) => {
@@ -535,7 +565,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
         )}
       </main>
 
-      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onTerminal={addTerminal} onMyFolder={myFolder} onSetup={() => setShowSetup(true)} collapsed={panelRail} onToggle={togglePanel} graphOn={graphFocus} onGraph={toggleGraph} />
+      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onTerminal={addTerminal} onMyFolder={myFolder} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} />
       </>}
 
       {dropping && <div className="drop-veil" role="status">{t('Drop to keep the files in this project')}</div>}

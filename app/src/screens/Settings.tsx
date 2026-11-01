@@ -10,12 +10,12 @@ import { api, type ProjectSummary, type SkillScope, type TerminalRef, type ToolI
 import { t } from '../i18n';
 import { recall, remember } from '../prefs';
 import { AgentForm } from '../components/AgentForm';
-import { SkillsDialog, type SkillDialogTab } from '../components/SkillsDialog';
+import { type SkillDialogTab } from '../components/SkillsDialog';
 import { Library } from './Library';
 import { DocumentStyleForm } from '../components/DocumentStyleForm';
+import { SkillsPage } from '../components/SkillsPage';
 import { Operations } from './Operations';
 import { McpManager } from '../components/McpManager';
-import { ProjectPicker } from '../components/ProjectPicker';
 
 export type SettingsTab = 'agents' | 'operations' | 'skills' | 'mcp' | 'documents';
 
@@ -33,7 +33,6 @@ interface Props {
 }
 
 export function Settings({ tab, onTab, onClose, onBack, backLabel, project, projects: given, tools, onTerminal }: Props) {
-  const [pickedId, setPickedId] = useState<string | null>(null);
   // Every project of the workspace, for the tabs' pickers (opened from a project, Settings is given only that one).
   const [projects, setProjects] = useState<ProjectSummary[]>(given);
   useEffect(() => { api.projects().then((all) => { if (all.length) setProjects(all); }).catch(() => {}); }, []);
@@ -43,8 +42,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
   const [scope, setScope] = useState<SkillScope>(() => (recall('qa-skill-scope') === 'global' ? 'global' : 'project'));
   // Settings is for the whole workspace: the tabs that work on one project (Agents, Skills, Templates)
   // choose it inside the tab; it starts on the project Settings was opened from.
-  const target = projects.find((p) => p.id === pickedId) ?? project ?? projects[0] ?? null;
-  const picker = <ProjectPicker projects={projects} value={target?.id ?? ''} onChange={setPickedId} />;
+  const target = project ?? projects[0] ?? null;
 
   const openSkills = (next: SkillDialogTab) => { setSkillsTab(next); onTab('skills'); };
 
@@ -72,15 +70,13 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
         </div>
       </div>
       <div className="settings-body">
-        {tab === 'documents' ? <DocumentStyleForm key={target?.id ?? 'none'} project={target} picker={picker} startOnProject={Boolean(project) || Boolean(pickedId)} />
+        {tab === 'documents' ? <DocumentStyleForm />
           : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} projects={projects} />
           : tab === 'operations' ? <Operations tools={tools} />
           : tab === 'agents'
           ? (
             <Library
               embedded
-              project={target}
-              projectPicker={picker}
               installedTick={installedTick}
               onBack={() => {}}
               backLabel=""
@@ -118,14 +114,12 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
             </div>
           ) : (
             <>
-              <SkillsDialog
-                key={`${target.id}:${skillsTab}`}
-                embedded
-                initialTab={skillsTab}
+              <SkillsPage
+                key={skillsTab}
+                startOnAdd={skillsTab === 'add'}
                 project={target}
-                projectPicker={picker}
+                projects={projects}
                 tools={tools}
-                onClose={() => onTab('agents')}
                 onTerminal={(terminal) => onTerminal(terminal, target.id)}
               />
             </>

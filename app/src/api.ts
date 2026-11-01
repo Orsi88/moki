@@ -33,7 +33,7 @@ export interface ActivityInfo { id: string; label: string; hint: string; skill: 
 // "Open with" (Excel, Word and PDF files): the programs the system offers; dialog = the system shows its own list instead (Windows).
 export interface OpenWithApps { dialog: boolean; apps: { id: string; name: string; isDefault: boolean }[] }
 // PDF comments and page edits, written by PdfCraft (desktop/pdfcraft.ts). Quads: 8 numbers, points from the page's top-left.
-export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; replies: PdfComment[] }
+export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; rect: number[] | null; replies: PdfComment[] }
 export interface PdfMark { page: number; quads: number[][] }
 export type PdfChange =
   | { op: 'highlight'; page: number; find: string; all: boolean; contents?: string; color: string }
@@ -103,28 +103,44 @@ export interface OperationPlanStep { id: string; agent: string; description: str
 export interface OperationPlan { operation: Operation; steps: OperationPlanStep[]; mcpsByTool: Record<string, string[] | null>; inbox: string[] }
 export interface OperationAnswer { step: string; input: string; text: string; files: string[] }
 // A run: its steps (agents), and each time one ran (a visit: "s2", then "s2-2" when a loop brought it back).
-export interface OperationRunStep { id: string; agent: string; name: string; inputs: string[]; outputs: string[]; outcomes: string[]; executes: string[]; lane: string; ai: string }
-export type VisitStatus = 'awaiting-approval' | 'ready' | 'running' | 'done';
+// x, y and the run's lanes: the board as it was when the run started (older runs have none).
+export interface OperationRunStep { id: string; agent: string; name: string; inputs: string[]; outputs: string[]; outcomes: string[]; executes: string[]; lane: string; ai: string; x?: number; y?: number }
+export type VisitStatus = 'awaiting-approval' | 'ready' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface OperationVisit {
-  slot: string; step: string; round: number; from: string; gate: string; status: VisitStatus;
+  slot: string; step: string; round: number; from: string; gate: string; map: Record<string, string>; status: VisitStatus;
   outcome?: string; question?: string; terminal?: string; startedAt?: string; finishedAt?: string; handoff?: boolean; missing?: string[];
+  error?: string; attempts?: number; notes?: string;
+  live?: boolean; // running, with its terminal open in this session
 }
 export interface OperationDecision { kind: 'path' | 'limit'; from: string; outcome?: string; options: { to: string; when: string }[] }
 export interface OperationRun {
   id: string; project: string; operation: { id: string; name: string }; status: string; currentStep: string;
   createdAt: string; updatedAt: string; paused: boolean; ended: boolean; maxRounds: number;
   steps: OperationRunStep[]; visits: OperationVisit[]; decision: OperationDecision | null; artifacts: string[];
+  links: OperationLink[]; lanes?: OperationLane[];
+  approvals: { step: string; decision: string; at: string; notes?: string }[];
+  canRedo?: boolean; events?: string[]; // whether rejecting can send the work back; the last lines of its log
 }
 
 export interface AgentInfo extends AgentContract {
   name: string; description: string; category: string; skills: string[]; access: string; version: string; status: string;
   basedOn: string; source: 'builtin' | 'custom'; path: string; usable: boolean;
 }
-export interface AgentDetail extends AgentInfo { text: string; html: string }
+export interface AgentDetail extends AgentInfo { text: string; html: string; body: string }
+/** What the page of one of your agents saves at once. */
+export interface AgentProfile { description: string; body: string; skills: string[]; contract: AgentContract }
 export interface Category { id: string; label: string; description: string; source: 'builtin' | 'custom' }
 
 // How generated PDF, Word and Excel files look (scripts/lib/doc-style.mjs). Texts may use
 // {project}, {title}, {date}, {page}, {pages}.
+// Tags say which projects an item applies to (scripts/lib/tags.mjs): none = every project,
+// "project:<id>" = that project, any other = the projects that carry it.
+export interface TagCatalog { tags: Tag[]; projects: { id: string; project: string; name: string; tags: string[] }[] }
+// A template (Settings › Templates): a named document style and the projects it applies to.
+export interface DocumentTemplate {
+  id: string; name: string; tags: string[]; style: DocumentStyle;
+  appliesTo: string[]; usedBy: string[]; defaultOf: string[]; // project ids
+}
 export interface DocumentStyle {
   font: { family: string; size: number; color: string };
   accent: string;
@@ -199,6 +215,8 @@ export interface Bridge {
     input(id: string, data: string): void;
     resize(id: string, cols: number, rows: number): void;
     kill(id: string): void;
+    list?(project: string): Promise<TerminalRef[]>; // the terminals still running for a project (they outlive its tabs)
+    attach?(id: string): Promise<string | null>; // what a running terminal printed; null when it is not running
     on(event: 'data' | 'exit', callback: (id: string, payload: string | number) => void): () => void;
   };
 }
@@ -227,6 +245,7 @@ export const api = {
   forgetWorkspace: (id: string) => call<boolean>('forgetWorkspace', id),
   createProject: (name: string, starter: Starter, folder?: string, tags: string[] = []) => call<ProjectSummary & { backup?: string }>('createProject', name, starter, folder ?? null, tags),
   deleteProject: (project: string, confirm: string) => call<boolean>('deleteProject', project, confirm),
+  deleteNote: (project: string, path: string) => call<boolean>('deleteNote', project, path),
   tags: () => call<Tag[]>('tags'),
   saveTag: (tag: { id?: string; name: string; color?: string; description?: string }) => call<Tag>('saveTag', tag),
   removeTag: (id: string) => call<boolean>('removeTag', id),
@@ -244,8 +263,15 @@ export const api = {
   readFile: (project: string, path: string) => call<FileContent>('readFile', project, path),
   writeFile: (project: string, path: string, text: string) => call<FileContent>('writeFile', project, path, text),
   renderMarkdown: (text: string, project?: string, path?: string) => call<string>('renderMarkdown', text, project, path),
-  documentStyle: (project?: string | null) => call<{ global: DocumentStyle; project: DocumentStyle | null }>('documentStyle', project ?? null),
-  saveDocumentStyle: (project: string | null, style: DocumentStyle | null) => call<boolean>('saveDocumentStyle', project, style),
+  userName: () => call<string>('userName'),
+  templates: () => call<DocumentTemplate[]>('templates'),
+  saveTemplate: (template: Partial<DocumentTemplate> & { name: string; style: DocumentStyle }) => call<DocumentTemplate>('saveTemplate', template),
+  removeTemplate: (id: string) => call<boolean>('removeTemplate', id),
+  setProjectTemplate: (project: string, id: string | null) => call<boolean>('setProjectTemplate', project, id),
+  tagCatalog: () => call<TagCatalog>('tagCatalog'),
+  agentTags: () => call<Record<string, string[]>>('agentTags'),
+  setAgentTags: (name: string, tags: string[]) => call<string[]>('setAgentTags', name, tags),
+  saveAgentProfile: (name: string, profile: AgentProfile) => call<boolean>('saveAgentProfile', name, profile),
   createNote: (project: string, title: string, text: string) => call<string>('createNote', project, title, text),
   run: (project: string, runId: string) => call<RunState>('run', project, runId),
   inbox: (project: string) => call<InboxFile[]>('inbox', project),
@@ -293,12 +319,17 @@ export const api = {
   startOperation: (project: string, id: string, req: { tools: Record<string, string>; answers: OperationAnswer[]; context: string }) => call<OperationRun>('startOperation', project, id, req),
   operationRuns: (project: string) => call<OperationRun[]>('operationRuns', project),
   operationRun: (project: string, run: string) => call<OperationRun>('operationRun', project, run),
+  operationOutputs: (project: string, run: string, slot: string) => call<{ path: string; name: string; size: number }[]>('operationOutputs', project, run, slot),
   advanceOperations: (project: string) => call<{ run: string; step: string }[]>('advanceOperations', project),
   startOperationStep: (project: string, run: string, step: string, language: string) => call<LaunchResult>('startOperationStep', project, run, step, language),
   approveOperationStep: (project: string, run: string) => call<string>('approveOperationStep', project, run),
   chooseOperationPath: (project: string, run: string, to: string) => call<OperationRun>('chooseOperationPath', project, run, to),
   pauseOperation: (project: string, run: string, paused: boolean) => call<OperationRun>('pauseOperation', project, run, paused),
   cancelOperation: (project: string, run: string) => call<OperationRun>('cancelOperation', project, run),
+  rejectOperationStep: (project: string, run: string, notes: string, redo: boolean) => call<OperationRun>('rejectOperationStep', project, run, notes, redo),
+  retryOperationStep: (project: string, run: string, ai = '') => call<string>('retryOperationStep', project, run, ai),
+  answerOperationStep: (project: string, run: string, text: string) => call<{ sent: 'terminal' | 'reopened' }>('answerOperationStep', project, run, text),
+  reopenOperationStep: (project: string, run: string) => call<string>('reopenOperationStep', project, run),
   projectAgents: (project: string) => call<string[]>('projectAgents', project),
   setProjectAgents: (project: string, names: string[]) => call<string[]>('setProjectAgents', project, names),
   searchSkills: (query: string, category = '', page = 1) => call<SkillSearchPage>('searchSkills', query, category, page),

@@ -168,6 +168,34 @@ export function withContract(text: string, c: AgentContract): string {
   return `---\n${front.join('\n')}${normalized.slice(end)}`;
 }
 
+// Puts the skills an agent uses in its file, in place of the ones there.
+export function withSkills(text: string, skills: string[]): string {
+  const normalized = text.replace(/\r\n/g, '\n');
+  const end = normalized.indexOf('\n---', 4);
+  if (!normalized.startsWith('---\n') || end === -1) throw new Error('The file has no frontmatter.');
+  const lines = normalized.slice(4, end).split('\n');
+  const line = `skills: ${skills.join(', ')}`;
+  const at = lines.findIndex((l) => /^skills:/.test(l));
+  if (at >= 0) lines[at] = line;
+  else lines.splice(Math.max(0, lines.findIndex((l) => /^access:/.test(l))), 0, line);
+  return `---\n${lines.join('\n')}${normalized.slice(end)}`;
+}
+
+// The description (one line in the frontmatter) and the instructions (the body) of an agent's file.
+export function withProfile(text: string, profile: { description: string; body: string }): string {
+  const normalized = text.replace(/\r\n/g, '\n');
+  const end = normalized.indexOf('\n---', 4);
+  if (!normalized.startsWith('---\n') || end === -1) throw new Error('The file has no frontmatter.');
+  const one = profile.description.replace(/\s+/g, ' ').trim();
+  const value = /^["'>|]/.test(one) || /["']$/.test(one) ? `"${one}"` : one;
+  const lines = normalized.slice(4, end).split('\n');
+  const at = lines.findIndex((l) => /^description:/.test(l));
+  if (at >= 0) lines[at] = `description: ${value}`;
+  else lines.splice(1, 0, `description: ${value}`);
+  const body = profile.body.replace(/\r\n/g, '\n').replace(/^\n+/, '').replace(/\s*$/, '\n');
+  return `---\n${lines.join('\n')}\n---\n\n${body}`;
+}
+
 function readAgents(dir: string, source: Agent['source'], root: string): Agent[] {
   if (!existsSync(dir)) return [];
   const agents: Agent[] = [];

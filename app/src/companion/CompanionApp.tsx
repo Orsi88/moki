@@ -11,9 +11,10 @@ import { remember } from '../prefs';
 import { ACTIVITY_CAT } from '../icons/cats';
 import { CatIcon } from '../components/CatIcon';
 import { IconCopy, IconMcp, IconPlay, IconRefresh, IconStar } from '../components/Icons';
-import { call } from './bridge';
+import { call, onVisible, setBadge } from './bridge';
+import { OperationRunScreen, OperationStarter, visitText } from './Operations';
 
-type Tab = 'activities' | 'agents' | 'context' | 'runs';
+type Tab = 'activities' | 'agents' | 'context' | 'operations' | 'runs';
 interface State { project: { id: string; name: string; description: string; repository: string } | null; projects: { id: string; name: string }[]; folder: string | null; mcp: { id: string; name: string; access: string; transport: string }[] }
 interface ContextFile { id: string; path: string; title: string; description: string; kind: string; source: string; included: boolean; priority: boolean }
 interface Launch { activity: string; run?: string; agent?: string; needsFiles?: boolean; key: string }
@@ -31,9 +32,18 @@ export function CompanionApp() {
   const [open, setOpen] = useState<string>(''); // the card whose launch options are showing
   const [notice, setNotice] = useState<{ text: string; warn?: boolean } | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [connectMenu, setConnectMenu] = useState(false); // which AI tool gets Moki's MCP servers
+  const [openRun, setOpenRun] = useState(''); // the operation run whose screen is showing
+  const [tick, setTick] = useState(0); // counts reloads, so an open run screen reloads with the rest
+  // Run updates not seen yet: each run's last seen state, per project (kept in this webview's storage).
+  const [visible, setVisible] = useState(true);
+  useEffect(() => onVisible(setVisible), []);
+  const [seen, setSeen] = useState<Record<string, string> | null>(null);
 
   const fail = (e: unknown) => setNotice({ text: e instanceof Error ? e.message : String(e), warn: true });
+  const notify = useCallback((text: string, warn?: boolean) => setNotice({ text, warn }), []);
   const load = useCallback(() => {
+    setTick((n) => n + 1);
     call<State>('state').then((s) => {
       setState(s);
       if (!s.project) return;
@@ -47,13 +57,36 @@ export function CompanionApp() {
   }, []);
   useEffect(() => { load(); return window.qa?.onChanged(() => load()); }, [load]);
 
-  const choose = (id: string) => { setOpen(''); setNotice(null); call('chooseProject', id).then(load).catch(fail); };
-  const connect = () => {
-    setConnecting(true);
-    call<{ changed: boolean; cancelled: boolean; file: string }>('connectClaude')
-      .then((r) => { if (!r.cancelled) setNotice({ text: r.changed ? t('Claude Code connected: {file}', { file: r.file }) : t('Claude Code already had Moki\'s servers.') }); })
+  const choose = (id: string) => { setOpen(''); setOpenRun(''); setNotice(null); call('chooseProject', id).then(load).catch(fail); };
+  // VS Code's own AI gets the servers by itself; the AI tools opened on this folder read them from a file written here.
+  const connect = (tool: 'claude' | 'cursor' | 'codex') => {
+    setConnectMenu(false); setConnecting(true);
+    const label = { claude: 'Claude Code', cursor: 'Cursor', codex: 'Codex' }[tool];
+    call<{ changed: boolean; cancelled: boolean; file: string; skipped?: string[] }>('connectTool', tool)
+      .then((r) => {
+        if (r.cancelled) return;
+        const left = r.skipped?.length ? ` ${t('Left out (a variable Codex cannot read): {list}', { list: r.skipped.join(', ') })}` : '';
+        setNotice({ text: (r.changed ? t('{tool} connected: {file}', { tool: label, file: r.file }) : t('{tool} already had Moki\'s servers.', { tool: label })) + left, warn: Boolean(r.skipped?.length) });
+      })
       .catch(fail).finally(() => setConnecting(false));
   };
+
+  // What is seen: the first time, everything listed; then the Runs list while it is on screen, and the run whose screen is open.
+  const project = state?.project?.id ?? '';
+  useEffect(() => {
+    if (!project) return;
+    const now = runStates(operations, runs);
+    const key = `moki-seen:${project}`;
+    let known: Record<string, string> | null = null;
+    try { known = JSON.parse(localStorage.getItem(key) ?? 'null') as Record<string, string> | null; } catch { /* storage off */ }
+    const next = { ...(known ?? now) };
+    if (visible && tab === 'runs') {
+      if (openRun) { if (now[openRun]) next[openRun] = now[openRun]; } else Object.assign(next, now);
+    }
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* storage off */ }
+    setSeen(next);
+    setBadge(Object.keys(now).filter((id) => next[id] !== now[id]).length);
+  }, [project, operations, runs, visible, tab, openRun]);
 
   if (!state) return <div className="mk"><p className="mk-empty muted">{t('Loading…')}</p></div>;
 
@@ -85,7 +118,9 @@ export function CompanionApp() {
   }
 
   const included = files.filter((f) => f.included).length;
-  const openCount = runs.length + operations.filter((o) => !['completed', 'cancelled'].includes(o.status)).length;
+  const states = runStates(operations, runs);
+  const fresh = seen ? Object.keys(states).filter((id) => seen[id] !== states[id]) : [];
+  const openOps = operations.filter((o) => !['completed', 'cancelled'].includes(o.status)).length;
   const toggle = (key: string) => { setOpen((o) => (o === key ? '' : key)); setNotice(null); };
   const launchBox = (l: Launch) => open === l.key && (
     <LaunchBox launch={l} inbox={inbox} languages={languages} agents={l.agent || l.run ? [] : agents.filter((a) => !l.activity || a.skills.includes(activities.find((x) => x.id === l.activity)?.skill ?? ''))}
@@ -96,9 +131,10 @@ export function CompanionApp() {
     <div className="mk">
       {header}
       <div className="dialog-tabs mk-tabs" role="tablist">
-        {([['activities', t('Activities')], ['agents', t('Agents')], ['context', t('Context')], ['runs', t('Runs')]] as const).map(([id, label]) => (
+        {([['activities', t('Activities')], ['agents', t('Agents')], ['context', t('Context')], ['operations', t('Operations')], ['runs', t('Runs')]] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={`dialog-tab${tab === id ? ' on' : ''}`} onClick={() => { setTab(id); setOpen(''); }}>
-            {label}{id === 'runs' && openCount > 0 && <span className="mk-count">{openCount}</span>}
+            {label}{id === 'runs' && runs.length + openOps > 0 && <span className="mk-count">{runs.length + openOps}</span>}
+            {id === 'runs' && fresh.length > 0 && <span className="mk-new" role="img" aria-label={t('Updates not seen')} title={t('Updates not seen')} />}
           </button>
         ))}
       </div>
@@ -137,38 +173,71 @@ export function CompanionApp() {
             }} />
         )}
 
-        {tab === 'runs' && (
+        {tab === 'operations' && (
+          <div className="mk-list">
+            <p className="muted small">{t('Pick an operation, choose the AI of each step and start it: each step opens in its own terminal and the next one starts when it delivers. Follow it in Runs.')}</p>
+            <OperationStarter inbox={inbox} notify={notify} onStarted={(id) => { setOpenRun(id); setTab('runs'); load(); }} />
+          </div>
+        )}
+
+        {tab === 'runs' && !openRun && (
           <div className="mk-list">
             {!runs.length && !operations.length && <p className="muted small">{t('Nothing in progress in this project.')}</p>}
+            {operations.length > 0 && <h3 className="mk-section">{t('Operations')}</h3>}
+            {operations.map((o) => {
+              const v = o.visits.at(-1);
+              const agent = v ? o.steps.find((s) => s.id === v.step)?.name ?? v.step : '';
+              return (
+                <Card key={o.id} on={false} fresh={fresh.includes(o.id)} icon={<CatIcon id="flow" size={40} />} title={o.operation.name}
+                  hint={v && !o.ended ? `${agent}: ${visitText(v)}` : describeRun(o.id).date} pill={o.paused ? t('Paused') : statusLabel(o.status)} onPick={() => setOpenRun(o.id)} />
+              );
+            })}
             {runs.length > 0 && <h3 className="mk-section">{t('Activities to resume')}</h3>}
             {runs.map((r) => (
-              <Card key={r.id} on={open === `run:${r.id}`} icon={<CatIcon id="run" size={40} />} title={describeRun(r.id).title}
+              <Card key={r.id} on={open === `run:${r.id}`} fresh={fresh.includes(r.id)} icon={<CatIcon id="run" size={40} />} title={describeRun(r.id).title}
                 hint={`${describeRun(r.id).date}${r.currentStep ? ` · ${t('stopped at:')} ${r.currentStep}` : ''}`} pill={statusLabel(r.status)} onPick={() => toggle(`run:${r.id}`)}>
                 {launchBox({ key: `run:${r.id}`, activity: 'resume', run: r.id })}
               </Card>
             ))}
-            {operations.length > 0 && <h3 className="mk-section">{t('Operations')}</h3>}
-            {operations.map((o) => (
-              <Card key={o.id} on={false} icon={<CatIcon id="flow" size={40} />} title={o.operation.name}
-                hint={o.currentStep ? `${t('Step')}: ${o.steps.find((s) => o.currentStep.startsWith(s.id))?.name ?? o.currentStep}` : describeRun(o.id).date} pill={statusLabel(o.status)} />
-            ))}
-            {operations.length > 0 && <p className="muted small">{t('Operations are run step by step in the Moki app.')}</p>}
           </div>
         )}
+        {tab === 'runs' && openRun && <OperationRunScreen runId={openRun} tick={tick} notify={notify} onBack={() => { setOpenRun(''); load(); }} />}
       </main>
 
       <footer className="mk-foot">
         <span className="mk-mcp" title={state.mcp.map((m) => m.name).join(', ')}><IconMcp size={14} /> {t('MCPs: {n} on', { n: state.mcp.length })}</span>
-        <button type="button" className="btn btn-ghost btn-sm" disabled={connecting} onClick={connect} title={t('Writes Moki\'s MCP servers to this folder\'s .mcp.json, which Claude Code in the IDE reads.')}>{t('Connect Claude Code')}</button>
+        <div className="mk-connect">
+          <button type="button" className="btn btn-ghost btn-sm" disabled={connecting} aria-expanded={connectMenu} onClick={() => setConnectMenu((v) => !v)}
+            title={t('Give Moki\'s MCP servers to an AI tool opened on this folder. VS Code\'s own AI already gets them.')}>{t('Connect to…')}</button>
+          {connectMenu && (
+            <>
+              <div className="mk-menu-backdrop" onMouseDown={() => setConnectMenu(false)} />
+              <ul className="mk-menu" role="menu" aria-label={t('Connect to…')}>
+                {([['claude', 'Claude Code', '.mcp.json'], ['cursor', 'Cursor', '.cursor/mcp.json'], ['codex', 'Codex', '.codex/config.toml']] as const).map(([id, label, file]) => (
+                  <li key={id}><button type="button" role="menuitem" onClick={() => connect(id)}><span>{label}</span><span className="muted small">{file}</span></button></li>
+                ))}
+                <li className="mk-menu-note muted small">{t('VS Code\'s own AI (Copilot) already gets them.')}</li>
+              </ul>
+            </>
+          )}
+        </div>
         <button type="button" className="icon-btn" onClick={load} title={t('Refresh')} aria-label={t('Refresh')}><IconRefresh size={14} /></button>
       </footer>
     </div>
   );
 }
 
-function Card({ on, icon, title, hint, pill, chips, onPick, children }: { on: boolean; icon: ReactNode; title: string; hint: string; pill?: string; chips?: string[]; onPick?: () => void; children?: ReactNode }) {
+// Each run's state as a short text: a change means something happened (a step moved on, asked, finished…).
+function runStates(operations: OperationRun[], runs: OpenRun[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const o of operations) { const v = o.visits.at(-1); out[o.id] = `${o.status}|${o.paused}|${o.visits.length}|${v?.status ?? ''}|${v?.outcome ?? ''}`; }
+  for (const r of runs) out[r.id] = `${r.status}|${r.currentStep}`;
+  return out;
+}
+
+function Card({ on, fresh = false, icon, title, hint, pill, chips, onPick, children }: { on: boolean; fresh?: boolean; icon: ReactNode; title: string; hint: string; pill?: string; chips?: string[]; onPick?: () => void; children?: ReactNode }) {
   return (
-    <div className={`mk-card${on ? ' on' : ''}`}>
+    <div className={`mk-card${on ? ' on' : ''}${fresh ? ' fresh' : ''}`}>
       <button type="button" className="mk-card-head" onClick={onPick} disabled={!onPick} aria-expanded={onPick ? on : undefined}>
         <span className="mk-card-icon">{icon}</span>
         <span className="mk-card-text">

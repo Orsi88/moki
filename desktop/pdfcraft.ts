@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import { which } from '../scripts/lib/core.ts';
 
 export interface PdfStep { tool: string; args: Record<string, unknown> }
-export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; replies: PdfComment[] }
+// rect: where it is on its page, [x0, y0, x1, y1] in points from the top-left of the page as displayed.
+export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; rect: number[] | null; replies: PdfComment[] }
 export interface PdfMark { page: number; quads: number[][] } // quads: 8 numbers each, points from the page's top-left
 export type PdfChange =
   | { op: 'highlight'; page: number; find: string; all: boolean; contents?: string; color: string }
@@ -108,9 +109,10 @@ export function toComments(listResult: unknown): PdfComment[] {
   const items = Array.isArray(listResult) ? listResult : (listResult as { comments?: unknown })?.comments;
   if (!Array.isArray(items)) return [];
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  const rect = (v: unknown) => (Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === 'number' && Number.isFinite(n)) ? v as number[] : null);
   return items.filter((c) => c && typeof c === 'object' && typeof c.id === 'string').map((c) => ({
     id: c.id, page: Number(c.page) || 0, type: str(c.type) ?? '', author: str(c.author), contents: str(c.contents), color: str(c.color),
-    replies: toComments(c.replies),
+    rect: rect(c.rect), replies: toComments(c.replies),
   }));
 }
 

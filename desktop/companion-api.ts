@@ -3,10 +3,14 @@
 // the project the IDE is connected to: a project id sent by the page is never
 // used. Starting the AI goes through the same service.launch as the desktop app,
 // so the request, the context exclusions and the MCP servers are the same.
+// Multi-agent operations run on the same engine as in the app (scripts/lib/operation-runs.ts):
+// drive() is the app's loop — advance every open run, start the steps that are ready —
+// and runs after each action and whenever the project's files change.
 
 import { listProjects, projectSummary, type ProjectSummary } from '../scripts/lib/core.ts';
 import { enabledServers, generatedEntries, syncToolFolder, toolFile, type McpServer } from '../scripts/lib/mcp.ts';
 import type { Companion, Resource } from './companion.ts';
+import { AGENT_AIS } from '../scripts/lib/agents.ts';
 import type { Service } from './service.ts';
 
 // What the extension host gives: the active project, the clipboard, the chat, a confirmation dialog, the open folder.
@@ -19,6 +23,8 @@ export interface CompanionHost {
   folder: () => string | null; // the folder open in the IDE (its .mcp.json for Claude Code)
   tracked: (folder: string, file: string) => boolean; // the file is versioned in the folder's Git repository
   mokiServer: (project: string) => McpServer;
+  language: () => string; // the language the agents talk in (one of LANGUAGES)
+  showTerminal: (id: string) => boolean; // brings a step's terminal to the front; false when it is not open here
 }
 
 export interface ContextFile { id: string; path: string; title: string; description: string; kind: string; source: string; included: boolean; priority: boolean }
@@ -58,6 +64,25 @@ export function createCompanionApi(root: string, service: Service, host: Compani
     });
   };
 
+  // The app's operation loop. One pass at a time; a step that cannot start is marked failed by the engine.
+  let driving = false;
+  const drive = (): { run: string; step: string; opened: boolean; message: string }[] => {
+    const c = host.companion();
+    if (!c || driving) return [];
+    driving = true;
+    try {
+      return service.advanceOperations(c.project).map(({ run, step }) => {
+        try {
+          const r = service.startOperationStep(c.project, run, step, host.language());
+          return { run, step, opened: r.opened, message: r.message };
+        } catch (e) { return { run, step, opened: false, message: e instanceof Error ? e.message : String(e) }; }
+      });
+    } finally { driving = false; }
+  };
+  // An action on a run, then the loop, so a step made ready starts at once.
+  const act = <T>(fn: (project: string) => T): T => { const r = fn(active().project); drive(); return r; };
+  const runOf = (runId: unknown) => service.operationRun(active().project, runId);
+
   const calls: Record<string, (...a: unknown[]) => unknown> = {
     state: (): CompanionState => {
       const c = host.companion();
@@ -82,6 +107,39 @@ export function createCompanionApi(root: string, service: Service, host: Compani
     inbox: () => service.inbox(active().project),
     openRuns: () => service.openRuns(active().project),
     operationRuns: () => service.operationRuns(active().project),
+    // ---- multi-agent operations (the same calls the app's Operations panel makes)
+    // Every operation of the workspace (the example one is created when there is none, as in the app),
+    // the ones this project already uses first, each marked.
+    operations: () => {
+      const linked = new Set(service.projectOperations(active().project).map((o) => o.id));
+      const all = service.operations(host.language().startsWith('Portuguese') ? 'pt-BR' : 'en').map((o) => ({ ...o, linked: linked.has(o.id) }));
+      return [...all.filter((o) => o.linked), ...all.filter((o) => !o.linked)];
+    },
+    // Opening an operation to start it here links it to the project (project.json "operations"), as the app does.
+    operationPlan: (id) => {
+      const project = active().project;
+      const linked = service.projectOperations(project).map((o) => o.id);
+      if (!linked.includes(String(id))) service.setProjectOperations(project, [...linked, String(id)]);
+      return service.operationPlan(project, id);
+    },
+    // The AI tools a step can run in: the terminal ones the agents may name, and whether each is installed.
+    aiTools: () => service.integrations().filter((t) => (AGENT_AIS as readonly string[]).includes(t.id)),
+    startOperation: (id, request) => act((p) => service.startOperation(p, id, request)),
+    operationRun: (runId) => runOf(runId),
+    approveOperationStep: (runId) => act((p) => service.approveOperationStep(p, runId)),
+    rejectOperationStep: (runId, notes, redo) => act((p) => service.rejectOperationStep(p, runId, notes, redo)),
+    retryOperationStep: (runId, ai) => act((p) => service.retryOperationStep(p, runId, ai)),
+    answerOperationStep: (runId, text) => act((p) => service.answerOperationStep(p, runId, text)),
+    reopenOperationStep: (runId) => act((p) => service.reopenOperationStep(p, runId)),
+    chooseOperationPath: (runId, to) => act((p) => service.chooseOperationPath(p, runId, to)),
+    pauseOperation: (runId, paused) => act((p) => service.pauseOperation(p, runId, paused)),
+    cancelOperation: (runId) => act((p) => service.cancelOperation(p, runId)),
+    // The running step's terminal, in front.
+    showTerminal: (runId) => {
+      const v = runOf(runId).visits.at(-1);
+      if (!v?.terminal || !host.showTerminal(v.terminal)) throw new Error('The terminal of this step is not open in VS Code.');
+      return true;
+    },
     context: () => contextFiles(active()),
     // "Goes to the AI": on = the AI may read it and requests include it; off = left out of both.
     setIncluded: (id, on) => {
@@ -106,26 +164,31 @@ export function createCompanionApi(root: string, service: Service, host: Compani
       const chat = await host.focusChat(prompt);
       return { prompt, chat };
     },
-    // Claude Code in the IDE reads MCP servers from the folder's .mcp.json: Moki's entries go there after the person confirms.
-    connectClaude: async () => {
+    // An AI tool opened on this folder reads its MCP servers from a file there (Claude Code: .mcp.json;
+    // Cursor: .cursor/mcp.json; Codex: .codex/config.toml): Moki's entries go there after the person confirms.
+    connectTool: async (tool: unknown) => {
+      if (tool !== 'claude' && tool !== 'cursor' && tool !== 'codex') throw new Error('Unknown AI tool.');
       const c = active();
       const folder = host.folder();
       if (!folder) throw new Error('Open a folder in the IDE first.');
-      const file = toolFile(folder, 'claude');
-      const versioned = host.tracked(folder, '.mcp.json');
+      const file = toolFile(folder, tool);
+      const rel = tool === 'cursor' ? '.cursor/mcp.json' : tool === 'codex' ? '.codex/config.toml' : '.mcp.json';
+      const label = { claude: 'Claude Code', cursor: 'Cursor', codex: 'Codex' }[tool];
+      const versioned = host.tracked(folder, rel);
       const ok = await host.confirm(
         `Write Moki's MCP servers to ${file}?`,
-        `Claude Code in the IDE reads its MCP servers from this file. Only Moki's entries (moki, moki-*) change; yours stay, and the current file is backed up to .moki-backup/ first.${versioned ? ' This file is versioned in Git: the change will show in your commits.' : ''}`,
+        `${label} opened on this folder reads its MCP servers from this file. Only Moki's entries change; yours stay, and the current file is backed up to .moki-backup/ first.${tool === 'codex' ? ' Codex reads a project\'s .codex/config.toml only when the project is trusted.' : ''}${versioned ? ' This file is versioned in Git: the change will show in your commits.' : ''}`,
       );
-      if (!ok) return { changed: false, cancelled: true, file };
-      const r = syncToolFolder(folder, generatedEntries(host.mokiServer(c.project), enabledServers(c.project, root)), 'claude');
-      c.log('connect-claude', { changed: r.changed });
-      return { ...r, cancelled: false };
+      if (!ok) return { changed: false, cancelled: true, file, tool };
+      const r = syncToolFolder(folder, generatedEntries(host.mokiServer(c.project), enabledServers(c.project, root)), tool);
+      c.log(`connect-${tool}`, { changed: r.changed });
+      return { ...r, cancelled: false, tool };
     },
+    connectClaude: () => calls.connectTool('claude'),
   };
 
   // One message from the page: only names in the list, never the whole service.
-  return async (method: unknown, args: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> => {
+  const call = async (method: unknown, args: unknown): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> => {
     if (typeof method !== 'string' || !Object.hasOwn(calls, method)) return { ok: false, error: 'Unknown action.' };
     try {
       return { ok: true, value: await calls[method](...(Array.isArray(args) ? args : [])) };
@@ -133,4 +196,6 @@ export function createCompanionApi(root: string, service: Service, host: Compani
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   };
+  // drive: for the host, when the project's files change (a step wrote its handoff, a question…).
+  return Object.assign(call, { drive });
 }

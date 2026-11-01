@@ -15,6 +15,7 @@ import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './no
 import { setWorkspaceEnv } from './workspaces.ts';
 import { appChooser } from './open-with.ts';
 import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
+import { runPdfLocal } from './pdf-local.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
 import { memoryUsage, planUsage } from './usage.ts';
 
@@ -26,7 +27,10 @@ process.env.QA_RUN_TOOL = join(DIST, 'run-tool.mjs').replace(`app.asar${sep}`, `
 // Moki's MCP server, which the AI tools started from the app get (bundled from ide/mcp/server.ts), unpacked the same way.
 process.env.QA_MCP_SERVER = join(DIST, 'mcp.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 
-const terminals = createTerminals((channel, id, payload) => win?.webContents.send(channel, id, payload));
+// A terminal that ended may have run a step of an operation: the run learns it here, even when its project is not on screen.
+const terminals = createTerminals((channel, id, payload) => win?.webContents.send(channel, id, payload), (id, project) => {
+  if (project) { try { service.operationStepExited(project, id); } catch { /* a run that is gone */ } }
+});
 
 // QA_FAKE_TOOLS (UI tests only): every AI tool looks installed and nothing is started.
 const fakeTools = process.env.QA_FAKE_TOOLS === '1';
@@ -41,7 +45,8 @@ const service = createService(ROOT, {
   reveal: (path) => shell.showItemInFolder(path),
   copy: (text) => clipboard.writeText(text),
   appChooser,
-  pdfcraft: { available: pdfcraftAvailable, run: runPdfcraft },
+  // PDF comments and page edits: PdfCraft when it is installed, otherwise Moki itself (desktop/pdf-local.ts).
+  pdfcraft: { available: () => true, run: (steps, root) => (pdfcraftAvailable() ? runPdfcraft(steps, root) : runPdfLocal(steps, root)) },
   trash: (path) => shell.trashItem(path),
   pickFolder: async () => {
     if (!win) return null;
@@ -49,6 +54,9 @@ const service = createService(ROOT, {
     return r.canceled ? null : r.filePaths[0] ?? null;
   },
   onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
+  killTerminal: (id) => terminals.kill(id),
+  terminalAlive: (id) => terminals.alive(id),
+  writeTerminal: (id, data) => terminals.write(id, data),
 });
 
 let win: BrowserWindow | null = null;
@@ -212,7 +220,7 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('qa:term-new', (event, tool: unknown) => {
       if (!trusted(event)) return { error: 'Untrusted caller.' };
       if (!terminals.available()) return { error: 'Terminals inside the app are not available on this computer (node-pty is not installed).' };
-      if (tool === '') return { terminal: { id: terminals.prepare(shellSpec(ROOT)), title: 'Terminal' } };
+      if (tool === '') return { terminal: { id: terminals.prepare({ ...shellSpec(ROOT), title: 'Terminal' }), title: 'Terminal' } };
       if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].command || TOOLS[tool].clipboard) return { error: 'Unknown tool.' };
       const r = launchInTerminal(tool, '', ROOT, terminals.prepare);
       return r.terminal ? { terminal: r.terminal } : { error: r.message };
@@ -228,6 +236,10 @@ if (!app.requestSingleInstanceLock()) {
       if (trusted(event) && typeof id === 'string' && isSize(cols) && isSize(rows)) terminals.resize(id, cols, rows);
     });
     ipcMain.on('qa:term-kill', (event, id: unknown) => { if (trusted(event) && typeof id === 'string') terminals.kill(id); });
+    // A project opened again: the terminals still running for it, and what one printed while its tab was away.
+    ipcMain.handle('qa:term-list', (event, project: unknown) => (trusted(event) && typeof project === 'string'
+      ? terminals.list().filter((x) => x.project === project).map((x) => ({ id: x.id, title: x.title })) : []));
+    ipcMain.handle('qa:term-attach', (event, id: unknown) => (trusted(event) && typeof id === 'string' ? terminals.attach(id) : null));
 
     // Status bar: plan usage of the AI tools, and memory of the computer, of Moki and of each project's terminals.
     ipcMain.handle('qa:usage', async (event, refresh: unknown) => {

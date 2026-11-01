@@ -5,6 +5,9 @@
 // for the active project). VS Code's AI gets Moki's MCP server (ide/mcp/server.ts) and
 // the servers the project has on in the MCP Manager (scripts/lib/mcp.ts); Claude Code
 // in the IDE gets them through the folder's .mcp.json (Connect Claude Code).
+// Multi-agent operations run here as in the app: each step in its own VS Code terminal,
+// with an id the engine keeps on the step, and the loop (companion-api drive) runs on
+// every change of the project's files, so an operation moves on with the panel closed.
 
 import * as vscode from 'vscode';
 import { createHash, randomBytes } from 'node:crypto';
@@ -23,17 +26,6 @@ import { MCP_FILE, generatedEntries, mokiServer, resolveServer, syncCursorFolder
 
 const PICKED = 'moki.project'; // the project chosen for this VS Code workspace (workspaceState)
 
-// Arguments as an array and no shell, so the request is never read as a command line.
-function openTerminal(spec: TermSpec): string {
-  const terminal = vscode.window.createTerminal({
-    name: 'Moki', shellPath: which(spec.file) ?? spec.file, shellArgs: spec.args, cwd: spec.cwd,
-    // VS Code terminals do not inherit this process's environment; the tools need the active workspace.
-    env: spec.env ?? { QA_WORKSPACE: process.env.QA_WORKSPACE ?? null },
-  });
-  terminal.show();
-  return terminal.name;
-}
-
 // The chat the request goes to: Claude Code's input when its extension is there, else VS Code's chat (Copilot) with the request typed in.
 async function focusChat(prompt: string): Promise<string> {
   const commands = new Set(await vscode.commands.getCommands(true));
@@ -48,20 +40,43 @@ export function start(context: vscode.ExtensionContext): void {
   const webRoot = vscode.Uri.file(join(dist, 'webview'));
   const buildId = ((): string => { try { return (JSON.parse(readFileSync(join(dist, 'build-info.json'), 'utf8')) as { buildId: string }).buildId; } catch { return '0'; } })();
 
+  let companion: Companion | null = null;
+
+  // The terminals Moki opened, by an id of this session: an operation step keeps it (markStarted), to
+  // answer a question in it, close it, or learn that it closed before the step was done.
+  const terminals = new Map<string, { terminal: vscode.Terminal; project: string | null }>();
+  const session = Date.now().toString(36);
+  let opened = 0;
+  // Arguments as an array and no shell, so the request is never read as a command line.
+  const openTerminal = (spec: TermSpec): string => {
+    const id = `vs${session}-${++opened}`;
+    const terminal = vscode.window.createTerminal({
+      name: spec.title ? `Moki · ${spec.title}` : 'Moki', shellPath: which(spec.file) ?? spec.file, shellArgs: spec.args, cwd: spec.cwd,
+      // VS Code terminals do not inherit this process's environment; the tools need the active workspace.
+      env: spec.env ?? { QA_WORKSPACE: process.env.QA_WORKSPACE ?? null },
+    });
+    terminals.set(id, { terminal, project: companion?.project ?? null });
+    terminal.show();
+    return id;
+  };
+  const live = (id: string) => terminals.get(id)?.terminal;
+
   // The same service as the desktop app (it opens the workspace used last); the AI tools open in VS Code's terminals.
   const service = createService(ROOT, {
     launch: (tool, prompt, root, plugins = [], extra = []) => {
       if (TOOLS[tool].clipboard) return launchTool(tool, prompt, root, plugins, extra);
       const r = launchInTerminal(tool, prompt, root, openTerminal, plugins, extra);
-      return { opened: r.opened, message: r.message };
+      return { opened: r.opened, message: r.message, terminal: r.terminal };
     },
     openFolder,
     openPath: (file) => { void vscode.env.openExternal(vscode.Uri.file(file)); },
     copy: (text) => { void vscode.env.clipboard.writeText(text); },
     onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
+    terminalAlive: (id) => { const t = live(id); return Boolean(t && t.exitStatus === undefined); },
+    writeTerminal: (id, data) => { live(id)?.sendText(data, false); }, // the engine ends the answer with a carriage return itself
+    killTerminal: (id) => { live(id)?.dispose(); terminals.delete(id); },
   });
 
-  let companion: Companion | null = null;
   let candidates: string[] = [];
   const panels = new Set<vscode.WebviewView>();
   const mcpChanged = new vscode.EventEmitter<void>();
@@ -75,7 +90,7 @@ export function start(context: vscode.ExtensionContext): void {
 
   let watcher: vscode.FileSystemWatcher | null = null;
   let timer: NodeJS.Timeout | undefined;
-  const later = (): void => { clearTimeout(timer); timer = setTimeout(() => { refresh(); mcpChanged.fire(); }, 400); };
+  const later = (): void => { clearTimeout(timer); timer = setTimeout(() => { drive(); refresh(); mcpChanged.fire(); }, 400); };
   const watch = (project: string | null): void => {
     watcher?.dispose();
     watcher = null;
@@ -96,6 +111,7 @@ export function start(context: vscode.ExtensionContext): void {
     }
     status.text = companion ? `$(moki-cat) Moki: ${name(companion.project)}` : candidates.length > 1 ? '$(moki-cat) Moki: choose a project' : '$(moki-cat) Moki: no project';
     status.tooltip = companion ? 'Moki project of this folder. Click to change.' : 'Choose the Moki project of this folder.';
+    drive();
     refresh();
   };
   const pick = (id: string): void => { void context.workspaceState.update(PICKED, id); use(id); };
@@ -128,7 +144,11 @@ export function start(context: vscode.ExtensionContext): void {
     folder: () => folders()[0] ?? null,
     tracked: (folder, file) => { try { execFileSync('git', ['ls-files', '--error-unmatch', file], { cwd: folder, stdio: 'ignore', windowsHide: true }); return true; } catch { return false; } },
     mokiServer: (project) => mokiServer(project, ROOT, mcpScript, which('node')),
+    language: () => (vscode.env.language.toLowerCase().startsWith('pt') ? 'Portuguese (pt-BR)' : 'English'),
+    showTerminal: (id) => { const t = live(id); t?.show(); return Boolean(t); },
   });
+  // The operations' loop; a failure here never stops the extension (the run shows it).
+  function drive(): void { try { api.drive(); } catch { /* shown in the run */ } }
 
   // The built page (app/companion.html) with a policy for the webview: scripts only with this page's nonce, no network.
   const page = (webview: vscode.Webview): string => {
@@ -149,10 +169,17 @@ export function start(context: vscode.ExtensionContext): void {
       view.webview.html = page(view.webview);
       panels.add(view);
       view.onDidDispose(() => panels.delete(view));
+      view.onDidChangeVisibility(() => { void view.webview.postMessage({ event: 'visible', visible: view.visible }); });
       // Messages come only from this page; each call is checked by companion-api.
       view.webview.onDidReceiveMessage(async (raw: unknown) => {
         const msg = (raw ?? {}) as { id?: unknown; method?: unknown; args?: unknown; event?: unknown; url?: unknown };
         if (msg.event === 'openLink' && typeof msg.url === 'string' && /^https?:\/\//.test(msg.url)) { void vscode.env.openExternal(vscode.Uri.parse(msg.url, true)); return; }
+        // Run updates the person has not seen: a number on the Moki icon of the Activity Bar.
+        if (msg.event === 'badge') {
+          const count = typeof (raw as { count?: unknown }).count === 'number' ? Math.max(0, Math.floor((raw as { count: number }).count)) : 0;
+          view.badge = count ? { value: count, tooltip: count === 1 ? '1 run update' : `${count} run updates` } : undefined;
+          return;
+        }
         if (typeof msg.id !== 'number') return;
         const reply = await api(msg.method, msg.args);
         void view.webview.postMessage({ id: msg.id, reply });
@@ -210,6 +237,15 @@ export function start(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(resolveProject),
+    // A step's terminal closed: done if it wrote its summary, else failed (the engine decides).
+    vscode.window.onDidCloseTerminal((closed) => {
+      for (const [id, { terminal, project }] of terminals) {
+        if (terminal !== closed) continue;
+        terminals.delete(id);
+        if (project) { try { service.operationStepExited(project, id); } catch { /* not a step */ } }
+        later();
+      }
+    }),
     vscode.commands.registerCommand('moki.chooseProject', chooseProject),
     vscode.commands.registerCommand('moki.refresh', () => { resolveProject(); refresh(); }),
   );

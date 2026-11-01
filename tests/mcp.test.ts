@@ -8,7 +8,7 @@ import { ROOT } from '../scripts/lib/repo.mjs';
 import { createProject, TOOLS } from '../scripts/lib/core.ts';
 import {
   appliesTo, clean, enabledServers, generatedEntries, importConfig, listServers, mergeManaged, mokiServer, removeServer,
-  resolveServer, saveServer, serversForAgent, syncCursorFolder, toolConfig, type McpServer,
+  mergeCodex, resolveServer, saveServer, serversForAgent, syncCursorFolder, syncToolFolder, toolConfig, type McpServer,
 } from '../scripts/lib/mcp.ts';
 import { createOperationRun } from '../scripts/lib/operation-runs.ts';
 import { probeServer } from '../desktop/mcp-probe.ts';
@@ -164,6 +164,34 @@ test('sync with Cursor in the linked folder: asks first, honours writeAllowed, b
   setRepo('acme', { name: 'app', localPath: linked, purpose: 'system', writeAllowed: false, linkedFolder: true });
   assert.throws(() => service.syncCursorMcp('acme', true), /writeAllowed: false/);
   setRepo('acme', { name: 'app', localPath: linked, purpose: 'system', writeAllowed: true, linkedFolder: true });
+});
+
+test('Codex: Moki writes its own region of .codex/config.toml; the person\'s tables stay; a variable is never written as a value', () => {
+  const server = (id: string, extra: Partial<McpServer>): McpServer => ({
+    id, name: id, description: '', transport: 'stdio', command: 'npx', args: ['-y', 'x'], url: '', headers: {}, env: {}, access: 'read', enabled: true, projects: [], ...extra,
+  });
+  const entries = generatedEntries(server('moki', { command: 'node', args: ['C:\\moki\\server.ts', '--project', 'acme'], env: { QA_ROOT: 'C:\\moki' } }), [
+    server('jira', { env: { JIRA_TOKEN: '${JIRA_TOKEN}', MODE: 'cloud', OTHER: 'x-${JIRA_TOKEN}' } }),
+    server('github', { transport: 'http', url: 'https://api.example.com/mcp', headers: { Authorization: 'Bearer ${GH_TOKEN}', 'X-Team': '${TEAM}' } }),
+  ]);
+  const mine = '[mcp_servers.mine]\ncommand = "mine"\n';
+  const first = mergeCodex(mine, entries);
+  assert.ok(first.text.startsWith(mine));
+  assert.match(first.text, /\[mcp_servers\."moki"\]\ncommand = "node"\nargs = \["C:\\\\moki\\\\server.ts", "--project", "acme"\]\nenv = \{ "QA_ROOT" = "C:\\\\moki" \}/);
+  assert.match(first.text, /\[mcp_servers\."moki-jira"\]\ncommand = "npx"\nargs = \["-y", "x"\]\nenv = \{ "MODE" = "cloud" \}\nenv_vars = \["JIRA_TOKEN"\]/);
+  assert.match(first.text, /\[mcp_servers\."moki-github"\]\nurl = "https:\/\/api.example.com\/mcp"\nbearer_token_env_var = "GH_TOKEN"/);
+  assert.doesNotMatch(first.text, /\$\{/);
+  assert.deepEqual(first.skipped, ['moki-jira: OTHER', 'moki-github: header X-Team']);
+  // Written again: Moki's region is replaced, not repeated.
+  const again = mergeCodex(first.text, entries.slice(0, 1));
+  assert.equal(again.text.match(/>>> moki/g)?.length, 1);
+  assert.ok(!again.text.includes('moki-jira') && again.text.startsWith(mine));
+
+  const folder = mkdtempSync(join(tmpdir(), 'moki-codex-'));
+  const r = syncToolFolder(folder, entries, 'codex');
+  assert.ok(r.changed && r.file.endsWith(join('.codex', 'config.toml')));
+  assert.equal(syncToolFolder(folder, entries, 'codex').changed, false);
+  rmSync(folder, { recursive: true, force: true });
 });
 
 test('service: one catalog with where each server applies, test results kept without values', async () => {

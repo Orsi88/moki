@@ -1,12 +1,16 @@
-// Settings › MCP servers: one catalog for the workspace. Each server says where it
-// applies — every project (global) or only the projects chosen — and can be switched
-// off without being deleted. Add, edit, test, import, delete; and give a project's
-// servers to the AI tools (copy, sync with Cursor). Credentials are never typed here:
-// values are ${VARIABLE} (scripts/lib/mcp.ts).
+// Settings › MCP servers: one catalog for the workspace, in the shape of the other tabs
+// (ListPage): filter tabs, a search bar, the rows; a row opens the server's detail. Each row says where its server
+// applies, right in the list: the Global switch (every project), or, switched off, the
+// projects chosen in a small picker beside it, shown as chips under the row. A server
+// can be switched off without being deleted. Add, edit, test, import, delete.
+// Credentials are never typed here: values are ${VARIABLE} (scripts/lib/mcp.ts). The AI
+// tools Moki starts get the servers of their project by themselves.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type McpEntry, type McpServer, type ProjectSummary } from '../api';
 import { t } from '../i18n';
+import { IconFolder, IconX } from './Icons';
+import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from './ListPage';
 
 interface Props { project: ProjectSummary | null; projects: ProjectSummary[] }
 
@@ -84,7 +88,7 @@ export function McpManager({ project, projects: summaries }: Props) {
   const [importing, setImporting] = useState(false);
   const [pasted, setPasted] = useState('');
   const [importWhere, setImportWhere] = useState<{ global: boolean; chosen: string[] }>({ global: true, chosen: [] });
-  const [target, setTarget] = useState(project?.id ?? summaries[0]?.id ?? ''); // the project for "Use them in the AI tools"
+  const [picker, setPicker] = useState<string | null>(null); // the server whose projects are being chosen
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -94,6 +98,13 @@ export function McpManager({ project, projects: summaries }: Props) {
     api.foundMcpServers(project?.id ?? null).then(setFound).catch(() => setFound([]));
   }, [project?.id]);
   useEffect(() => { load(); }, [load]);
+  // Escape closes the project picker only (caught first, so Settings does not close too).
+  useEffect(() => {
+    if (!picker) return undefined;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setPicker(null); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [picker]);
 
   const act = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true); setError(''); setInfo('');
@@ -106,17 +117,29 @@ export function McpManager({ project, projects: summaries }: Props) {
     const names = s.projects.map((id) => nameOf.get(id) ?? id);
     return names.length > 2 ? t('{first} and {n} more', { first: names.slice(0, 2).join(', '), n: names.length - 2 }) : names.join(', ');
   };
-  const matches = (s: McpEntry) => (!query || `${s.name} ${s.id} ${s.description} ${whereLabel(s)}`.toLowerCase().includes(query.toLowerCase()))
-    && ({
-      all: true, global: !s.projects.length, specific: s.projects.length > 0, off: !s.enabled,
-      ok: Boolean(s.status?.ok), failing: Boolean(s.status && !s.status.ok), untested: !s.status,
-    } as Record<Filter, boolean>)[filter];
+  const inFilter = (s: McpEntry, f: Filter) => ({
+    all: true, global: !s.projects.length, specific: s.projects.length > 0, off: !s.enabled,
+    ok: Boolean(s.status?.ok), failing: Boolean(s.status && !s.status.ok), untested: !s.status,
+  } as Record<Filter, boolean>)[f];
+  const matches = (s: McpEntry) => matchesQuery(query, s.name, s.id, s.description, whereLabel(s)) && inFilter(s, filter);
+  const shown = servers.filter(matches);
   const current = draft?.id ? servers.find((s) => s.id === draft.id) : undefined;
   const set = (patch: Partial<Draft>) => draft && setDraft({ ...draft, ...patch });
-  const targetProject = summaries.find((p) => p.id === target) ?? null;
 
   const save = () => draft && act(async () => { setDraft(toDraft(await api.saveMcpServer(fromDraft(draft)))); }, t('Saved.'));
   const toggle = (s: McpEntry) => act(() => api.saveMcpServer({ ...s, enabled: !s.enabled }));
+  // Where a server applies: shown at once, then saved (a failure reloads the list as it is on disk).
+  const place = (s: McpEntry, projects: string[]) => {
+    setServers((all) => all.map((x) => (x.id === s.id ? { ...x, projects } : x)));
+    void act(() => api.saveMcpServer({ ...s, projects }));
+  };
+  // Global on: every project. Off: the picker opens, and the server stays global until a first project is chosen.
+  const setGlobal = (s: McpEntry, global: boolean) => {
+    if (!global) { setPicker(s.id); return; }
+    setPicker(null);
+    place(s, []);
+  };
+  const linkProjects = (s: McpEntry, chosen: string[]) => { if (chosen.length) place(s, chosen); };
   const remove = (s: McpEntry) => {
     const used = s.usedBy.length ? `\n\n${t('It is on in: {projects}', { projects: s.usedBy.map((id) => nameOf.get(id) ?? id).join(', ') })}` : '';
     if (!window.confirm(`${t('Delete the MCP server {name}?', { name: s.name })}${used}`)) return;
@@ -135,95 +158,15 @@ export function McpManager({ project, projects: summaries }: Props) {
   }, t('Imported.'));
   const missingProjects = Boolean(draft && !draft.global && !draft.projects.length);
 
-  return (
-    <div className="mcp">
-      <div className="mcp-list">
-        <h1>{t('MCP servers')}</h1>
-        <p className="muted">{t('One list for the whole workspace. Each server applies to every project (global) or only to the projects you choose; agents, operations and the IDE get only the servers that apply to their project and are on.')}</p>
+  if (draft) {
+    return (
+      <div className="list-page mcp-page">
+        <header className="library-head">
+          <div className="title-row"><BackArrow label={t('MCP servers')} onBack={() => { setDraft(null); setInfo(''); setError(''); }} /><h1>{draft.id ? draft.name : t('New MCP server')}</h1></div>
+        </header>
         {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
         {info && <div className="result" role="status"><p className="result-title">{info}</p></div>}
-
-        <div className="mcp-tools">
-          <input type="search" placeholder={t('Search')} value={query} onChange={(e) => setQuery(e.target.value)} />
-          <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label={t('Filter')}>
-            <option value="all">{t('All')}</option><option value="global">{t('Global')}</option><option value="specific">{t('Specific projects')}</option>
-            <option value="ok">{t('Working')}</option><option value="failing">{t('Failing')}</option><option value="untested">{t('Not tested')}</option><option value="off">{t('Off')}</option>
-          </select>
-          <button type="button" className="btn" disabled={busy} onClick={() => { setDraft({ ...EMPTY }); setTab('config'); }}>{t('Add')}</button>
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setImporting((v) => !v)}>{t('Import JSON')}</button>
-        </div>
-
-        {importing && (
-          <div className="mcp-import">
-            <textarea rows={6} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={'{ "mcpServers": { "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] } } }'} />
-            <p className="muted small">{t('Claude Code, Cursor or VS Code format. A credential written in it becomes a ${VARIABLE}: set the variable on this computer.')}</p>
-            <WhereField global={importWhere.global} chosen={importWhere.chosen} projects={projects} onChange={(global, chosen) => setImportWhere({ global, chosen })} />
-            <button type="button" className="btn" disabled={busy || !pasted.trim() || (!importWhere.global && !importWhere.chosen.length)}
-              onClick={() => importText(pasted, importWhere.global ? [] : importWhere.chosen)}>{t('Import')}</button>
-          </div>
-        )}
-
-        {servers.length ? (
-          <ul className="mcp-rows">
-            {servers.filter(matches).map((s) => (
-              <li key={s.id} className={`mcp-row${draft?.id === s.id ? ' on' : ''}${s.enabled ? '' : ' off'}`}>
-                <input type="checkbox" checked={s.enabled} disabled={busy} aria-label={t('On')} title={s.enabled ? t('On: click to switch it off') : t('Off: click to switch it on')} onChange={() => toggle(s)} />
-                <button type="button" className="mcp-row-main" onClick={() => { setDraft(toDraft(s)); setTab('config'); }}>
-                  <span className="mcp-name">{s.name}</span>
-                  <span className="muted small">{s.transport === 'http' ? 'HTTP' : 'stdio'} · {s.id}{s.access === 'execute' ? ` · ${t('executes')}` : ''}</span>
-                </button>
-                <span className={`mcp-where-chip${s.projects.length ? '' : ' global'}`} title={whereLabel(s)}>{whereLabel(s)}</span>
-                <Status entry={s} />
-              </li>
-            ))}
-          </ul>
-        ) : <p className="muted small">{t('No MCP servers yet. Add one or import a configuration.')}</p>}
-
-        {found.length > 0 && (
-          <>
-            <h2 className="mcp-section">{t('Found in the AI tools')}</h2>
-            <ul className="mcp-rows">
-              {found.map((f) => (
-                <li key={`${f.source}:${f.name}`} className="mcp-row">
-                  <span className="mcp-row-main"><span className="mcp-name">{f.name}</span><span className="muted small">{f.source}</span></span>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy || servers.some((s) => s.name === f.name)} onClick={() => importText(JSON.stringify({ mcpServers: { [f.name]: f.config } }), [])}>{t('Import into Moki')}</button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-
-        {summaries.length > 0 && (
-          <>
-            <h2 className="mcp-section">{t('Use them in the AI tools')}</h2>
-            <p className="muted small">{t('Claude Code and Cursor started from Moki get the servers that are on, plus Moki\'s own server for this project.')}</p>
-            <div className="mcp-tools">
-              <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label={t('Project')}>
-                {summaries.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              {targetProject?.repository && (
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => {
-                  if (!window.confirm(t('Write the servers that are on to {folder}/.cursor/mcp.json?\n\nOnly Moki\'s entries (moki, moki-*) change; yours stay. The current file is backed up to .moki-backup/ first.', { folder: targetProject.repository ?? '' }))) return;
-                  void act(async () => { const r = await api.syncCursorMcp(targetProject.id, true); setInfo(r.changed ? t('Cursor updated: {file}', { file: r.file }) : t('Cursor already had these servers.')); });
-                }}>{t('Sync with Cursor in {folder}', { folder: targetProject.repository.split(/[\\/]/).pop() ?? '' })}</button>
-              )}
-              {(['claude', 'cursor'] as const).map((tool) => (
-                <button key={tool} type="button" className="btn btn-ghost" disabled={busy || !targetProject} onClick={() => act(async () => {
-                  const r = await api.copyMcpConfig(target, tool);
-                  if (!r.copied) window.prompt(t('Copy the configuration'), r.text);
-                }, t('Configuration copied.'))}>{tool === 'claude' ? t('Copy for Claude Code') : t('Copy for Cursor')}</button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-
-      {draft && (
-        <aside className="mcp-panel">
-          <div className="mcp-panel-head">
-            <h2>{draft.id ? draft.name : t('New MCP server')}</h2>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft(null)}>{t('Close')}</button>
-          </div>
+        <section className="agent-card mcp-panel">
           <div className="dialog-tabs" role="tablist">
             {([['config', t('Configuration')], ['env', draft.transport === 'http' ? t('Headers') : t('Environment')], ['tools', t('Tools')]] as const).map(([id, label]) => (
               <button key={id} type="button" role="tab" aria-selected={tab === id} className={`dialog-tab${tab === id ? ' on' : ''}`} onClick={() => setTab(id)}>{label}</button>
@@ -290,8 +233,119 @@ export function McpManager({ project, projects: summaries }: Props) {
             {current && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setTab('tools'); void test(current); }}>{busy ? t('Testing…') : t('Test')}</button>}
             {current && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => remove(current)}>{t('Delete')}</button>}
           </div>
-        </aside>
-      )}
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="list-page mcp-list">
+        <ListHead title={t('MCP servers')} intro={t('One list for the whole workspace. Each server applies to every project (global) or only to the projects you choose; agents, operations and the IDE get only the servers that apply to their project and are on.')}
+          action={(
+            <div className="row-actions">
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setImporting((v) => !v)}>{t('Import JSON')}</button>
+              <button type="button" className="btn" disabled={busy} onClick={() => { setDraft({ ...EMPTY }); setTab('config'); }}>{t('Add server')}</button>
+            </div>
+          )} />
+        <ListTabs label={t('MCP servers')} value={filter} onChange={setFilter} tabs={([
+          ['all', t('All')], ['global', t('Global')], ['specific', t('Specific projects')], ['ok', t('Working')], ['failing', t('Failing')], ['untested', t('Not tested')], ['off', t('Off')],
+        ] as const).map(([id, label]) => ({ id, label, count: servers.filter((x) => inFilter(x, id)).length }))} />
+        <ListTools query={query} onQuery={setQuery} placeholder={t('Search MCP servers')} count={countLabel(shown.length, '1 server', '{n} servers')} />
+        {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
+        {info && <div className="result" role="status"><p className="result-title">{info}</p></div>}
+
+        {importing && (
+          <div className="mcp-import">
+            <textarea rows={6} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={'{ "mcpServers": { "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] } } }'} />
+            <p className="muted small">{t('Claude Code, Cursor or VS Code format. A credential written in it becomes a ${VARIABLE}: set the variable on this computer.')}</p>
+            <WhereField global={importWhere.global} chosen={importWhere.chosen} projects={projects} onChange={(global, chosen) => setImportWhere({ global, chosen })} />
+            <button type="button" className="btn" disabled={busy || !pasted.trim() || (!importWhere.global && !importWhere.chosen.length)}
+              onClick={() => importText(pasted, importWhere.global ? [] : importWhere.chosen)}>{t('Import')}</button>
+          </div>
+        )}
+
+        {servers.length ? (
+          <ul className="mcp-rows">
+            {shown.map((s) => {
+              const global = !s.projects.length && picker !== s.id;
+              return (
+                <li key={s.id} className={`mcp-row mcp-server${s.enabled ? '' : ' off'}`}>
+                  <div className="mcp-row-line">
+                    <input type="checkbox" checked={s.enabled} disabled={busy} aria-label={t('On')} title={s.enabled ? t('On: click to switch it off') : t('Off: click to switch it on')} onChange={() => toggle(s)} />
+                    <button type="button" className="mcp-row-main" onClick={() => { setDraft(toDraft(s)); setTab('config'); }}>
+                      <span className="mcp-name">{s.name}</span>
+                      <span className="muted small">{s.transport === 'http' ? 'HTTP' : 'stdio'} · {s.id}{s.access === 'execute' ? ` · ${t('executes')}` : ''}</span>
+                    </button>
+                    <span className="mcp-global">
+                      <span className="small">{t('Global')}</span>
+                      <button type="button" role="switch" aria-checked={global} className={`switch${global ? ' on' : ''}`} disabled={busy}
+                        aria-label={t('Global: {name} in every project', { name: s.name })} onClick={() => setGlobal(s, !global)}><span /></button>
+                    </span>
+                    <div className="mcp-pick-wrap">
+                      <button type="button" className={`icon-btn mcp-pick-btn${picker === s.id ? ' on' : ''}`} disabled={busy || global}
+                        title={global ? t('Switch Global off to choose projects') : t('Choose projects')} aria-label={t('Choose the projects of {name}', { name: s.name })}
+                        aria-expanded={picker === s.id} onClick={() => setPicker((p) => (p === s.id ? null : s.id))}><IconFolder size={15} /></button>
+                      {picker === s.id && (
+                        <>
+                          <div className="mcp-pick-backdrop" onMouseDown={() => setPicker(null)} />
+                          <div className="mcp-pick" role="dialog" aria-label={t('Projects of {name}', { name: s.name })}>
+                            <p className="small muted">{s.projects.length ? t('Projects that get {name}', { name: s.name }) : t('Choose the projects that get {name}', { name: s.name })}</p>
+                            {projects.length ? (
+                              <ul>
+                                {projects.map((p, i) => {
+                                  const on = s.projects.includes(p.id);
+                                  const last = on && s.projects.length === 1; // a server for specific projects keeps at least one
+                                  return (
+                                    <li key={p.id}>
+                                      <label title={last ? t('The last project: switch Global on instead') : ''}>
+                                        <input type="checkbox" checked={on} disabled={last} autoFocus={i === 0}
+                                          onChange={(e) => linkProjects(s, e.target.checked ? [...s.projects, p.id] : s.projects.filter((x) => x !== p.id))} />
+                                        <span>{p.name}</span>
+                                      </label>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : <p className="muted small">{t('This workspace has no projects yet.')}</p>}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <Status entry={s} />
+                  </div>
+                  {s.projects.length > 0 && (
+                    <ul className="mcp-chips" aria-label={t('Projects of {name}', { name: s.name })}>
+                      {s.projects.map((id) => (
+                        <li key={id} className="mcp-chip">
+                          {nameOf.get(id) ?? id}
+                          {s.projects.length > 1 && (
+                            <button type="button" disabled={busy} aria-label={t('Remove {project} from {name}', { project: nameOf.get(id) ?? id, name: s.name })}
+                              onClick={() => linkProjects(s, s.projects.filter((x) => x !== id))}><IconX size={10} /></button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : <p className="muted small">{t('No MCP servers yet. Add one or import a configuration.')}</p>}
+
+        {found.length > 0 && (
+          <>
+            <h2 className="mcp-section">{t('Found in the AI tools')}</h2>
+            <ul className="mcp-rows">
+              {found.map((f) => (
+                <li key={`${f.source}:${f.name}`} className="mcp-row">
+                  <span className="mcp-row-main"><span className="mcp-name">{f.name}</span><span className="muted small">{f.source}</span></span>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy || servers.some((s) => s.name === f.name)} onClick={() => importText(JSON.stringify({ mcpServers: { [f.name]: f.config } }), [])}>{t('Import into Moki')}</button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
     </div>
   );
 }

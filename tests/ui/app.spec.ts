@@ -98,6 +98,8 @@ test.describe.serial('Moki settings', () => {
   test('Templates scrolls and its controls share one size', async () => {
     await page.getByRole('tab', { name: 'Templates' }).click();
     await expect(page.getByRole('heading', { name: 'Templates' })).toBeVisible();
+    await expect(page.locator('.ds-card-item')).toHaveCount(1); // the list first: every template of the workspace
+    await page.getByRole('button', { name: 'Default' }).click();
     const form = page.locator('.ds-form');
     const room = await form.evaluate((el) => el.scrollHeight - el.clientHeight);
     expect(room).toBeGreaterThan(40);
@@ -129,24 +131,61 @@ test.describe.serial('Moki settings', () => {
     await expect(page.locator('.ds-page-mark')).toHaveText('RASCUNHO');
   });
 
-  test('Create skill stays on Add a skill', async () => {
+  test('templates are a list: a new one tagged with a project applies only to it', async () => {
+    page.once('dialog', (d) => { void d.accept(); }); // the watermark typed above is discarded
+    await page.getByRole('button', { name: 'Voltar para Templates' }).click();
+    await page.getByRole('button', { name: 'Novo template' }).click();
+    await page.locator('.ds-form').getByRole('textbox', { name: 'Nome' }).fill('Acme look');
+    await page.locator('.ds-form .tag-field').getByRole('textbox', { name: 'Adicionar uma tag' }).fill('Acme');
+    await page.getByRole('listbox').getByText('Acme Library').click();
+    await page.locator('.ds-actions').getByRole('button', { name: 'Salvar' }).click();
+    await expect(page.locator('.list-back')).toContainText('Acme Library');
+    await page.getByRole('button', { name: 'Voltar para Templates' }).click();
+    const card = page.locator('.ds-card-item', { hasText: 'Acme look' });
+    await expect(card).toContainText('Acme Library');
+    await expect(page.locator('.ds-card-item')).toHaveCount(2);
+
+    await page.getByRole('searchbox', { name: 'Buscar templates' }).fill('acme');
+    await expect(page.locator('.ds-card-item')).toHaveCount(1);
+    await page.getByRole('searchbox', { name: 'Buscar templates' }).fill('');
+
+    const [root] = readFileSync(join(scratch, 'root.txt'), 'utf8').trim().split('\n');
+    const saved = readdirSync(join(root, 'workspace', 'templates')).map((f) => JSON.parse(readFileSync(join(root, 'workspace', 'templates', f), 'utf8')) as { name: string; tags: string[] });
+    expect(saved.find((x) => x.name === 'Acme look')?.tags).toEqual(['project:acme']);
+  });
+
+  test('Skills is one list like the other tabs: filter tabs, search, a detail; Add a skill has its own page', async () => {
     await page.getByRole('tab', { name: 'Skills' }).click();
-    await page.getByRole('tab', { name: 'Nativas e criadas' }).click();
-    await expect(page.getByRole('button', { name: 'Criar skill' })).toHaveCount(0);
-    await page.getByRole('tab', { name: 'Adicionar skill' }).click();
+    await expect(page.getByRole('heading', { name: 'Skills', level: 1 })).toBeVisible();
+    await page.getByRole('tab', { name: /^Plugins/ }).click();
+    await expect(page.locator('.skill-item')).toHaveCount(4);
+    await page.getByRole('searchbox', { name: 'Buscar skills' }).fill('caveman');
+    await expect(page.locator('.skill-item')).toHaveCount(1);
+    await page.locator('.skill-item').click();
+    const acme = page.getByRole('checkbox', { name: 'Acme Library' });
+    await expect(acme).not.toBeChecked();
+    await acme.check();
+    await expect(acme).toBeChecked();
+    await page.getByRole('button', { name: 'Voltar para Skills' }).click();
+    await expect(page.locator('.skill-item')).toContainText('Usado em 1 projeto');
+
+    await page.getByRole('button', { name: 'Adicionar skill' }).click();
     await expect(page.getByRole('tab', { name: 'Criar skill' })).toBeVisible();
+    await expect(page.getByText('Instalar para')).toHaveCount(0); // Settings installs for every project
+    await page.getByRole('button', { name: 'Voltar para Skills' }).click();
   });
 
   test('an agent shows what it needs and delivers; your copy edits it, MCPs and AI included', async () => {
     await page.getByRole('tab', { name: 'Agentes' }).click();
-    await page.locator('.library-item', { hasText: 'test-designer' }).click();
+    await expect(page.getByRole('heading', { name: 'Agentes' })).toBeVisible(); // the list first
+    await page.locator('.library-item', { has: page.locator('.list-card-title', { hasText: /^test-designer$/ }) }).click();
     const contract = page.getByRole('group', { name: 'Na operação' });
     await expect(contract.getByRole('list', { name: 'Entradas' })).toContainText('User stories');
     await expect(contract.getByRole('list', { name: 'Saídas' })).toContainText('test-cases.json');
     await expect(contract.getByRole('textbox')).toHaveCount(0); // built-in: read-only
 
     await page.getByRole('button', { name: 'Duplicar' }).click();
-    await expect(page.locator('.library-item.active')).toContainText('test-designer-custom');
+    await expect(page.locator('.title-row h1')).toHaveText('test-designer-custom');
     await contract.getByRole('textbox', { name: 'Entradas' }).fill('Logs');
     await contract.getByRole('textbox', { name: 'Entradas' }).press('Enter');
     await contract.getByRole('combobox', { name: 'Servidor MCP' }).fill('jira');
@@ -162,6 +201,37 @@ test.describe.serial('Moki settings', () => {
     expect(file).toContain('mcps:\n  jira: execute\nai: codex\nmetadata:');
   });
 
+  test('your agent: description and instructions in text fields, skills searched and added, one Save; tags say which projects it reaches', async () => {
+    await expect(page.locator('.title-row h1')).toHaveText('test-designer-custom');
+    await page.getByRole('textbox', { name: 'Descrição' }).fill('Designs the tests of the Acme stories.');
+    await expect(page.getByText('Alterações não salvas')).toBeVisible();
+    const notes = page.getByRole('textbox', { name: 'Instruções' });
+    expect((await notes.boundingBox())?.height ?? 0).toBeGreaterThan(400);
+    await notes.fill('# Notes only\n');
+    await expect(page.getByText(/Faltam as seções: ## Role/)).toBeVisible();
+    await page.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(page.getByText('Alterações não salvas')).toHaveCount(0);
+
+    await page.getByRole('textbox', { name: 'Descrição' }).fill('Designs the tests of the Acme stories.');
+    await page.getByRole('searchbox', { name: 'Adicionar skill' }).fill('requirements');
+    await page.locator('.skill-options button', { has: page.locator('.skill-name', { hasText: /^requirements-review$/ }) }).click();
+    await expect(page.locator('.skill-row .skill-name')).toHaveText(['test-design', 'project-context', 'requirements-review']);
+    await page.locator('.agent-savebar').getByRole('button', { name: 'Salvar' }).click();
+    await expect(page.getByText('Alterações não salvas')).toHaveCount(0);
+
+    await page.locator('.library-detail .tag-field').getByRole('textbox', { name: 'Adicionar uma tag' }).fill('Acme');
+    await page.getByRole('listbox').getByText('Acme Library').click();
+    await expect(page.locator('.library-detail .tag-field .tag-chip')).toHaveText('Acme Library');
+
+    const [root] = readFileSync(join(scratch, 'root.txt'), 'utf8').trim().split('\n');
+    const file = readFileSync(join(root, 'workspace', 'library', 'agents', 'quality', 'test-designer-custom.md'), 'utf8');
+    expect(file).toMatch(/skills: .*requirements-review/);
+    expect(file).toContain('description: Designs the tests of the Acme stories.\n');
+    expect(file).toContain('\n## Role\n');
+    const tags = JSON.parse(readFileSync(join(root, 'workspace', 'library', 'agent-tags.json'), 'utf8')) as { agents: Record<string, string[]> };
+    expect(tags.agents['test-designer-custom']).toEqual(['project:acme']);
+  });
+
   test('an operation links agents with arrows: approval, which output answers which input, saved in the list', async () => {
     await page.getByRole('tab', { name: 'Operações' }).click();
     // The first time, an example to learn from: three lanes, the Moki agents, approval between them.
@@ -169,7 +239,8 @@ test.describe.serial('Moki settings', () => {
     await example.click();
     await expect(page.locator('.ops-card-name')).toHaveText(['requirements-analyst', 'test-designer', 'evidence-builder']);
     await expect(page.getByRole('region', { name: 'Checagem' }).locator('.ops-panel-head .pill')).toHaveText('Pronta');
-    await page.locator('.operations .home-list').getByRole('button', { name: 'Nova operação' }).click();
+    await page.getByRole('button', { name: 'Voltar para Operações' }).click(); // the list, like every tab
+    await page.getByRole('button', { name: 'Nova operação' }).click();
     await page.getByRole('textbox', { name: 'Nome da operação' }).fill('Revisão e testes');
     const pick = async (name: string) => {
       if (!(await page.locator('.ops-palette').isVisible())) await page.getByRole('button', { name: '+ Adicionar agente' }).click();
@@ -247,8 +318,24 @@ test.describe.serial('Moki settings', () => {
     await page.mouse.up();
     expect(await scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(100);
 
+    // Expand: the editor takes the whole window and the board grows; Esc brings it back, Settings stays open.
+    const normalH = (await scroller.boundingBox())?.height ?? 0;
+    await page.getByRole('button', { name: 'Expandir' }).click();
+    await expect(page.locator('.ops-editor.expanded')).toBeVisible();
+    await expect.poll(async () => (await scroller.boundingBox())?.height ?? 0).toBeGreaterThan(normalH + 100);
+    await page.getByRole('button', { name: 'Recolher' }).click();
+    await expect(page.locator('.ops-editor.expanded')).toHaveCount(0);
+    // Esc: first it closes the details of what is selected, then the expanded view; Settings stays open.
+    await page.getByRole('button', { name: 'Expandir' }).click();
+    if (await page.locator('.ops-inspector.has-sel').count()) await page.keyboard.press('Escape');
+    await expect(page.locator('.ops-inspector.has-sel')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ops-editor.expanded')).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'Operações' })).toBeVisible();
+
     await page.getByRole('button', { name: 'Salvar' }).click();
     await expect(page.getByText('Salva nas suas operações.')).toBeVisible();
+    await page.getByRole('button', { name: 'Voltar para Operações' }).click();
     await expect(page.locator('.library-item', { hasText: 'Revisão e testes' })).toBeVisible();
     const [root] = readFileSync(join(scratch, 'root.txt'), 'utf8').trim().split('\n');
     const saved = JSON.parse(readFileSync(join(root, 'workspace', 'library', 'operations', 'revisao-e-testes.json'), 'utf8'));
@@ -336,10 +423,11 @@ test.describe.serial('Moki workspaces', () => {
   test('a hidden project is deleted for good only after typing delete', async () => {
     const row = wsPage.locator('.home-row', { hasText: 'Old Portal' });
     wsPage.once('dialog', (d) => { void d.accept(); });
-    await row.hover();
-    await row.getByRole('button', { name: 'Desvisualizar' }).click();
+    await row.click({ button: 'right' }); // the row's actions are on the right click
+    await wsPage.getByRole('menuitem', { name: 'Desvisualizar' }).click();
     await wsPage.getByText('Ocultos (1)').click();
-    await wsPage.locator('.home-hidden .home-row', { hasText: 'Old Portal' }).getByRole('button', { name: 'Excluir definitivamente' }).click();
+    await wsPage.locator('.home-hidden .home-row', { hasText: 'Old Portal' }).click({ button: 'right' });
+    await wsPage.getByRole('menuitem', { name: 'Excluir definitivamente' }).click();
 
     const dialog = wsPage.getByRole('dialog', { name: 'Excluir Old Portal' });
     const confirm = dialog.getByRole('button', { name: 'Excluir definitivamente' });
@@ -374,9 +462,9 @@ test.describe.serial('Moki workspaces', () => {
     await note.getByRole('button', { name: 'Fechar (Esc)' }).click();
 
     const row = wsPage.locator('.home-row', { hasText: 'Lista' }).last();
-    await row.hover();
+    await row.click({ button: 'right' });
     const opened = wsApp.waitForEvent('window');
-    await row.getByRole('button', { name: 'Abrir no bloco de notas' }).click();
+    await wsPage.getByRole('menuitem', { name: 'Abrir no bloco de notas' }).click();
     const book = await opened;
     await expect(book.getByRole('tab')).toHaveText(['Lista']);
     await expect(book.locator('textarea.note-editor')).toHaveValue('leite');
@@ -430,6 +518,15 @@ test.describe.serial('Moki project tree', () => {
     expect(existsSync(join(project, 'inbox', 'cenarios.md'))).toBe(true);
     await expect(treePage.locator('.tree-row[title="inbox/cenarios.md"]')).toBeVisible();
     await expect(treePage.locator('textarea')).toBeVisible();
+    // A .md file has the notes' / commands too.
+    const md = treePage.locator('textarea.editor');
+    await md.click();
+    await md.pressSequentially('/tab');
+    await expect(treePage.getByRole('listbox', { name: 'Comandos' })).toContainText('Tabela');
+    await md.press('Enter');
+    await expect(md).toHaveValue(/\| Coluna 1 \| Coluna 2 \| Coluna 3 \|/);
+    await treePage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    await expect.poll(() => readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'cenarios.md'), 'utf8')).toContain('| Coluna 1 |');
 
     await treePage.getByRole('button', { name: 'Opções da pasta do projeto' }).click();
     await expect(treePage.getByRole('menuitem', { name: 'Copiar caminho' })).toBeVisible();
@@ -605,8 +702,15 @@ test.describe.serial('Moki operations in a project', () => {
     await launch.locator('.ops-run-inputs').first().getByRole('button', { name: 'us-1.md' }).click();
     await launch.getByRole('button', { name: 'Iniciar operação' }).click();
 
+    // The run opens on its board: each card shows how its step is doing; the panel beside it, the step under way.
     const runView = opsPage.locator('.ops-run');
-    await expect(runView.locator('.ops-timeline-status')).toHaveText(['Em andamento']);
+    const card = (step: string) => runView.locator(`.ops-run-card[data-step="${step}"]`);
+    await expect(card('s1')).toHaveAttribute('data-state', 'running');
+    await expect(card('s2')).toHaveAttribute('data-state', 'pending');
+    await expect(runView.locator('.ops-run-panel h2')).toHaveText('requirements-analyst');
+    // The step's panel takes the right side of the screen: the project panel steps aside while the board shows.
+    await expect(opsPage.locator('.workspace.panel-rail')).toHaveCount(1);
+    await expect(runView.locator('.ops-run-panel')).toHaveCSS('position', 'absolute');
     await expect(side.locator('.ops-side-row', { hasText: 'Em andamento' })).toBeVisible();
     const runs = join(dirs[0], 'workspace', 'projects', 'acme', 'runs');
     const runId = readdirSync(runs).find((d) => d.includes('-op-fluxo-qa')) as string;
@@ -616,27 +720,64 @@ test.describe.serial('Moki operations in a project', () => {
     // The analyst stops to ask something: the run waits for the user and shows the question.
     writeFileSync(join(run, 'waiting', 's1.md'), 'Qual ambiente devo considerar?');
     await expect(runView.locator('.ops-question')).toContainText('requirements-analyst pergunta: Qual ambiente devo considerar?');
+    await expect(card('s1')).toHaveAttribute('data-state', 'asking');
     await expect(runView.locator('.ops-run-head .pill')).toHaveText('Aguardando informações');
-    rmSync(join(run, 'waiting', 's1.md'));
+    // Answered here: its terminal is not open in Moki (the tools are faked), so the step starts again with the answer.
+    await expect(runView.getByRole('button', { name: 'Ver a pergunta completa' })).toBeVisible();
+    await expect(runView.locator('.ops-question')).toContainText('O terminal dele não está aberto no Moki');
+    await runView.getByRole('textbox', { name: 'Sua resposta' }).fill('Homologação');
+    await runView.getByRole('button', { name: 'Responder e retomar' }).click();
     await expect(runView.locator('.ops-question')).toHaveCount(0);
+    await expect(card('s1')).toHaveAttribute('data-state', 'running');
+    expect(existsSync(join(run, 'waiting', 's1.md'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(run, 'state.json'), 'utf8')).visits[0].resume).toEqual({ question: 'Qual ambiente devo considerar?', answer: 'Homologação' });
 
     // The analyst delivers its files and its summary: the next step waits for approval (an approval arrow).
     mkdirSync(join(run, 'outputs', 's1'), { recursive: true });
     for (const f of ['review-matrix.json', 'Matriz.xlsx', 'Relatorio.pdf']) writeFileSync(join(run, 'outputs', 's1', f), 'x');
     writeFileSync(join(run, 'handoff', 's1.md'), 'Revisei a US-1.');
-    await expect(runView.locator('.ops-timeline-status')).toHaveText(['Concluída', 'Aguardando sua aprovação']);
-    await runView.getByRole('button', { name: 'Aprovar e iniciar test-designer' }).click();
-    await expect(runView.locator('.ops-timeline-status')).toHaveText(['Concluída', 'Em andamento']);
+    await expect(card('s1')).toHaveAttribute('data-state', 'done');
+    await expect(card('s2')).toHaveAttribute('data-state', 'awaiting-approval');
+    await expect(runView.locator('.ops-run-panel h2')).toHaveText('test-designer');
 
-    mkdirSync(join(run, 'outputs', 's2'), { recursive: true });
-    for (const f of ['mapping.md', 'test-cases.json', 'Casos.xlsx']) writeFileSync(join(run, 'outputs', 's2', f), 'x');
-    writeFileSync(join(run, 'handoff', 's2.md'), 'Casos prontos.');
-    await expect(runView.locator('.ops-timeline-status')).toHaveText(['Concluída', 'Concluída']);
+    // Rejected with a reason and sent back: the analyst runs again (its second time) and sees why.
+    await runView.getByRole('button', { name: 'Reprovar…' }).click();
+    await runView.getByRole('textbox', { name: 'Por que você reprova' }).fill('Falta a regra de senha.');
+    await runView.getByRole('button', { name: 'Devolver para requirements-analyst' }).click();
+    await expect(card('s2')).toHaveAttribute('data-state', 'cancelled');
+    await expect(card('s1')).toHaveAttribute('data-state', 'running');
+    await expect(card('s1').locator('.chip')).toHaveText('×2');
+    await expect(runView.locator('.ops-run-panel .ops-notes')).toContainText('Falta a regra de senha.');
+
+    mkdirSync(join(run, 'outputs', 's1-2'), { recursive: true });
+    for (const f of ['review-matrix.json', 'Matriz.xlsx', 'Relatorio.pdf']) writeFileSync(join(run, 'outputs', 's1-2', f), 'x');
+    writeFileSync(join(run, 'handoff', 's1-2.md'), 'Revisei de novo.');
+    await expect(card('s2')).toHaveAttribute('data-state', 'awaiting-approval');
+    await runView.getByRole('button', { name: 'Aprovar e iniciar test-designer' }).click();
+    await expect(card('s2')).toHaveAttribute('data-state', 'running');
+
+    mkdirSync(join(run, 'outputs', 's2-2'), { recursive: true });
+    for (const f of ['mapping.md', 'test-cases.json', 'Casos.xlsx']) writeFileSync(join(run, 'outputs', 's2-2', f), 'x');
+    writeFileSync(join(run, 'handoff', 's2-2.md'), 'Casos prontos.');
+    await expect(card('s2')).toHaveAttribute('data-state', 'done');
     await expect(runView.locator('.ops-run-head .pill')).toHaveText('Concluída');
 
-    // Closed, the run stays in the side panel, among the finished ones; its summary opens as a tab.
-    await runView.getByRole('button', { name: 'Ler o resumo' }).first().click();
-    await expect(opsPage.getByRole('tab', { name: /s1\.md/ })).toBeVisible();
+    // A click on a card shows that step beside the board.
+    await card('s1').click();
+    await expect(runView.locator('.ops-run-panel h2')).toHaveText('requirements-analyst');
+    await expect(runView.locator('.ops-run-panel .ops-run-visit')).toHaveCount(2);
+
+    // The list shows each time a step ran (the app remembers it: the next test reads the list).
+    await runView.getByRole('button', { name: 'Lista', exact: true }).click();
+    await expect(runView.locator('.ops-timeline-status')).toHaveText(['Concluída', 'Cancelada', 'Concluída', 'Concluída']);
+
+    // Each step's summary and files show in the run screen itself, without opening anything else.
+    const summary = runView.getByRole('region', { name: 'Resumo da etapa' }).first();
+    await expect(summary).toBeVisible();
+    const delivered = runView.getByRole('region', { name: 'O que entregou' }).first();
+    await delivered.locator('.run-file').first().click();
+    await expect(delivered.locator('.run-preview')).toBeVisible();
+    // Closed, the run stays in the side panel, among the finished ones.
     await side.getByText('Concluídas (1)').click();
     await expect(side.locator('.ops-side-ended .ops-side-row')).toContainText('Fluxo QA');
   });
@@ -682,5 +823,245 @@ test.describe.serial('Moki operations in a project', () => {
     await expect(opsPage.locator('[data-step="s1"] .ops-dot-label')).toHaveText(['approved', 'rejected', 'senão']);
     await expect(opsPage.getByRole('button', { name: 'Seta de reviewer para fixer, quando rejected' })).toContainText('rejected');
     await expect(opsPage.locator('.ops-card-start')).toHaveText('Início');
+  });
+});
+
+// A terminal keeps running when you leave its project, and its tab comes back, with what it printed, when the project opens again.
+test.describe.serial('Moki terminals outlive the project screen', () => {
+  let termApp: ElectronApplication;
+  let termPage: Page;
+  const dirs: string[] = [];
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    ({ app: termApp, page: termPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await termApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('leaving the project does not close its terminal; opening it again brings the tab back', async () => {
+    await termPage.getByTitle('Novo terminal').first().click();
+    await termPage.getByRole('menuitem', { name: /Terminal/ }).first().click();
+    const pane = termPage.locator('.term-pane:not([hidden])');
+    await expect(pane).toBeVisible();
+    await pane.click();
+    await termPage.keyboard.type('echo moki-segue-rodando');
+    await termPage.keyboard.press('Enter');
+    await expect(pane.locator('.xterm-rows')).toContainText('moki-segue-rodando');
+
+    // Leaving asks nothing (a confirm would be dismissed and keep us here).
+    await termPage.getByTitle('Todos os projetos').click();
+    await expect(termPage.locator('.home-project', { hasText: 'Acme Library' }).first()).toBeVisible();
+    await termPage.locator('.home-project', { hasText: 'Acme Library' }).first().click();
+    await expect(termPage.locator('.term-pane:not([hidden]) .xterm-rows')).toContainText('moki-segue-rodando');
+
+    // Closing its tab is what stops it.
+    termPage.once('dialog', (d) => { void d.accept(); });
+    await termPage.locator('.tab-close[title="Fechar o terminal"]').first().click();
+    await expect(termPage.locator('.term-pane')).toHaveCount(0);
+  });
+});
+
+// MCP servers: where each one applies is set right in the list (Global switch, project picker, chips).
+test.describe.serial('Moki MCP servers list', () => {
+  let mcpApp: ElectronApplication;
+  let mcpPage: Page;
+  const dirs: string[] = [];
+  let catalog = '';
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    addProject(root, 'beta', 'Beta Store');
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    catalog = join(root, 'workspace', 'mcp-servers.json');
+    writeFileSync(catalog, JSON.stringify({ servers: [{ id: 'playwright', name: 'Playwright', transport: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'], access: 'read', enabled: true, projects: [] }] }));
+    ({ app: mcpApp, page: mcpPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await mcpApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('a server is made global or given to chosen projects from its row', async () => {
+    const saved = () => (JSON.parse(readFileSync(catalog, 'utf8')) as { servers: { projects: string[] }[] }).servers[0].projects;
+    await mcpPage.getByRole('button', { name: 'Configurações' }).click();
+    await mcpPage.getByRole('tab', { name: 'Servidores MCP' }).click();
+    await expect(mcpPage.getByText('Usar nas IAs')).toHaveCount(0);
+    const global = mcpPage.getByRole('switch', { name: 'Global: Playwright em todos os projetos' });
+    const pick = mcpPage.getByRole('button', { name: 'Escolher os projetos de Playwright' });
+    await expect(global).toHaveAttribute('aria-checked', 'true');
+    await expect(pick).toBeDisabled();
+
+    // Global off: the picker opens; the server stays global until a project is chosen.
+    await global.click();
+    const picker = mcpPage.getByRole('dialog', { name: 'Projetos de Playwright' });
+    await expect(picker).toBeVisible();
+    expect(saved()).toEqual([]);
+    await picker.getByRole('checkbox', { name: 'Acme Library' }).check();
+    await expect.poll(saved).toEqual(['acme']);
+    await expect(picker.getByRole('checkbox', { name: 'Acme Library' })).toBeDisabled(); // the last one stays
+    await picker.getByRole('checkbox', { name: 'Beta Store' }).check();
+    await expect.poll(saved).toEqual(['acme', 'beta']);
+    await mcpPage.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+
+    // The projects show as chips under the row; one can be removed there.
+    const chips = mcpPage.getByRole('list', { name: 'Projetos de Playwright' });
+    await expect(chips.locator('.mcp-chip')).toHaveText(['Acme Library', 'Beta Store']);
+    await chips.getByRole('button', { name: 'Tirar Beta Store de Playwright' }).click();
+    await expect.poll(saved).toEqual(['acme']);
+    await expect(chips.locator('.mcp-chip')).toHaveText(['Acme Library']);
+
+    // Global on again: every project, no chips.
+    await global.click();
+    await expect.poll(saved).toEqual([]);
+    await expect(global).toHaveAttribute('aria-checked', 'true');
+    await expect(mcpPage.locator('.mcp-chip')).toHaveCount(0);
+  });
+});
+
+// A small PDF with one line of text per page, its xref offsets computed (pdf.js reads it as is).
+function smallPdf(lines: string[]): Buffer {
+  const objs: string[] = [];
+  const pageIds = lines.map((_, i) => 3 + i * 2);
+  objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objs.push(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${lines.length} >>`);
+  const font = 3 + lines.length * 2;
+  lines.forEach((line, i) => {
+    const stream = `BT /F1 18 Tf 72 700 Td (${line}) Tj ET`;
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${pageIds[i] + 1} 0 R >>`);
+    objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+  });
+  objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+const REVIEW_MD = '# Revisão\n\nA senha expira em 30 dias.\n';
+
+test.describe.serial('Moki PDF comments', () => {
+  let pdfApp: ElectronApplication;
+  let pdfPage: Page;
+  const dirs: string[] = [];
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    writeFileSync(join(root, 'workspace', 'projects', 'acme', 'relatorio.pdf'), smallPdf(['Requisito de login', 'Segunda pagina']));
+    writeFileSync(join(root, 'workspace', 'projects', 'acme', 'revisao.md'), REVIEW_MD);
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    ({ app: pdfApp, page: pdfPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await pdfApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('a selection is commented right on the page; the comment stays beside it, joined by a line', async () => {
+    await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
+    const span = pdfPage.locator('.pdf-page .textLayer span', { hasText: 'Requisito' }).first();
+    await expect(span).toBeVisible();
+    await pdfPage.evaluate(() => {
+      const el = [...document.querySelectorAll('.pdf-page .textLayer span')].find((s) => s.textContent?.includes('Requisito'));
+      if (!el) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel?.removeAllRanges(); sel?.addRange(range);
+      document.querySelector('.pdf-pages')?.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+    const box = pdfPage.getByRole('dialog', { name: 'Destacar e comentar' });
+    await expect(box).toBeVisible();
+    await box.getByRole('radio', { name: 'Verde' }).click();
+    await box.getByRole('textbox').fill('Falta o caso de senha expirada');
+    await box.getByRole('button', { name: 'Comentar' }).click();
+    await expect(box).toHaveCount(0);
+
+    const card = pdfPage.locator('.pdf-card', { hasText: 'Falta o caso de senha expirada' });
+    await expect(card).toBeVisible();
+    await expect(pdfPage.locator('.pdf-links path')).toHaveCount(1);
+    // The card sits at the height of the commented line, beside the page.
+    const spanBox = await span.boundingBox();
+    await expect.poll(async () => Math.abs(((await card.boundingBox())?.y ?? 0) + 18 - ((spanBox?.y ?? 0) + (spanBox?.height ?? 0) / 2))).toBeLessThan(30);
+    expect(((await card.boundingBox())?.x ?? 0)).toBeGreaterThan((spanBox?.x ?? 0) + (spanBox?.width ?? 0));
+
+    await card.getByRole('button', { name: 'Responder' }).click();
+    const thread = pdfPage.locator('.pdf-card').first();
+    await thread.getByRole('textbox').fill('Vou incluir');
+    await thread.getByRole('button', { name: 'Salvar' }).click();
+    await expect(thread).toContainText('Vou incluir');
+
+    // The column closes from the bar: the page grows and a mark on its edge shows the comment; the mark opens it again.
+    const pageWidth = async () => (await pdfPage.locator('.pdf-page').first().boundingBox())?.width ?? 0;
+    const withRail = await pageWidth();
+    await pdfPage.getByRole('button', { name: /^Comentários \(/ }).click();
+    await expect(pdfPage.locator('.pdf-card')).toHaveCount(0);
+    await expect.poll(pageWidth).toBeGreaterThan(withRail);
+    const marker = pdfPage.locator('.pdf-marker');
+    await expect(marker).toHaveCount(1);
+    await marker.click();
+    await expect(pdfPage.locator('.pdf-card')).toHaveCount(1);
+
+    // The search field finds the text in every page, selects the match (the box opens there) and highlights all of them.
+    const field = pdfPage.getByRole('searchbox', { name: 'Buscar no PDF' });
+    await field.fill('pagina');
+    await field.press('Enter');
+    await expect(pdfPage.locator('.pdf-find-count')).toHaveText('1 de 1');
+    await expect(pdfPage.getByRole('dialog', { name: 'Destacar e comentar' })).toBeVisible();
+    await pdfPage.getByRole('button', { name: 'Destacar todas' }).click();
+    await expect(pdfPage.locator('.pdf-card')).toHaveCount(2);
+    await expect(pdfPage.locator('.pdf-card').nth(1)).toContainText('página 2');
+    // The comments took the project panel's place; opening the panel closes them, and a button brings them back.
+    await expect(pdfPage.locator('.workspace.panel-rail')).toHaveCount(1);
+  });
+
+  test('a .md file is commented the same way; the comment is kept inside the file, invisible to other viewers', async () => {
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'revisao.md');
+    await pdfPage.locator('.tree-row[title="revisao.md"]').click();
+    const text = pdfPage.locator('.md-commented .markdown p', { hasText: 'A senha expira' });
+    await expect(text).toBeVisible();
+    await text.evaluate((p) => {
+      const node = p.firstChild as Text;
+      const start = node.data.indexOf('expira em 30 dias');
+      const range = document.createRange();
+      range.setStart(node, start); range.setEnd(node, start + 'expira em 30 dias'.length);
+      const sel = window.getSelection();
+      sel?.removeAllRanges(); sel?.addRange(range);
+      p.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+    const box = pdfPage.getByRole('dialog', { name: 'Comentário' });
+    await box.getByRole('textbox').fill('E quando expira?');
+    await box.getByRole('button', { name: 'Comentar' }).click();
+
+    await expect(pdfPage.locator('.md-card')).toContainText('E quando expira?');
+    await expect(pdfPage.locator('mark.md-comment')).toHaveText('expira em 30 dias');
+    await expect(pdfPage.locator('.md-links path')).toHaveCount(1);
+    await expect.poll(() => readFileSync(file, 'utf8')).toMatch(/A senha <!--c:[a-z0-9]+-->expira em 30 dias<!--\/c:[a-z0-9]+-->\./);
+    expect(readFileSync(file, 'utf8')).toContain('<!-- moki-comments');
+
+    // The bar's comments button hides the column (a mark on the text's edge stays) and the mark brings it back.
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Comentários (1)' }).click();
+    await expect(pdfPage.locator('.md-card')).toHaveCount(0);
+    await expect(pdfPage.locator('mark.md-comment')).toHaveText('expira em 30 dias');
+    await pdfPage.locator('.md-marker').click();
+    await expect(pdfPage.locator('.md-card')).toContainText('E quando expira?');
+
+    pdfPage.once('dialog', (d) => { void d.accept(); });
+    await pdfPage.locator('.md-card').getByRole('button', { name: 'Excluir' }).click();
+    await expect(pdfPage.locator('.md-card')).toHaveCount(0);
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(REVIEW_MD);
   });
 });

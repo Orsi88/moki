@@ -1,7 +1,8 @@
 /* Moki light (the IDE panel): the app's palette and components (styles.css) laid out for a
    narrow sidebar — a fixed header, tabs and footer, and one scrolling column of cards. */
 
-body { font-size: 13px; background: var(--bg); }
+/* padding 0: VS Code gives every webview body 20px on each side, so the header, tabs and footer would stop short of the panel's edges. */
+body { font-size: 13px; background: var(--bg); padding: 0; }
 .mk { height: 100vh; display: flex; flex-direction: column; min-width: 0; }
 
 .mk-head { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px; flex-shrink: 0; }
@@ -9,8 +10,8 @@ body { font-size: 13px; background: var(--bg); }
 .mk-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--faint); }
 .mk-dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
 
-.mk-tabs { display: flex; flex-wrap: wrap; column-gap: 14px; padding: 0 12px; flex-shrink: 0; overflow: hidden; }
-.mk-tabs .dialog-tab { padding: 7px 0; font-size: 0.85rem; white-space: nowrap; }
+.mk-tabs { display: flex; flex-wrap: wrap; column-gap: 12px; padding: 0 12px; flex-shrink: 0; overflow: hidden; }
+.mk-tabs .dialog-tab { padding: 7px 0; font-size: 0.82rem; white-space: nowrap; }
 .mk-tabs .dialog-tab:focus-visible { outline: none; color: var(--text); }
 .mk-count { display: inline-block; margin-left: 5px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 0.7rem; font-weight: 700; line-height: 16px; text-align: center; }
 
@@ -64,6 +65,27 @@ body { font-size: 13px; background: var(--bg); }
 .mk-foot { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--ribbon); }
 .mk-mcp { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Operations: the start form's steps, a run's steps and what it waits for. */
+.mk-steps, .mk-run-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mk-steps li { display: grid; grid-template-columns: 20px 1fr; gap: 4px 8px; align-items: center; }
+.mk-steps li select { grid-column: 2; width: 100%; }
+.mk-step-n { width: 20px; height: 20px; border-radius: 50%; background: var(--bg-3); color: var(--muted); font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.mk-step-name { min-width: 0; font-size: 0.85rem; font-weight: 600; overflow-wrap: anywhere; }
+.mk-back { align-self: flex-start; padding-left: 0; }
+.mk-run-head { display: flex; gap: 10px; align-items: flex-start; }
+.mk-run-steps li { display: grid; grid-template-columns: 20px 1fr; gap: 2px 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+.mk-run-steps li.on { border-color: var(--accent); }
+.mk-run-steps li.done .mk-step-n { background: var(--ok); color: var(--accent-text); }
+.mk-run-steps li.failed .mk-step-n { background: var(--err); color: #fff; }
+.mk-run-steps li.awaiting-approval .mk-step-n, .mk-run-steps li.running .mk-step-n { background: var(--accent); color: var(--accent-text); }
+.mk-step-state { grid-column: 2; font-size: 0.78rem; color: var(--muted); }
+.mk-run-action { border-top: 0; padding-top: 12px; background: transparent; }
+.mk-run-action .btn { justify-content: center; width: 100%; }
+.mk-question { margin: 0; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--bg-2); font-size: 0.85rem; white-space: pre-wrap; }
+.mk-run-tools { flex-direction: row; flex-wrap: wrap; }
+.mk-run-tools .btn { width: auto; flex: 1; }
+.mk-events ul { margin: 6px 0 0; padding-left: 16px; color: var(--muted); }
+
 /* Scroll bars: thin, no arrows, and only seen while the pointer is over what scrolls. VS Code gives
    webviews a scrollbar-color, and while it is set Chromium ignores ::-webkit-scrollbar and draws the
    system bar (with arrows): it goes back to auto here. */
@@ -76,3 +98,17 @@ html, html * { scrollbar-color: auto; scrollbar-width: auto; }
 
 /* The list keeps 6px for its scroll bar (scrollbar-gutter): the rows above and below end where its cards end. */
 .mk-head, .mk-tabs, .mk-foot { padding-right: 18px; }
+
+/* Run updates not seen yet: a dot on the Runs tab and on the run's card. */
+.mk-new { display: inline-block; width: 7px; height: 7px; margin-left: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); vertical-align: 2px; }
+.mk-card.fresh { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.mk-card.fresh .mk-card-title::after { content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: 2px; }
+
+/* The footer's "Connect to…": the AI tools that read Moki's MCP servers from this folder. */
+.mk-connect { position: relative; }
+.mk-menu-backdrop { position: fixed; inset: 0; z-index: 20; }
+.mk-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 21; min-width: 220px; margin: 0; padding: 4px; list-style: none;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); box-shadow: 0 8px 24px rgb(0 0 0 / 0.35); }
+.mk-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 8px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.mk-menu button:hover { background: var(--bg-3); }
+.mk-menu-note { padding: 6px 8px 4px; border-top: 1px solid var(--border); margin-top: 4px; }

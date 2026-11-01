@@ -228,6 +228,54 @@ export function writeMerged(file: string, entries: GeneratedEntry[], tool: 'clau
   return true;
 }
 
+// ---------------------------------------------------------------- Codex: .codex/config.toml
+
+// Codex reads [mcp_servers.<name>] tables from TOML, and does not expand ${VAR}: a variable passes
+// through env_vars when the key has its name (KEY=${KEY}), and a bearer token through
+// bearer_token_env_var. Anything else with a variable is left out and reported, never written as a value.
+const CODEX_BEGIN = '# >>> moki: the servers below are written by Moki; edit them in Moki, not here';
+const CODEX_END = '# <<< moki';
+const tq = (v: string): string => JSON.stringify(v); // TOML basic strings take JSON's escapes
+
+export function codexBlock(entries: GeneratedEntry[]): { text: string; skipped: string[] } {
+  const skipped: string[] = [];
+  const tables = entries.map(({ key, server: s }) => {
+    const lines = [`[mcp_servers.${tq(key)}]`];
+    if (s.transport === 'http') {
+      lines.push(`url = ${tq(s.url)}`);
+      for (const [name, value] of Object.entries(s.headers)) {
+        const bearer = /^Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value);
+        if (name.toLowerCase() === 'authorization' && bearer) lines.push(`bearer_token_env_var = ${tq(bearer[1])}`);
+        else skipped.push(`${key}: header ${name}`);
+      }
+      return lines.join('\n');
+    }
+    lines.push(`command = ${tq(s.command)}`, `args = [${s.args.map(tq).join(', ')}]`);
+    const literal: string[] = [];
+    const passed: string[] = [];
+    for (const [name, value] of Object.entries(s.env)) {
+      if (value === `\${${name}}`) passed.push(name);
+      else if (REF.test(value)) skipped.push(`${key}: ${name}`);
+      else literal.push(`${tq(name)} = ${tq(value)}`);
+      REF.lastIndex = 0;
+    }
+    if (literal.length) lines.push(`env = { ${literal.join(', ')} }`);
+    if (passed.length) lines.push(`env_vars = [${passed.map(tq).join(', ')}]`);
+    return lines.join('\n');
+  });
+  return { text: [CODEX_BEGIN, ...tables, CODEX_END].join('\n\n'), skipped };
+}
+
+// The person's TOML stays; Moki's region (between its markers) is replaced, or added at the end.
+export function mergeCodex(existing: string, entries: GeneratedEntry[]): { text: string; skipped: string[] } {
+  const { text: block, skipped } = codexBlock(entries);
+  const start = existing.indexOf(CODEX_BEGIN);
+  const end = existing.indexOf(CODEX_END);
+  const own = start >= 0 && end > start ? existing.slice(0, start) + existing.slice(end + CODEX_END.length) : existing;
+  const body = own.replace(/\s+$/, '');
+  return { text: `${body ? `${body}\n\n` : ''}${block}\n`, skipped };
+}
+
 // ---------------------------------------------------------------- Moki's own server and Cursor in the linked folder
 
 // Moki's read-only server (ide/mcp/server.ts) bound to one project, as the AI tools start it.
@@ -253,21 +301,31 @@ function excludeInGit(folder: string, line: string): void {
   } catch { /* not a .git folder: nothing hidden */ }
 }
 
-export const toolFile = (folder: string, tool: 'claude' | 'cursor'): string => (tool === 'cursor' ? join(folder, '.cursor', 'mcp.json') : join(folder, '.mcp.json'));
+export type McpTool = 'claude' | 'cursor' | 'codex';
+export const toolFile = (folder: string, tool: McpTool): string => (tool === 'cursor' ? join(folder, '.cursor', 'mcp.json')
+  : tool === 'codex' ? join(folder, '.codex', 'config.toml') : join(folder, '.mcp.json'));
 
-// A folder the AI tool is opened on (Cursor: .cursor/mcp.json; Claude Code: .mcp.json): Moki's entries written, the person's kept.
+// A folder the AI tool is opened on (Cursor: .cursor/mcp.json; Claude Code: .mcp.json; Codex: .codex/config.toml): Moki's entries written, the person's kept.
 // The current file is copied to <folder>/.moki-backup/<tool>-mcp-<date>/ first; the backup, and a new .mcp.json, are hidden from Git.
 // The caller checks that writing there is allowed and that the person confirmed it.
-export function syncToolFolder(folder: string, entries: GeneratedEntry[], tool: 'claude' | 'cursor'): { file: string; changed: boolean; backup?: string } {
+export function syncToolFolder(folder: string, entries: GeneratedEntry[], tool: McpTool): { file: string; changed: boolean; backup?: string; skipped?: string[] } {
   const file = toolFile(folder, tool);
   let backup: string | undefined;
   if (existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
     backup = join(folder, '.moki-backup', `${tool}-mcp-${stamp}`);
     mkdirSync(backup, { recursive: true });
-    writeFileSync(join(backup, 'mcp.json'), readFileSync(file));
+    writeFileSync(join(backup, tool === 'codex' ? 'config.toml' : 'mcp.json'), readFileSync(file));
     excludeInGit(folder, '.moki-backup/');
-  } else if (tool === 'claude') excludeInGit(folder, '.mcp.json'); // Moki created it: it stays out of the person's commits
+  } else if (tool !== 'cursor') excludeInGit(folder, tool === 'codex' ? '.codex/' : '.mcp.json'); // Moki created it: it stays out of the person's commits
+  if (tool === 'codex') {
+    const before = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    const { text, skipped } = mergeCodex(before, entries);
+    if (text === before) return { file, changed: false, backup, skipped };
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+    return { file, changed: true, backup, skipped };
+  }
   return { file, changed: writeMerged(file, entries, tool), backup };
 }
 
