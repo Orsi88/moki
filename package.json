@@ -16,7 +16,7 @@
     "qa": "node scripts/qa.ts",
     "mcp": "node ide/mcp/server.ts",
     "wiki": "node scripts/build-wiki.mjs",
-    "test-catalog": "node scripts/test-catalog.mjs",
+    "test-catalog": "node scripts/catalog-tests.mjs",
     "app:build": "node scripts/build-desktop.mjs",
     "app:dev": "node scripts/build-desktop.mjs && electron .",
     "vscode:build": "node scripts/build-vscode.mjs",

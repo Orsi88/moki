@@ -3,7 +3,8 @@
 // The rules below classify each test; a test no rule classifies stops the script, so a new
 // test is never put in a wrong area silently. Run it after adding or renaming tests.
 //
-// Usage: node scripts/test-catalog.mjs   (npm run test-catalog)
+// Usage: node scripts/catalog-tests.mjs   (npm run test-catalog)
+// (Not named test-*.mjs: node --test runs files with that name as tests, and would rewrite the catalogs on every test run.)
 
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -84,7 +85,7 @@ function scan(rel) {
 const rows = [];
 for (const file of readdirSync(join(root, 'tests')).filter((f) => /\.test\.(ts|mjs)$/.test(f)).sort()) {
   const rules = RULES[file];
-  if (!rules) throw new Error(`tests/${file}: add its rules to scripts/test-catalog.mjs`);
+  if (!rules) throw new Error(`tests/${file}: add its rules to scripts/catalog-tests.mjs`);
   for (const t of scan(`tests/${file}`)) {
     const rule = rules.find(([re]) => re.test(t.title));
     if (!rule) throw new Error(`tests/${file}:${t.line}: no rule classifies "${t.title}"`);
