@@ -32,7 +32,13 @@ Registering a tool in Moki instead of directly in the IDE means the agents, the 
 
 ## Install
 
-**From a package.** From the repository root:
+**From the release.** Download [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) from the [latest release](https://github.com/Orsi88/moki/releases/latest), then:
+
+```bash
+code --install-extension moki-0.3.0.vsix --force
+```
+
+**From the source.** From the repository root:
 
 ```bash
 npm install
