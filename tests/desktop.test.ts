@@ -1521,9 +1521,10 @@ test('terminal tabs start only the chosen tool, in the framework root, with the 
     const r = launchInTerminal('claude', "it's $(rm -rf ~)\nação", '/home/u/qa', (spec) => { specs.push(spec); return 't7'; });
     assert.deepEqual(r.terminal, { id: 't7', title: 'Claude Code' });
     const plugins = pluginArgs('claude', '/home/u/qa');
-    assert.deepEqual(specs, [{ file: 'claude', args: [...plugins, "it's $(rm -rf ~) ação"], cwd: '/home/u/qa' }]);
+    // The prompt after "--" (never read as an option); the tab is named after the tool.
+    assert.deepEqual(specs, [{ file: 'claude', args: [...plugins, '--', "it's $(rm -rf ~) ação"], cwd: '/home/u/qa', title: 'Claude Code' }]);
     launchInTerminal('claude', '', '/home/u/qa', (spec) => { specs.push(spec); return 't8'; }); // "+" menu: the tool alone
-    assert.deepEqual(specs[1], { file: 'claude', args: plugins, cwd: '/home/u/qa' });
+    assert.deepEqual(specs[1], { file: 'claude', args: plugins, cwd: '/home/u/qa', title: 'Claude Code' });
     assert.throws(() => launchInTerminal('vscode', 'x', '/home/u/qa', () => 'never'), /does not run in a terminal/);
   } finally {
     process.env.PATH = path;
