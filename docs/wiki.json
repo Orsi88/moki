@@ -26,8 +26,8 @@
     ] },
     { "title": "Contributing", "pages": [
       { "file": "contributing.md", "page": "Contributing" },
-      { "file": "testing.md", "page": "Automated tests" },
-      { "file": "test-catalog.md", "page": "Test catalog" },
+      { "file": "testing.md", "page": "Automated tests", "pt": { "file": "pt-BR/testing.md", "page": "Testes automatizados" } },
+      { "file": "test-catalog.md", "page": "Test catalog", "pt": { "file": "pt-BR/test-catalog.md", "page": "Catálogo de testes" } },
       { "file": "skill-standard.md", "page": "Skill standard" }
     ] }
   ]

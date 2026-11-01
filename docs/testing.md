@@ -1,15 +1,15 @@
 # Automated tests
 
-What is tested in Moki, how, where it runs and how to add a test. All tests live in `tests/`. Every scenario, one row each: [Test catalog](test-catalog.md) (`npm run test-catalog` regenerates it from the test files).
+What is tested in Moki, how, where it runs and how to add a test. All tests live in `tests/`. Every scenario, one row each, with the totals per kind and per area: [Test catalog](test-catalog.md) (`npm run test-catalog` regenerates it from the test files).
 
 ## At a glance
 
-| Suite | Runner | Files | Test cases | Runs in CI |
-|---|---|---|---|---|
-| Unit and integration | `node --test` (Node's built-in runner, TypeScript run directly) | 10 files in `tests/` | 123 | Yes (`npm test`) |
-| Interface (end to end) | Playwright driving the Electron app | `tests/ui/app.spec.ts` | 21 | **No** |
-| Repository checks | `scripts/validate.mjs`, `check-artifacts.mjs`, `check-secrets.mjs` | — | — | Yes (`npm run check`) |
-| Type check | `tsc` for the desktop/CLI code and for the app | — | — | Yes (`npm run typecheck`) |
+| Suite | Runner | Where | Runs in CI |
+|---|---|---|---|
+| Unit and integration | `node --test` (Node's built-in runner, TypeScript run directly) | `tests/*.test.ts`, `tests/*.test.mjs` | Yes (`npm test`) |
+| Interface (end to end) | Playwright driving the Electron app | `tests/ui/app.spec.ts` | **No** |
+| Repository checks | `scripts/validate.mjs`, `check-artifacts.mjs`, `check-secrets.mjs` | — | Yes (`npm run check`) |
+| Type check | `tsc` for the desktop/CLI code and for the app | — | Yes (`npm run typecheck`) |
 
 ```bash
 npm test          # unit and integration
@@ -18,7 +18,7 @@ npm run check     # validation, run artifacts, secrets
 npm run typecheck
 ```
 
-Run them from a terminal **without** `QA_ROOT`, `QA_MCP_SERVER` or `QA_RUN_TOOL` set (the installed app and the VS Code extension set them): with `QA_ROOT`, tests and checks read the installed copy in `Documents/Moki` instead of the checkout. `unset QA_ROOT QA_MCP_SERVER QA_RUN_TOOL` first.
+Run them from a terminal **without** `QA_ROOT`, `QA_MCP_SERVER` or `QA_RUN_TOOL` set (the installed app and the VS Code extension set them): with `QA_ROOT`, tests, checks and the pre-commit hook read the installed copy in `Documents/Moki` instead of the checkout. `unset QA_ROOT QA_MCP_SERVER QA_RUN_TOOL` first.
 
 ## The three kinds
 
@@ -28,18 +28,21 @@ Run them from a terminal **without** `QA_ROOT`, `QA_MCP_SERVER` or `QA_RUN_TOOL`
 
 ## Unit and integration tests (`node --test`)
 
-| File | Kind | Area | Cases | What it covers |
-|---|---|---|---|---|
-| `framework.test.mjs` | Unit + integration | Framework | 17 | The validator on the real repository and on a fixture (structure, workflows, mirrors and drift), frontmatter, subagent generation, artifact and secret checks, the run-state schema, xlsx and docx generation and filling, output checks, the `qa` assistant (activities, prompts, inbox copies), Markdown rendering |
-| `desktop.test.ts` | Integration (+ some unit) | Desktop service | 61 | Projects (create, delete, tree, read and edit files, inbox drops, notes), file confinement (`fs-guard`), "open with" and PdfCraft, launching AI tools (choices checked against fixed lists, request building, Word extraction, UTF-8 on Windows, no shell), tags, agents and the agent library, multi-agent operations (definitions, runs, branching and loops, failures and retries, rejection, answers, cancelling), skills (registry, creation, set up, global), linked folders and repository writes, Markdown/docx/spreadsheet rendering, installer sync, the UI request bridge, note windows, workspaces, search |
-| `companion.test.ts` | Integration | IDE: context and MCP server | 8 | How a folder finds its project, which resources the AI may read (shared context waits, secrets never), isolation between projects, context modes and the context pack, the MCP protocol (initialize, tools, logging), a session bound to one project, the server over stdio |
-| `companion-api.test.ts` | Integration | IDE: panel API | 9 | Only the panel's calls exist, state, agents, context switches, launching Claude Code with `--mcp-config`, copying for the chat, *Connect Claude Code*, no project, operations from the panel |
-| `mcp.test.ts` | Unit + integration | MCP servers | 14 | The catalog (ids, credentials as `${VARIABLE}` only, where a server applies), what an agent gets, importing configurations, Claude Code and Cursor configurations and merging, variables at start, launches with `--mcp-config`, Cursor sync, the service and its test results, a run keeping its servers, what the IDE lists, probing a real stdio server |
-| `tags.test.ts` | Unit | Tags | 3 | The one rule (no tag = every project) and the migrations of agents and document templates to tags |
-| `usage.test.ts` | Unit | Status bar | 4 | Claude and Codex plan windows, memory per terminal and per project |
-| `i18n.test.ts` | Unit (static) | Translations | 2 | Every text of the app has a pt-BR translation that keeps its `{placeholders}` |
-| `icon-font.test.mjs` | Unit | IDE icon | 2 | The status bar cat glyph and the SVG path flattening |
-| `wiki.test.mjs` | Unit | Documentation | 3 | The wiki built from `docs/`: every page, links rewritten, the in-development note, broken links stop it |
+| File | Kind | What it covers |
+|---|---|---|
+| `framework.test.mjs` | Unit + integration | The validator on the real repository and on a fixture (structure, workflows, mirrors and drift), frontmatter, subagent generation, artifact and secret checks, the run-state schema, xlsx and docx generation and filling, output checks, the `qa` assistant (activities, prompts, inbox copies), Markdown rendering |
+| `desktop.test.ts` | Integration (+ some unit) | Projects (create, delete, tree, read and edit files, inbox drops, notes), file confinement (`fs-guard`), "open with" and PdfCraft, launching AI tools (choices checked against fixed lists, request building, Word extraction, UTF-8 on Windows, no shell), tags, agents and the agent library, multi-agent operations (definitions, runs, branching and loops, failures and retries, rejection, answers, cancelling), skills (registry, creation, set up, global), linked folders and repository writes, Markdown/docx/spreadsheet rendering, installer sync, the UI request bridge, note windows, workspaces, search |
+| `companion.test.ts` | Integration | How a folder finds its project, which resources the AI may read (shared context waits, secrets never), isolation between projects, context modes and the context pack, the MCP protocol (initialize, tools, logging), a session bound to one project, the server over stdio |
+| `companion-api.test.ts` | Integration | Only the panel's calls exist, state, agents, context switches, launching Claude Code with `--mcp-config`, copying for the chat, *Connect Claude Code*, no project, operations from the panel |
+| `mcp.test.ts` | Unit + integration | The catalog (ids, credentials as `${VARIABLE}` only, where a server applies), what an agent gets, importing configurations, Claude Code and Cursor configurations and merging, variables at start, launches with `--mcp-config`, Cursor sync, the service and its test results, a run keeping its servers, what the IDE lists, probing a real stdio server |
+| `pdf-local.test.ts` | Unit | Comments in a PDF without PdfCraft: highlights, comments, replies, edits and deletes written by Moki itself |
+| `md-comments.test.ts` | Unit | Comments kept inside a Markdown file (invisible to other viewers), replies, edits and deletes |
+| `tool-path.test.ts` | Unit | Finding the AI tools from the installed app: the PATH it builds from the terminal's and the usual install folders |
+| `tags.test.ts` | Unit | The one rule (no tag = every project) and the migrations of agents and document templates to tags |
+| `usage.test.ts` | Unit | Claude and Codex plan windows, memory per terminal and per project |
+| `i18n.test.ts` | Unit (static) | Every text of the app has a pt-BR translation that keeps its `{placeholders}` |
+| `icon-font.test.mjs` | Unit | The status bar cat glyph and the SVG path flattening |
+| `wiki.test.mjs` | Unit | The wiki built from `docs/`: every page, links rewritten, the in-development note, broken links stop it |
 
 Two tests in `desktop.test.ts` are skipped on Windows (*app plugins load only in app sessions* and *terminal tabs start only the chosen tool…*): they check POSIX command lines and run in CI on Linux.
 
@@ -54,15 +57,16 @@ Two tests in `desktop.test.ts` are skipped on Windows (*app plugins load only in
 
 Playwright opens the built Electron app (`npm run test:ui` builds it first). Each `describe` block gets its own temporary workspace and user profile, and its tests run in order on the same window (`workers: 1`).
 
-| Block | Tests | What it covers |
-|---|---|---|
-| Moki settings | 8 | Document templates (layout, logo, watermark, per-project templates), *Create skill*, an agent's contract and your copy of it, your own agent, the operation editor (cards, arrows, approval, input mapping) |
-| Moki tags | 1 | A project tag brings another project into the activity context |
-| Moki workspaces | 3 | The workspace picker, deleting a hidden project, loose notes and the notebook window |
-| Moki project tree | 5 | Copying a path, creating files and folders, slash commands and checklists in notes, favourite notes, project notes in the notebook |
-| Moki operations in a project | 2 | Starting an operation from its form and following it on the board (states, rejecting with a reason, answering a question, approving, the list view); results choosing arrows, loops, the user's decision |
-| Moki terminals outlive the project screen | 1 | Leaving a project keeps its terminal; coming back restores the tab and its output |
-| Moki MCP servers list | 1 | The Global switch, the project picker, the chips and removing a project |
+| Block | What it covers |
+|---|---|
+| Moki settings | The Settings lists (Agents, Operations, Skills, MCP servers, Templates), document templates (layout, logo, watermark, per-project templates), skills and *Add a skill*, an agent's page and your copy of it, the operation editor (cards, arrows, approval, input mapping) |
+| Moki tags | A project tag brings another project into the activity context |
+| Moki workspaces | The workspace picker, deleting a hidden project, loose notes and the notebook window |
+| Moki project tree | Copying a path, creating files and folders, slash commands and checklists in notes, favourite notes, project notes in the notebook |
+| Moki operations in a project | Starting an operation from its form and following it on the board (states, rejecting with a reason, answering a question, approving, the list view); results choosing arrows, loops, the user's decision |
+| Moki terminals outlive the project screen | Leaving a project keeps its terminal; coming back restores the tab and its output |
+| Moki MCP servers list | The Global switch, the project picker, the chips and removing a project |
+| Moki PDF comments | Commenting a selection on a PDF page and in a Markdown file |
 
 ### How they are written
 
@@ -80,6 +84,8 @@ Playwright opens the built Electron app (`npm run test:ui` builds it first). Eac
 | What the person sees or clicks | An interface test in `tests/ui/app.spec.ts`, in the block of its screen |
 | A text of the app | A pt-BR translation (`i18n.test.ts` fails without it) |
 
+Then run `npm run test-catalog`: it adds the scenario to the catalog, and stops if a new test file has no rule in `scripts/test-catalog.mjs` (give it its area and kind there). Add the scenario's Portuguese title to `docs/pt-BR/test-scenarios.json`: until then the Portuguese catalog shows it in English, and the script says which ones are missing.
+
 Before a commit: `npm run typecheck`, `npm run check`, `npm test`, and `npm run test:ui` when the window changed.
 
 ## What has no automated test
@@ -90,5 +96,5 @@ Before a commit: `npm run typecheck`, `npm run check`, `npm test`, and `npm run 
 | The VS Code extension host (`ide/vscode/host.ts`, `extension.ts`) and its panel (`app/src/companion/`) | Project detection, MCP registration, terminals and operations in the IDE | The panel's API (`companion-api.test.ts`) only |
 | Terminal output kept for a returning tab (`desktop/terminals.ts`) | Terminals outliving the project screen | One interface test |
 | The CLI helpers (`new-project`, `new-run`, `runs`) and the terminal menu (`qa --terminal`) | Documented commands for AI tools and people | Not tested |
-| The interface tests in CI | 21 tests that only run when someone runs them | Not in CI |
+| The interface tests in CI | They only run when someone runs them | Not in CI |
 | Coverage | Knowing what the tests miss | Not measured |

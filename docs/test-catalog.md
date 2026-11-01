@@ -8,8 +8,8 @@ Every automated test scenario of Moki, one row each: 155 scenarios. The scenario
 
 | Kind | Scenarios |
 |---|---|
-| Integration | 79 |
 | Unit | 53 |
+| Integration | 79 |
 | Interface | 23 |
 
 | Area | Unit | Integration | Interface |
@@ -24,6 +24,7 @@ Every automated test scenario of Moki, one row each: 155 scenarios. The scenario
 | [Workspaces](#workspaces) |  | 1 |  |
 | [Tags](#tags) | 3 | 1 |  |
 | [Launching AI tools](#launching-ai-tools) | 1 | 6 |  |
+| [Finding the AI tools](#finding-the-ai-tools) | 2 |  |  |
 | [Activities and runs](#activities-and-runs) |  | 1 |  |
 | [Agents](#agents) |  | 4 |  |
 | [Multi-agent operations](#multi-agent-operations) |  | 7 |  |
@@ -39,7 +40,6 @@ Every automated test scenario of Moki, one row each: 155 scenarios. The scenario
 | [IDE icon](#ide-icon) | 2 |  |  |
 | [Framework](#framework) | 14 | 3 |  |
 | [Documentation](#documentation) | 3 |  |  |
-| [Finding the AI tools](#finding-the-ai-tools) | 2 |  |  |
 | [Settings (UI)](#settings-ui) |  |  | 8 |
 | [Tags (UI)](#tags-ui) |  |  | 1 |
 | [Workspaces (UI)](#workspaces-ui) |  |  | 3 |
@@ -146,6 +146,13 @@ Run with `npm test`.
 | 5 | app plugins load only in app sessions: Claude by folder, Codex as one line of instructions *(skipped on Windows)* | Integration | [desktop.test.ts:1476](../tests/desktop.test.ts#L1476) |
 | 6 | launcher keeps user text out of any shell command line | Unit | [desktop.test.ts:1506](../tests/desktop.test.ts#L1506) |
 | 7 | terminal tabs start only the chosen tool, in the framework root, with the prompt as one argument *(skipped on Windows)* | Integration | [desktop.test.ts:1514](../tests/desktop.test.ts#L1514) |
+
+### Finding the AI tools
+
+| # | Scenario | Kind | Where |
+|---|---|---|---|
+| 1 | PATH: the fresher PATH and the usual tool folders join the current one, without repeats | Unit | [tool-path.test.ts:5](../tests/tool-path.test.ts#L5) |
+| 2 | PATH: npm global and the installers' folders are among the usual ones | Unit | [tool-path.test.ts:14](../tests/tool-path.test.ts#L14) |
 
 ### Activities and runs
 
@@ -307,13 +314,6 @@ Run with `npm test`.
 | 1 | every page of docs/wiki.json is built, with Home, the sidebar and the footer | Unit | [wiki.test.mjs:12](../tests/wiki.test.mjs#L12) |
 | 2 | links become wiki pages or GitHub links; a page says where it is edited and links its translation | Unit | [wiki.test.mjs:20](../tests/wiki.test.mjs#L20) |
 | 3 | another branch gets the in-development note; a broken link stops the build | Unit | [wiki.test.mjs:36](../tests/wiki.test.mjs#L36) |
-
-### Finding the AI tools
-
-| # | Scenario | Kind | Where |
-|---|---|---|---|
-| 1 | PATH: the fresher PATH and the usual tool folders join the current one, without repeats | Unit | [tool-path.test.ts:5](../tests/tool-path.test.ts#L5) |
-| 2 | PATH: npm global and the installers' folders are among the usual ones | Unit | [tool-path.test.ts:14](../tests/tool-path.test.ts#L14) |
 
 ## Interface tests
 
