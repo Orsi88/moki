@@ -114,4 +114,6 @@ Exception: an authorized change to a **target repository** (e.g. automation code
 
 Edit `skills/` and `core/` only; then `npm run build` (regenerates `.agents/skills/` and `.claude/skills/`) and `npm run check`. Standard: [docs/skill-standard.md](docs/skill-standard.md).
 
+Documentation is edited in `docs/` (guides in English, user guides also in `docs/pt-BR/`) and published to the GitHub wiki by `.github/workflows/wiki.yml` (`npm run wiki` builds it locally); a new page goes in `docs/wiki.json`. The README stays a short introduction; `README.md` and `README.pt-BR.md` change together.
+
 Changes to Moki itself follow the `moki-change` skill (with `moki-architecture`): impact analysis, a proposal with code and impact, approval, then implementation and checks. Act as `moki-consultant` (read-only, ends at the proposal) to analyze or plan, and as `moki-executor` to implement an approved plan.
