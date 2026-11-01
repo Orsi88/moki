@@ -36,6 +36,7 @@ Run them from a terminal **without** `QA_ROOT`, `QA_MCP_SERVER` or `QA_RUN_TOOL`
 | `companion-api.test.ts` | Integration | Only the panel's calls exist, state, agents, context switches, launching Claude Code with `--mcp-config`, copying for the chat, *Connect Claude Code*, no project, operations from the panel |
 | `mcp.test.ts` | Unit + integration | The catalog (ids, credentials as `${VARIABLE}` only, where a server applies), what an agent gets, importing configurations, Claude Code and Cursor configurations and merging, variables at start, launches with `--mcp-config`, Cursor sync, the service and its test results, a run keeping its servers, what the IDE lists, probing a real stdio server |
 | `activities.test.ts` | Unit + integration | Activities: the list of the app's actions, the ones of Moki and your own, the request text, file checks, tags and favorites, and through the service: creating, duplicating, deleting and launching (a skill, an agent or an operation) |
+| `favorites.test.ts` | Unit + integration | Favorites of the workspace: one list per kind (activities, agents, operations, templates, skills), their order, safe ids and the service |
 | `pdf-local.test.ts` | Unit | Comments in a PDF without PdfCraft: highlights, comments, replies, edits and deletes written by Moki itself |
 | `md-comments.test.ts` | Unit | Comments kept inside a Markdown file (invisible to other viewers), replies, edits and deletes |
 | `tool-path.test.ts` | Unit | Finding the AI tools from the installed app: the PATH it builds from the terminal's and the usual install folders |
@@ -68,6 +69,8 @@ Playwright opens the built Electron app (`npm run test:ui` builds it first). Eac
 | Moki terminals outlive the project screen | Leaving a project keeps its terminal; coming back restores the tab and its output |
 | Moki MCP servers list | The Global switch, the project picker, the chips and removing a project |
 | Moki activities | Creating an activity in Settings, starring it, and finding it first when opening the AI tool |
+| Moki favorites | The star on the cards of Agents, Operations, Templates and Skills, and favorites first |
+| Moki settings without a project | In a workspace with no project, Skills shows its list and only Add a skill waits for a project |
 | Moki PDF comments | Commenting a selection on a PDF page and in a Markdown file |
 
 ### How they are written

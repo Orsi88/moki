@@ -1,6 +1,6 @@
 # Catálogo de testes
 
-Todos os cenários de teste automatizado do Moki, um por linha: 162 cenários. O cenário é o título do teste, que diz o comportamento verificado; os títulos vêm de `docs/pt-BR/test-scenarios.json` (o original, em inglês, está no código). Como as suítes rodam e como os testes são escritos: [Testes automatizados](testing.md).
+Todos os cenários de teste automatizado do Moki, um por linha: 166 cenários. O cenário é o título do teste, que diz o comportamento verificado; os títulos vêm de `docs/pt-BR/test-scenarios.json` (o original, em inglês, está no código). Como as suítes rodam e como os testes são escritos: [Testes automatizados](testing.md).
 
 > Gerado pelo `npm run test-catalog` a partir dos arquivos de teste; não edite à mão. Rode de novo depois de criar ou renomear um teste.
 
@@ -8,9 +8,9 @@ Todos os cenários de teste automatizado do Moki, um por linha: 162 cenários. O
 
 | Tipo | Cenários |
 |---|---|
-| Unidade | 57 |
-| Integração | 81 |
-| Interface | 24 |
+| Unidade | 58 |
+| Integração | 82 |
+| Interface | 26 |
 
 | Área | Unidade | Integração | Interface |
 |---|---|---|---|
@@ -26,6 +26,7 @@ Todos os cenários de teste automatizado do Moki, um por linha: 162 cenários. O
 | [Abrir as ferramentas de IA](#abrir-as-ferramentas-de-ia) | 1 | 6 |  |
 | [Encontrar as ferramentas de IA](#encontrar-as-ferramentas-de-ia) | 2 |  |  |
 | [Atividades](#atividades) | 4 | 2 |  |
+| [Favoritos](#favoritos) | 1 | 1 |  |
 | [Atividades e execuções](#atividades-e-execuções) |  | 1 |  |
 | [Agentes](#agentes) |  | 4 |  |
 | [Operações multiagente](#operações-multiagente) |  | 7 |  |
@@ -50,6 +51,8 @@ Todos os cenários de teste automatizado do Moki, um por linha: 162 cenários. O
 | [Lista de servidores MCP (UI)](#lista-de-servidores-mcp-ui) |  |  | 1 |
 | [Comentários em PDF (UI)](#comentários-em-pdf-ui) |  |  | 2 |
 | [Atividades (UI)](#atividades-ui) |  |  | 1 |
+| [Configurações sem projeto (UI)](#configurações-sem-projeto-ui) |  |  | 1 |
+| [Favoritos (UI)](#favoritos-ui) |  |  | 1 |
 
 ## Testes de unidade e de integração
 
@@ -166,6 +169,13 @@ Rodam com `npm test`.
 | 4 | as suas atividades: salvas na biblioteca, chegam aos projetos por tags, nunca usam um id do Moki; favoritas | Unidade | [activities.test.ts:63](../../tests/activities.test.ts#L63) |
 | 5 | serviço: Configurações lista, cria, duplica e exclui; um alvo que não existe é recusado | Integração | [activities.test.ts:79](../../tests/activities.test.ts#L79) |
 | 6 | abrir: o texto da sua atividade, a atividade de um agente age como ele, a atividade de uma operação abre o formulário dela | Integração | [activities.test.ts:101](../../tests/activities.test.ts#L101) |
+
+### Favoritos
+
+| # | Cenário | Tipo | Onde |
+|---|---|---|---|
+| 1 | uma lista por tipo, separadas, na ordem em que foram marcadas; desmarcar tira o item | Unidade | [favorites.test.ts:14](../../tests/favorites.test.ts#L14) |
+| 2 | só os tipos conhecidos e ids seguros | Integração | [favorites.test.ts:31](../../tests/favorites.test.ts#L31) |
 
 ### Atividades e execuções
 
@@ -400,3 +410,15 @@ Rodam com `npm run test:ui`. Cada área é um bloco de `tests/ui/app.spec.ts`; o
 | # | Cenário | Tipo | Onde |
 |---|---|---|---|
 | 1 | uma atividade nova é criada em Configurações, marcada com estrela, e aparece primeiro ao abrir a ferramenta de IA | Interface | [ui/app.spec.ts:1090](../../tests/ui/app.spec.ts#L1090) |
+
+### Configurações sem projeto (UI)
+
+| # | Cenário | Tipo | Onde |
+|---|---|---|---|
+| 1 | Skills lista as skills do Moki; só o Adicionar skill espera um projeto | Interface | [ui/app.spec.ts:1134](../../tests/ui/app.spec.ts#L1134) |
+
+### Favoritos (UI)
+
+| # | Cenário | Tipo | Onde |
+|---|---|---|---|
+| 1 | agentes, operações, templates e skills são marcados com estrela pelo card e aparecem primeiro | Interface | [ui/app.spec.ts:1176](../../tests/ui/app.spec.ts#L1176) |

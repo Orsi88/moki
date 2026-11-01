@@ -10,7 +10,7 @@
 // - builtin: activities/<id>.md in the framework (read-only; duplicate one to change it).
 // - library: <workspace>/library/activities/<id>.md, the person's own.
 // A library activity with tags reaches only the projects of those tags (none = every
-// project, the same rule as agents and templates). Favorites: <workspace>/library/favorites.json.
+// project, the same rule as agents and templates). Favorites: scripts/lib/favorites.ts.
 //
 // The text: {files} becomes the inbox files (a line with {files} is left out when there are
 // none), a line that starts with {no-files} is kept only when there are none, and {project}
@@ -21,6 +21,7 @@ import { join } from 'node:path';
 import { ROOT, workspaceDir } from './repo.mjs';
 import { parseFrontmatter } from './frontmatter.mjs';
 import { appliesTo, cleanTags } from './tags.mjs';
+import { favoritesOf, setFavoriteOf } from './favorites.ts';
 
 export type TargetKind = 'moki' | 'skill' | 'agent' | 'workflow' | 'operation';
 export const TARGET_KINDS: TargetKind[] = ['skill', 'agent', 'workflow', 'operation']; // what a file may point to
@@ -50,7 +51,6 @@ export const isMokiActivity = (id: string): boolean => MOKI_ACTIVITIES.some((a) 
 
 export const builtinDir = (root = ROOT): string => join(root, 'activities');
 export const libraryDir = (root = ROOT): string => join(workspaceDir(root), 'library', 'activities');
-const favoritesFile = (root: string) => join(workspaceDir(root), 'library', 'favorites.json');
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
 
@@ -147,19 +147,6 @@ export function activityId(label: string, root = ROOT): string {
   return id;
 }
 
-export function favorites(root = ROOT): string[] {
-  try {
-    const list = (JSON.parse(readFileSync(favoritesFile(root), 'utf8')) as { activities?: unknown }).activities;
-    return Array.isArray(list) ? list.map(String).filter((id) => ID.test(id)) : [];
-  } catch { return []; }
-}
-
-export function setFavorite(id: string, on: boolean, root = ROOT): string[] {
-  const now = favorites(root).filter((x) => x !== id);
-  const next = on ? [...now, id] : now;
-  mkdirSync(join(workspaceDir(root), 'library'), { recursive: true });
-  let data: Record<string, unknown> = {};
-  try { data = JSON.parse(readFileSync(favoritesFile(root), 'utf8')) as Record<string, unknown>; } catch { /* new file */ }
-  writeFileSync(favoritesFile(root), `${JSON.stringify({ ...data, activities: next }, null, 2)}\n`);
-  return next;
-}
+// Starred activities (scripts/lib/favorites.ts keeps the favorites of every kind).
+export const favorites = (root = ROOT): string[] => favoritesOf('activities', root).filter((id) => ID.test(id));
+export const setFavorite = (id: string, on: boolean, root = ROOT): string[] => setFavoriteOf('activities', id, on, root);

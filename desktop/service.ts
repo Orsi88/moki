@@ -19,6 +19,7 @@ import { readableInputs, docxToMarkdown } from '../scripts/lib/docx.ts';
 import { checkOperation, cleanOperation, formatMessage, listOperations, removeOperation, seedExample, suggestOutput, writeOperation, type OperationAgent } from '../scripts/lib/operations.ts';
 import { advance, answered, approve, canRedo, cancel, createOperationRun, decide, isOperationRun, markStarted, missingOutputs, readRun, reject, resume, retry, runEvents, startFailed, setPaused, stepExited, stepPrompt, type RunRequest } from '../scripts/lib/operation-runs.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
+import { allFavorites, isFavoriteKind, setFavoriteOf } from '../scripts/lib/favorites.ts';
 import { FILES_RULES, ID as ACTIVITY_ID, TARGET_KINDS, activityId, activityMarkdown, favorites, getActivity, listActivities, removeLibraryActivity, saveLibraryActivity, setFavorite, type ActivityDef, type FilesRule, type TargetKind } from '../scripts/lib/activities.ts';
 import { listTemplates, removeTemplate, saveTemplate, setProjectTemplate, templateFor } from '../scripts/lib/doc-style.mjs';
 import { agentTags, agentsOfProject, setAgentTags, setAgentsOfProject } from '../scripts/lib/agent-tags.ts';
@@ -724,6 +725,12 @@ export function createService(root: string, deps: Deps) {
       const id = typeof project === 'string' && listProjects(root).includes(project) ? project : undefined;
       const stars = favorites(root);
       return { activities: listActivities(root, id).map((a) => activityInfo(a, id, stars)), languages: LANGUAGES };
+    },
+    // Favorites of every kind (activities, agents, operations, templates, skills): they come first in their lists.
+    favorites: () => allFavorites(root),
+    setFavorite: (kind: unknown, id: unknown, on: unknown) => {
+      if (!isFavoriteKind(kind)) throw new ServiceError('Unknown list.');
+      return failing(() => setFavoriteOf(kind, String(id ?? ''), on === true, root));
     },
     // What an activity of the person's own can use: the ready skills, the usable agents, the workflows, the operations.
     activityTargets: () => {

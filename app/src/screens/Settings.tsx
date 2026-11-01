@@ -110,22 +110,16 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
               ) : <p className="muted">{t('Create a project before installing skills or agents.')}</p>}
             />
           )
-          : !target ? (
-            <div className="settings-skills">
-              <h1>{t('Skills')}</h1>
-              <p className="muted">{t('Create a project before installing skills or agents.')}</p>
-            </div>
-          ) : (
-            <>
-              <SkillsPage
-                key={skillsTab}
-                startOnAdd={skillsTab === 'add'}
-                project={target}
-                projects={projects}
-                tools={tools}
-                onTerminal={(terminal) => onTerminal(terminal, target.id)}
-              />
-            </>
+          : (
+            // Without a project the list still shows (the skills of Moki, the installed ones, the plugins); only adding needs one.
+            <SkillsPage
+              key={skillsTab}
+              startOnAdd={skillsTab === 'add' && Boolean(target)}
+              project={target}
+              projects={projects}
+              tools={tools}
+              onTerminal={(terminal) => { if (target) onTerminal(terminal, target.id); }}
+            />
           )}
       </div>
     </div>

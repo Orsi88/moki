@@ -36,6 +36,7 @@ Rode a partir de um terminal **sem** `QA_ROOT`, `QA_MCP_SERVER` ou `QA_RUN_TOOL`
 | `companion-api.test.ts` | Integração | Só as chamadas do painel existem, estado, agentes, ligar e desligar contexto, abrir o Claude Code com `--mcp-config`, copiar para o chat, *Conectar ao Claude Code*, sem projeto, operações pelo painel |
 | `mcp.test.ts` | Unidade + integração | O catálogo (ids, credenciais só como `${VARIAVEL}`, onde um servidor vale), o que um agente recebe, importar configurações, configurações do Claude Code e do Cursor e a mesclagem, variáveis ao iniciar, abertura com `--mcp-config`, sincronização com o Cursor, o serviço e os resultados dos testes, uma execução mantendo os servidores dela, o que a IDE lista, teste de um servidor stdio real |
 | `activities.test.ts` | Unidade + integração | Atividades: a lista com as ações do app, as do Moki e as suas, o texto do pedido, a conferência dos arquivos, tags e favoritas, e, pelo serviço, criar, duplicar, excluir e abrir (uma skill, um agente ou uma operação) |
+| `favorites.test.ts` | Unidade + integração | Favoritos do workspace: uma lista por tipo (atividades, agentes, operações, templates, skills), a ordem, os ids aceitos e o serviço |
 | `pdf-local.test.ts` | Unidade | Comentários num PDF sem o PdfCraft: destaques, comentários, respostas, edições e exclusões gravados pelo próprio Moki |
 | `md-comments.test.ts` | Unidade | Comentários guardados dentro de um arquivo Markdown (invisíveis em outros visualizadores), respostas, edições e exclusões |
 | `tool-path.test.ts` | Unidade | Encontrar as ferramentas de IA a partir do app instalado: o PATH que ele monta com o do terminal e as pastas de instalação de sempre |
@@ -68,6 +69,8 @@ O Playwright abre o app Electron compilado (o `npm run test:ui` compila antes). 
 | Moki terminals outlive the project screen | Sair do projeto mantém o terminal; voltar traz a aba e a saída dela |
 | Moki MCP servers list | O botão Global, a escolha de projetos, os chips e tirar um projeto |
 | Moki activities | Criar uma atividade em Configurações, marcar com estrela e encontrar ela primeiro ao abrir a ferramenta de IA |
+| Moki favorites | A estrela nos cards de Agentes, Operações, Templates e Skills, e os favoritos primeiro |
+| Moki settings without a project | Num workspace sem projetos, a aba Skills mostra a lista e só o Adicionar skill espera um projeto |
 | Moki PDF comments | Comentar uma seleção numa página de PDF e num arquivo Markdown |
 
 ### Como são escritos

@@ -36,6 +36,7 @@ export interface ActivityInfo {
   category: string; source: 'moki' | 'builtin' | 'library'; target: ActivityTarget; files: 'required' | 'optional' | 'none'; note: string; tags: string[]; favorite: boolean;
 }
 export interface ActivityDetail extends ActivityInfo { template: string; path: string }
+export type FavoriteKind = 'activities' | 'agents' | 'operations' | 'templates' | 'skills';
 export interface ActivityDraft { id?: string; label: string; description: string; category: string; kind: string; target: string; files: string; note: string; tags: string[]; template: string }
 // "Open with" (Excel, Word and PDF files): the programs the system offers; dialog = the system shows its own list instead (Windows).
 export interface OpenWithApps { dialog: boolean; apps: { id: string; name: string; isDefault: boolean }[] }
@@ -268,6 +269,8 @@ export const api = {
   activities: (project?: string) => call<{ activities: ActivityInfo[]; languages: string[] }>('activities', project)
     .then((r) => ({ ...r, activities: [...r.activities].sort((a, b) => Number(b.favorite) - Number(a.favorite)) })),
   activity: (id: string) => call<ActivityDetail>('activity', id),
+  favorites: () => call<Record<FavoriteKind, string[]>>('favorites'),
+  setFavorite: (kind: FavoriteKind, id: string, on: boolean) => call<string[]>('setFavorite', kind, id, on),
   activityTargets: () => call<{ skills: string[]; agents: string[]; workflows: string[]; operations: { id: string; name: string }[] }>('activityTargets'),
   saveActivity: (draft: ActivityDraft) => call<ActivityInfo>('saveActivity', draft),
   duplicateActivity: (id: string) => call<ActivityInfo>('duplicateActivity', id),

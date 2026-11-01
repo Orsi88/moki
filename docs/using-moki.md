@@ -14,13 +14,18 @@ Claude Code, Codex, Gemini CLI, Antigravity CLI and Cursor Agent open in a termi
 
 Then you talk in that tool as usual. The request names the project, the linked folder, and the skills and agents installed for it.
 
-**Settings** (the gear) has three tabs:
+**Settings** (the gear) has six tabs, each one a list with filters and a search field:
 
 | Tab | What you do there |
 |---|---|
-| **Agents** | Roles that use one or more skills. Duplicate a built-in one, or create your own for this project or for every project. |
-| **Skills** | What is already installed, what ships with Moki, and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry (programming, design, QA, security, docs) or describe one for your AI tool to draft. |
-| **Documents** | Font, colours, header, footer, logo and watermark for the PDF, Word and Excel files activities generate. One style for every project, or a project's own. |
+| **Agents** | Roles that use one or more skills. Duplicate a built-in one, or create your own; tags say which projects it reaches. |
+| **Activities** | The ready-made requests you pick in "Open in your AI tool": the ones of Moki, and your own (what to ask, of which skill, agent, workflow or operation, with which files). See [Activities](activities.md). |
+| **Operations** | Agents linked by arrows into a multi-agent operation. See [Agents and operations](agents.md). |
+| **Skills** | What is already installed, what ships with Moki, the app plugins (in purple), and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry or describe one for your AI tool to draft. |
+| **MCP servers** | The tools the AI gets, global or for chosen projects. See [MCP servers](mcp-servers.md). |
+| **Templates** | Font, colours, header, footer, logo and watermark for the PDF, Word and Excel files activities generate; tags say which projects use each one. |
+
+**Favorites.** The star on a card of Activities, Agents, Operations, Templates or Skills makes it a favorite: favorites come first in their list, and starred activities come first wherever an activity is picked. They are kept per workspace in `library/favorites.json`.
 
 Notes on a project are Markdown files under `notes/` and open in their own window. Loose notes on the start screen stay in the app until you send one to a project.
 

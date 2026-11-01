@@ -1494,9 +1494,11 @@ span.mcp-row-main { cursor: default; }
 .md-comment-hint { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; padding: 6px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border); }
 
 /* Settings › Activities (components/ActivitiesPage.tsx): the star sits in the corner of each card; the form and the request text. */
-.activity-item { position: relative; }
-.activity-item > .star-btn { position: absolute; top: 10px; right: 10px; }
-.activity-item .list-card { padding-right: 44px; }
+/* A list card with a favorite star in its corner (Activities, Agents, Operations, Templates, Skills). */
+.activity-item, .fav-item { position: relative; }
+.activity-item > .star-btn, .fav-item > .star-btn { position: absolute; top: 10px; right: 10px; z-index: 1; }
+.activity-item .list-card, .fav-item .list-card { padding-right: 44px; }
+.fav-item > .star-btn:not(.on) { background: color-mix(in srgb, var(--bg-2) 85%, transparent); }
 .activity-form { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .activity-uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .activity-form textarea { font-family: var(--mono, monospace); font-size: 0.85rem; }

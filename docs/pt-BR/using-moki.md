@@ -14,13 +14,18 @@ Claude Code, Codex, Gemini CLI, Antigravity CLI e Cursor Agent abrem numa aba de
 
 Aí você conversa nessa ferramenta como de costume. O pedido cita o projeto, a pasta vinculada e as skills e os agentes instalados nele.
 
-**Configurações** (a engrenagem) tem três abas:
+**Configurações** (a engrenagem) tem seis abas, cada uma uma lista com filtros e busca:
 
 | Aba | O que você faz ali |
 |---|---|
-| **Agentes** | Papéis que usam uma ou mais skills. Duplique um pronto, ou crie o seu para este projeto ou para todos. |
-| **Skills** | O que já está instalado, o que vem com o Moki, e **Adicionar skill**: busque no registro público [SkillMD](https://skillmd.com) (programação, design, QA, segurança, documentação) ou descreva uma para a sua ferramenta de IA redigir. |
-| **Modelos** | Fonte, cores, cabeçalho, rodapé, logo e marca d'água dos PDF, Word e Excel que as atividades geram. Um estilo para todos os projetos, ou o de um projeto. |
+| **Agentes** | Papéis que usam uma ou mais skills. Duplique um pronto, ou crie o seu; as tags dizem a quais projetos ele chega. |
+| **Atividades** | Os pedidos prontos que você escolhe em "Abrir na sua ferramenta de IA": os do Moki e os seus (o que pedir, a qual skill, agente, workflow ou operação, com quais arquivos). Veja [Atividades](activities.md). |
+| **Operações** | Agentes ligados por setas numa operação multiagente. Veja [Agents and operations](../agents.md) (em inglês). |
+| **Skills** | O que já está instalado, o que vem com o Moki, os plugins do app (em roxo) e **Adicionar skill**: busque no registro público [SkillMD](https://skillmd.com) ou descreva uma para a sua ferramenta de IA redigir. |
+| **Servidores MCP** | As ferramentas que a IA recebe, globais ou para projetos escolhidos. Veja [MCP servers](../mcp-servers.md) (em inglês). |
+| **Templates** | Fonte, cores, cabeçalho, rodapé, logo e marca d'água dos PDF, Word e Excel que as atividades geram; as tags dizem quais projetos usam cada um. |
+
+**Favoritos.** A estrela num card de Atividades, Agentes, Operações, Templates ou Skills torna o item favorito: os favoritos aparecem primeiro na lista deles, e as atividades favoritas aparecem primeiro em todo lugar onde se escolhe uma atividade. Eles ficam guardados por workspace em `library/favorites.json`.
 
 Notas de um projeto são arquivos Markdown em `notes/` e abrem numa janela própria. Notas avulsas da tela inicial ficam no app até você enviar uma para um projeto.
 

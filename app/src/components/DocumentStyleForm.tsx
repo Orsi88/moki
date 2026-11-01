@@ -10,6 +10,7 @@ import { api, DOCUMENT_FONTS, type DocumentStyle, type DocumentTemplate } from '
 import { t } from '../i18n';
 import { TagField, TagFilter, matchesTag, useTagCatalog } from './TagField';
 import { ListBack, ListHead, ListTabs, ListTools, countLabel, matchesQuery } from './ListPage';
+import { StarButton, useFavorites } from './Favorites';
 
 interface Draft { id: string; name: string; tags: string[]; style: DocumentStyle }
 
@@ -52,6 +53,7 @@ function readLogo(file: File): Promise<string> {
 }
 
 export function DocumentStyleForm() {
+  const fav = useFavorites('templates');
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null); // the template being edited ('' id: not saved yet)
   const [saved, setSaved] = useState('');
@@ -149,8 +151,8 @@ export function DocumentStyleForm() {
         </ListTools>
         {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
         <ul className="list-cards">
-          {visible.map((x) => (
-            <li key={x.id}>
+          {fav.first(visible, (x) => x.id).map((x) => (
+            <li key={x.id} className="fav-item">
               <button type="button" className="ds-card-item" onClick={() => open(x)} aria-label={x.name}>
                 <span className="ds-thumb" aria-hidden="true"><span className="ds-thumb-page"><Page style={x.style} project={x.usedBy[0] ? projectName(x.usedBy[0]) : t('Project name')} /></span></span>
                 <span className="ds-card-body">
@@ -163,6 +165,7 @@ export function DocumentStyleForm() {
                   <span className="muted small">{x.style.font.family} · {x.style.font.size} pt{x.style.header.logo ? ` · ${t('logo')}` : ''}{x.style.watermark.text ? ` · ${x.style.watermark.text}` : ''}</span>
                 </span>
               </button>
+              <StarButton on={fav.has(x.id)} name={x.name} onToggle={() => fav.toggle(x.id)} />
             </li>
           ))}
           {!visible.length && <li className="muted">{t('No template with this filter.')}</li>}
