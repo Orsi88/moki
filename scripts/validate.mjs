@@ -9,6 +9,7 @@ import { parseFrontmatter } from './lib/frontmatter.mjs';
 import { validateSchema } from './lib/schema.mjs';
 import { findDrift } from './build.mjs';
 import { listAgents, listCategories, parseAgent, validateAgent } from './lib/agents.ts';
+import { builtinDir, isMokiActivity, parseActivity } from './lib/activities.ts';
 
 // Agent Skills spec fields only, so skills load in every compatible tool.
 const ALLOWED_KEYS = ['name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools'];
@@ -102,6 +103,7 @@ export function validate(root = ROOT, { checkDrift = true } = {}) {
   validateWorkflows(root, skills, err);
   validateAgents(root, skills, err);
   validateAgentsMd(root, skills, err);
+  validateActivities(root, skills, err);
   validateSchemas(root, err);
 
   for (const file of ['README.md', 'README.pt-BR.md', 'AGENTS.md'].map((f) => join(root, f)).filter(existsSync)) checkLinks(root, file, err);
@@ -189,6 +191,26 @@ function validateAgents(root, skills, err) {
   const text = existsSync(join(root, 'AGENTS.md')) ? readFileSync(join(root, 'AGENTS.md'), 'utf8') : '';
   for (const a of listAgents(root).filter((x) => x.source === 'builtin')) {
     if (!text.includes(`\`${a.name}\``)) err('AGENTS.md', `agent "${a.name}" is not listed in the agent catalog`);
+  }
+}
+
+// activities/*.md: each one parses, has a free id, and points to a skill, workflow or agent of the framework (operations live in workspaces).
+function validateActivities(root, skills, err) {
+  const dir = builtinDir(root);
+  if (!existsSync(dir)) return;
+  const agents = new Set(listAgents(root).filter((a) => a.source === 'builtin').map((a) => a.name));
+  for (const file of walkFiles(dir).filter((f) => f.endsWith('.md') && basename(f) !== 'README.md')) {
+    const where = relPosix(root, file);
+    const id = basename(file, '.md');
+    const { activity, errors } = parseActivity(readFileSync(file, 'utf8'), id, 'builtin', file);
+    errors.forEach((e) => err(where, e));
+    if (!activity) continue;
+    if (isMokiActivity(id)) err(where, `"${id}" is an action of the app: choose another id`);
+    const { kind, name } = activity.target;
+    if (kind === 'skill' && !skills.includes(name)) err(where, `uses the unknown skill "${name}"`);
+    if (kind === 'workflow' && !existsSync(join(root, 'skills', 'qa-orchestrator', 'references', 'workflows', `${name}.md`))) err(where, `uses the unknown workflow "${name}"`);
+    if (kind === 'agent' && !agents.has(name)) err(where, `uses the unknown agent "${name}"`);
+    if (kind === 'operation') err(where, 'an activity of the framework cannot use an operation (operations live in each workspace)');
   }
 }
 

@@ -311,7 +311,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   };
 
   // ---------- use the note with the AI ----------
-  const choices = activities.filter((a) => a.id !== 'resume' && a.available);
+  const choices = activities.filter((a) => a.id !== 'resume' && a.available && a.target.kind !== 'operation'); // a note goes to a request, not to an operation
   const activity = choices.find((a) => a.id === activityId);
   const quick = tools.filter((x) => x.available && QUICK.includes(x.kind));
   const tool = quick.find((x) => x.id === toolId) ?? quick[0];

@@ -9,6 +9,7 @@
     ] },
     { "title": "QA work", "pages": [
       { "file": "qa-skills.md", "page": "QA skills and agents", "pt": { "file": "pt-BR/qa-skills.md", "page": "Skills de QA e agentes" } },
+      { "file": "activities.md", "page": "Activities", "pt": { "file": "pt-BR/activities.md", "page": "Atividades" } },
       { "file": "agents.md", "page": "Agents and operations" }
     ] },
     { "title": "Tools", "pages": [

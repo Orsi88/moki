@@ -37,6 +37,7 @@ function fixture(): string {
   writeFileSync(join(root, 'package.json'), JSON.stringify({ version: '0.0.0-test' }));
   cpSync(join(ROOT, 'skills'), join(root, 'skills'), { recursive: true });
   cpSync(join(ROOT, 'agents'), join(root, 'agents'), { recursive: true });
+  cpSync(join(ROOT, 'activities'), join(root, 'activities'), { recursive: true });
   cpSync(join(ROOT, 'templates'), join(root, 'templates'), { recursive: true });
   addProject(root, 'acme', 'Acme Library');
   return root;
@@ -1063,5 +1064,51 @@ test.describe.serial('Moki PDF comments', () => {
     await pdfPage.locator('.md-card').getByRole('button', { name: 'Excluir' }).click();
     await expect(pdfPage.locator('.md-card')).toHaveCount(0);
     await expect.poll(() => readFileSync(file, 'utf8')).toBe(REVIEW_MD);
+  });
+});
+
+// Activities: ready-made requests, configured in Settings like agents and skills; favorites come first.
+test.describe.serial('Moki activities', () => {
+  let actApp: ElectronApplication;
+  let actPage: Page;
+  const dirs: string[] = [];
+  let library = '';
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    library = join(root, 'workspace', 'library', 'activities');
+    ({ app: actApp, page: actPage } = await openApp(root, userData, 'acme'));
+  });
+
+  test.afterAll(async () => {
+    await actApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('a new activity is created in Settings, starred, and comes first when opening the AI tool', async () => {
+    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('tab', { name: 'Atividades' }).click();
+    await expect(actPage.locator('.activity-item .list-card-title').getByText('Desenhar testes', { exact: true })).toBeVisible(); // one that comes with Moki
+    await actPage.getByRole('button', { name: 'Nova atividade' }).click();
+    await actPage.getByRole('textbox', { name: 'Nome' }).fill('Checar smoke');
+    await actPage.getByRole('combobox', { name: 'O que ela usa' }).selectOption('test-design');
+    await actPage.getByRole('textbox', { name: 'Pedido enviado à IA' }).fill('Use the test-design skill to list smoke checks for: {files}.');
+    await actPage.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(actPage.getByRole('heading', { name: 'Checar smoke', level: 1 })).toBeVisible();
+    await expect.poll(() => existsSync(join(library, 'checar-smoke.md'))).toBe(true);
+    expect(readFileSync(join(library, 'checar-smoke.md'), 'utf8')).toContain('uses: skill:test-design');
+
+    await actPage.getByRole('button', { name: 'Favorita: Checar smoke' }).click();
+    await expect(actPage.getByRole('button', { name: 'Favorita: Checar smoke' })).toHaveAttribute('aria-pressed', 'true');
+    await actPage.getByRole('button', { name: 'Voltar para Atividades' }).click();
+    await actPage.getByRole('tab', { name: /^Favoritas/ }).click();
+    await expect(actPage.locator('.activity-item .list-card-title')).toHaveText(['Checar smoke']);
+
+    // In the project, the starred activity is the first one offered.
+    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('button', { name: 'Abrir na sua ferramenta de IA' }).click();
+    await expect(actPage.locator('.answer-list .answer').first()).toContainText('Checar smoke');
   });
 });

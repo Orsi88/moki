@@ -59,6 +59,7 @@ const RULES = {
   'i18n.test.ts': [[/./, 'Translations', U]],
   'icon-font.test.mjs': [[/./, 'IDE icon', U]],
   'wiki.test.mjs': [[/./, 'Documentation', U]],
+  'activities.test.ts': [[/^service:|^launching:/, 'Activities', I], [/./, 'Activities', U]],
 };
 
 const unescape = (s) => s.replace(/\\(['"`\\])/g, '$1');
@@ -94,7 +95,7 @@ const blockName = (b) => { const n = b.replace(/^Moki /, ''); return `${n.charAt
 for (const t of scan('tests/ui/app.spec.ts')) rows.push({ ...t, file: 'tests/ui/app.spec.ts', area: blockName(t.block), kind: 'Interface' });
 
 // Areas in reading order: the app's main objects first, then the IDE, then the framework and tooling.
-const ORDER = ['Projects', 'Files and confinement', 'Open with', 'PDF (PdfCraft)', 'Notes', 'Rendering', 'Search', 'Workspaces', 'Tags', 'Launching AI tools', 'Finding the AI tools', 'Activities and runs', 'Agents', 'Multi-agent operations', 'Skills and set up', 'Linked folder', 'MCP servers', 'App bridge (IPC)', 'Installer', 'Status bar usage', 'Translations', 'IDE: panel API', 'IDE: context and MCP server', 'IDE icon', 'Framework', 'Documentation'];
+const ORDER = ['Projects', 'Files and confinement', 'Open with', 'PDF (PdfCraft)', 'Notes', 'Rendering', 'Search', 'Workspaces', 'Tags', 'Launching AI tools', 'Finding the AI tools', 'Activities', 'Activities and runs', 'Agents', 'Multi-agent operations', 'Skills and set up', 'Linked folder', 'MCP servers', 'App bridge (IPC)', 'Installer', 'Status bar usage', 'Translations', 'IDE: panel API', 'IDE: context and MCP server', 'IDE icon', 'Framework', 'Documentation'];
 const rank = (a) => { const i = ORDER.indexOf(a); return i < 0 ? ORDER.length : i; };
 
 // The texts of the page in each language; the scenarios stay as the test titles (English, as in the code).
@@ -129,7 +130,7 @@ const TEXT = {
       'Settings (UI)': 'Configurações (UI)', 'Tags (UI)': 'Tags (UI)', 'Workspaces (UI)': 'Workspaces (UI)', 'Project tree (UI)': 'Árvore do projeto (UI)',
       'Operations in a project (UI)': 'Operações num projeto (UI)', 'Terminals outlive the project screen (UI)': 'Terminais que continuam fora do projeto (UI)',
       'MCP servers list (UI)': 'Lista de servidores MCP (UI)', 'PDF comments (UI)': 'Comentários em PDF (UI)',
-      'Finding the AI tools': 'Encontrar as ferramentas de IA',
+      'Finding the AI tools': 'Encontrar as ferramentas de IA', Activities: 'Atividades', 'Activities (UI)': 'Atividades (UI)',
     },
   },
 };

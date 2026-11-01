@@ -1492,3 +1492,13 @@ span.mcp-row-main { cursor: default; }
 .md-card { border-left-color: var(--accent); }
 .md-marker { background: var(--accent); }
 .md-comment-hint { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; padding: 6px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border); }
+
+/* Settings › Activities (components/ActivitiesPage.tsx): the star sits in the corner of each card; the form and the request text. */
+.activity-item { position: relative; }
+.activity-item > .star-btn { position: absolute; top: 10px; right: 10px; }
+.activity-item .list-card { padding-right: 44px; }
+.activity-form { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.activity-uses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.activity-form textarea { font-family: var(--mono, monospace); font-size: 0.85rem; }
+.activity-template { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--bg-3); font-size: 0.82rem; white-space: pre-wrap; }
+@media (max-width: 700px) { .activity-uses { grid-template-columns: minmax(0, 1fr); } }

@@ -89,6 +89,8 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const [note, setNote] = useState<{ path: string | null } | null>(null); // open note (main area); path null = new note
   // A multi-agent operation in the main area: its start screen, or one of its runs.
   const [opView, setOpView] = useState<{ kind: 'launch' | 'run'; id: string } | null>(null);
+  // An activity of an operation: its start form, in place of the request.
+  const startOperationForm = (id: string) => { setLaunch(null); setNote(null); setOpView({ kind: 'launch', id }); };
   const [opsTick, setOpsTick] = useState(0);
   const advanceRef = useRef<() => void>(() => {});
   const [termMenu, setTermMenu] = useState<{ left: number; top: number } | null>(null);
@@ -565,7 +567,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
         )}
       </main>
 
-      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onTerminal={addTerminal} onMyFolder={myFolder} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} />
+      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onTerminal={addTerminal} onMyFolder={myFolder} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} />
       </>}
 
       {dropping && <div className="drop-veil" role="status">{t('Drop to keep the files in this project')}</div>}
@@ -618,7 +620,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
       {creating && <NewEntryDialog project={project.id} parent={creating.parent} kind={creating.kind} onClose={() => setCreating(null)} onCreated={(path) => created(path, creating.kind)} />}
       {showSetup && <SetupDialog project={project} onClose={() => setShowSetup(false)}
         onSaved={(activity) => { setShowSetup(false); onProjectChanged(); if (activity) setLaunch({ activity }); }} />}
-      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} />}
+      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} onOperation={startOperationForm} />}
     </div>
   );
 }

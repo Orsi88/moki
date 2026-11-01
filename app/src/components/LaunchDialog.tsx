@@ -15,6 +15,7 @@ interface Props {
   preset?: { activity: string; run?: string; skipActivity?: boolean }; // skipActivity: the activity was already chosen (side panel)
   onClose: () => void;
   onTerminal: (terminal: TerminalRef) => void; // the tool opened in a terminal tab of the app
+  onOperation?: (operation: string) => void; // an activity of an operation opens its start form instead
 }
 
 type StepKey = 'activity' | 'run' | 'files' | 'context' | 'agent' | 'details' | 'tool' | 'review';
@@ -32,7 +33,7 @@ const kindHint = (kind: ToolKind): string => ({
 
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function LaunchDialog({ project, tools, preset, onClose, onTerminal }: Props) {
+export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOperation }: Props) {
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [languages, setLanguages] = useState<string[]>(['English']);
   const [activity, setActivity] = useState(preset?.activity ?? '');
@@ -68,7 +69,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal }: Pr
   }, [project.id]);
 
   useEffect(() => {
-    api.activities().then((r) => { setActivities(r.activities); setLanguages(r.languages); }).catch(() => { /* empty list */ });
+    api.activities(project.id).then((r) => { setActivities(r.activities); setLanguages(r.languages); }).catch(() => { /* empty list */ });
     Promise.all([api.agents(), api.projectAgents(project.id)])
       .then(([list, enabled]) => setAgents(list.filter((a) => a.usable && enabled.includes(a.name))))
       .catch(() => setAgents([]));
@@ -186,6 +187,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal }: Pr
                 return (
                   <Answer key={a.id} title={t(a.label)} hint={t(a.hint)} on={activity === a.id}
                     onPick={() => {
+                      if (a.target.kind === 'operation') { onOperation?.(a.target.name); return; }
                       setActivity(a.id);
                       if (a.id === 'resume') setRun((r) => (runs.some((x) => x.id === r) ? r : runs[0]?.id ?? ''));
                       setStep(a.id === 'resume' ? 'run' : 'files');

@@ -15,7 +15,8 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { ROOT } from './lib/repo.mjs';
-import { ACTIVITIES, TOOLS, cleanPath, copyToInbox, isActivity, isFile, isTool, isUsable, listProjects, skillStatus } from './lib/core.ts';
+import { TOOLS, activityProblem, cleanPath, copyToInbox, isFile, isTool, listProjects } from './lib/core.ts';
+import { getActivity, listActivities } from './lib/activities.ts';
 import { deliver, runTerminalMenu, type MenuArgs } from './lib/terminal-menu.ts';
 import { c } from './lib/tui.ts';
 
@@ -71,16 +72,15 @@ async function main(): Promise<number> {
   if (!wantsTerminal) return openDesktopApp();
 
   if (project && !listProjects().includes(project)) throw new Error(`Project "${project}" not found. Create it with: npm run new-project -- ${project}`);
-  if (activity && !isActivity(activity)) throw new Error(`Unknown activity "${activity}". Options: ${Object.keys(ACTIVITIES).join(', ')}`);
-  if (activity && isActivity(activity) && activity !== 'resume' && !isUsable(ACTIVITIES[activity].skill)) {
-    throw new Error(`The ${ACTIVITIES[activity].skill} skill is ${skillStatus(ACTIVITIES[activity].skill)} and cannot run yet.`);
-  }
+  const def = activity ? getActivity(activity) : undefined;
+  if (activity && !def) throw new Error(`Unknown activity "${activity}". Options: ${listActivities().map((a) => a.id).join(', ')}`);
+  if (def && activityProblem(def)) throw new Error(`The activity "${def.label}" cannot run here: ${activityProblem(def)}.`);
   if (tool && !isTool(tool)) throw new Error(`Unknown tool "${tool}". Options: ${Object.keys(TOOLS).join(', ')}`);
   for (const f of args.file || []) if (!isFile(cleanPath(f))) throw new Error(`File not found: ${f}`);
 
   const menuArgs: MenuArgs = {
     project,
-    activity: activity && isActivity(activity) ? activity : undefined,
+    activity: def ? def.id : undefined,
     tool: tool && isTool(tool) ? tool : undefined,
     run: str(args.run),
     file: args.file,
@@ -91,7 +91,7 @@ async function main(): Promise<number> {
 
   const complete = menuArgs.project && menuArgs.activity && menuArgs.tool
     && (menuArgs.activity !== 'resume' || menuArgs.run)
-    && (!ACTIVITIES[menuArgs.activity].needsFiles || menuArgs.file?.length);
+    && (def?.files !== 'required' || menuArgs.file?.length);
   if (complete && menuArgs.project && menuArgs.activity && menuArgs.tool) {
     const files = (menuArgs.file || []).map((f) => copyToInbox(menuArgs.project as string, cleanPath(f)));
     return deliver({

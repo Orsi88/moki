@@ -153,5 +153,12 @@
   "workspaces: each one has its own projects; requests name a workspace outside the default": "workspaces: cada um tem os próprios projetos; os pedidos citam um workspace fora do padrão",
   "xlsx fill keeps the model, clears example rows and maps headers": "o preenchimento de xlsx mantém o modelo, limpa as linhas de exemplo e mapeia os cabeçalhos",
   "xlsx round trip and missing sheet warning": "ida e volta de xlsx e aviso de planilha ausente",
-  "your agent: description and instructions in text fields, skills searched and added, one Save; tags say which projects it reaches": "o seu agente: descrição e instruções em campos de texto, skills buscadas e acrescentadas, um Salvar só; as tags dizem a quais projetos ele chega"
+  "your agent: description and instructions in text fields, skills searched and added, one Save; tags say which projects it reaches": "o seu agente: descrição e instruções em campos de texto, skills buscadas e acrescentadas, um Salvar só; as tags dizem a quais projetos ele chega",
+  "the app's actions and the activities that come with Moki: one list, the same ids as before": "as ações do app e as atividades que vêm com o Moki: uma lista só, com os mesmos ids de antes",
+  "the request text: {files} lines only with files, {no-files} lines only without, {project}; an empty text asks for its target": "o texto do pedido: linhas com {files} só com arquivos, linhas com {no-files} só sem, {project}; um texto vazio pede o alvo dela",
+  "a file is checked: what it uses, its files rule, its id and its name": "um arquivo é conferido: o que ele usa, a regra de arquivos, o id e o nome",
+  "your own activities: saved in the library, reach projects by tags, never take an id of Moki; favorites": "as suas atividades: salvas na biblioteca, chegam aos projetos por tags, nunca usam um id do Moki; favoritas",
+  "service: Settings lists, creates, duplicates and deletes; a target that does not exist is refused": "serviço: Configurações lista, cria, duplica e exclui; um alvo que não existe é recusado",
+  "launching: your activity's text, an agent's activity acts as it, an operation's activity opens its form instead": "abrir: o texto da sua atividade, a atividade de um agente age como ele, a atividade de uma operação abre o formulário dela",
+  "a new activity is created in Settings, starred, and comes first when opening the AI tool": "uma atividade nova é criada em Configurações, marcada com estrela, e aparece primeiro ao abrir a ferramenta de IA"
 }

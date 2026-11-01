@@ -23,6 +23,7 @@ interface Props {
   onOpenPath: (path: string) => void;
   onLaunch: (preset?: { activity: string; run?: string; skipActivity?: boolean }) => void;
   onTerminal: (terminal: TerminalRef) => void; // a terminal tool opened in a tab of the app
+  onOperation?: (operation: string) => void; // an activity of an operation opens its start form
   onMyFolder: () => void; // opens the linked folder, or links one first
   onSetup: () => void; // description and the global skills the project uses
   collapsed: boolean; // shown as a thin rail
@@ -43,7 +44,7 @@ const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?
 
 const onboarding = (status: string): string => ({ 'not-started': t('Not started'), partial: t('In progress'), complete: t('Complete') } as Record<string, string>)[status] ?? status;
 
-export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onTerminal, onMyFolder, onSetup, collapsed, onToggle, graphOn, onGraph }: Props) {
+export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onTerminal, onMyFolder, onSetup, collapsed, onToggle, graphOn, onGraph }: Props) {
   const [run, setRun] = useState<RunState | null>(null);
   const [runs, setRuns] = useState<OpenRun[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -68,7 +69,7 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
     else setRun(null);
   }, [project.id, runId, refreshKey]);
 
-  useEffect(() => { api.activities().then((r) => setActivities(r.activities)).catch(() => setActivities([])); }, []);
+  useEffect(() => { api.activities(project.id).then((r) => setActivities(r.activities)).catch(() => setActivities([])); }, [project.id]);
 
   useEffect(() => {
     api.openRuns(project.id).then(setRuns).catch(() => setRuns([]));
@@ -91,6 +92,7 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
   const start = () => {
     if (!activity) { setCatalog(true); return; }
     const id = activity.id;
+    if (activity.target.kind === 'operation') { onOperation?.(activity.target.name); return; }
     if (activity.needsFiles) { if (tool) remember('qa-tool', tool.id); onLaunch({ activity: id, skipActivity: true }); return; }
     void quickOpen(id);
   };

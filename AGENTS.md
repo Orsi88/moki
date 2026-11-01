@@ -70,6 +70,8 @@ Access levels: **read-only** (reads the project or the framework, writes nothing
 
 Example: *"Review this story and, once approved, map the test scenarios"* → workflow `requirements-to-tests`: `project-context` → `requirements-review` (all its gates) → **approval** → `test-design` (mapping → **OK** → detailing).
 
+Activities (the ready-made requests people pick in the app) are files: `activities/` in the framework, `workspace/library/activities/` for the person's own; the app's own actions (open, context, setup, plan, resume) are in code. Guide: [docs/activities.md](docs/activities.md).
+
 Workflows: `skills/qa-orchestrator/references/workflows/` — `requirements-to-tests`, `failure-investigation`, `test-evidence`, `quality-lifecycle`.
 
 ## Interrupting and resuming

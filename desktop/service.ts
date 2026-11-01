@@ -7,7 +7,7 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSyn
 import { homedir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
-  ACTIVITIES, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isActivity, isTool, isUsable, linkedFolder, listProjects,
+  LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects,
   listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, which, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
@@ -19,6 +19,7 @@ import { readableInputs, docxToMarkdown } from '../scripts/lib/docx.ts';
 import { checkOperation, cleanOperation, formatMessage, listOperations, removeOperation, seedExample, suggestOutput, writeOperation, type OperationAgent } from '../scripts/lib/operations.ts';
 import { advance, answered, approve, canRedo, cancel, createOperationRun, decide, isOperationRun, markStarted, missingOutputs, readRun, reject, resume, retry, runEvents, startFailed, setPaused, stepExited, stepPrompt, type RunRequest } from '../scripts/lib/operation-runs.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
+import { FILES_RULES, ID as ACTIVITY_ID, TARGET_KINDS, activityId, activityMarkdown, favorites, getActivity, listActivities, removeLibraryActivity, saveLibraryActivity, setFavorite, type ActivityDef, type FilesRule, type TargetKind } from '../scripts/lib/activities.ts';
 import { listTemplates, removeTemplate, saveTemplate, setProjectTemplate, templateFor } from '../scripts/lib/doc-style.mjs';
 import { agentTags, agentsOfProject, setAgentTags, setAgentsOfProject } from '../scripts/lib/agent-tags.ts';
 import { appliesTo as reaches, projectTag } from '../scripts/lib/tags.mjs';
@@ -392,6 +393,39 @@ export function createService(root: string, deps: Deps) {
     const data = JSON.parse(readFileSync(join(projectDir(project), 'project.json'), 'utf8')) as { operations?: unknown };
     return Array.isArray(data.operations) ? data.operations.map(String) : [];
   };
+  // An activity as the app shows it: what it points to, whether it can run, whether it is a favorite.
+  const frameworkSkill = (name: string) => existsSync(join(root, 'skills', name, 'SKILL.md'));
+  const activityInfo = (a: ActivityDef, project: string | undefined, stars: string[]) => {
+    const skill = a.target.kind === 'moki' || a.target.kind === 'skill' ? a.target.name : a.target.kind === 'workflow' ? 'qa-orchestrator' : '';
+    const agent = a.target.kind === 'agent' ? listAgents(root).find((x) => x.name === a.target.name) : undefined;
+    const available = a.id === 'resume' ? true
+      : a.target.kind === 'agent' ? Boolean(agent && isUsableAgent(agent))
+      : a.target.kind === 'operation' ? (!project || linkedOperations(project).includes(a.target.name))
+      : !frameworkSkill(skill) || isUsable(skill, root); // a skill installed by the person (not in the framework) is theirs to use
+    return {
+      id: a.id, label: a.label, hint: a.description, category: a.category, source: a.source, target: a.target, files: a.files,
+      needsFiles: a.files === 'required', note: a.note, tags: a.tags, skill, favorite: stars.includes(a.id),
+      available, status: skill && frameworkSkill(skill) ? skillStatus(skill, root) : available ? 'ready' : 'unavailable',
+    };
+  };
+  // What the person typed for an activity of their own: checked like a file of activities/, and its target must exist.
+  const activityText = (raw: unknown): { label: string; text: string } => {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    const kind = String(r.kind ?? '') as TargetKind;
+    const name = String(r.target ?? '').trim();
+    if (!TARGET_KINDS.includes(kind)) throw new ServiceError('Choose what the activity uses: a skill, an agent, a workflow or an operation.');
+    if (!/^[a-z0-9][a-z0-9:-]{0,99}$/.test(name)) throw new ServiceError('Choose the skill, agent, workflow or operation it uses.');
+    if (kind === 'agent' && !listAgents(root).some((a) => a.name === name)) throw new ServiceError(`There is no agent "${name}".`);
+    if (kind === 'workflow' && !existsSync(join(root, 'skills', 'qa-orchestrator', 'references', 'workflows', `${name}.md`))) throw new ServiceError(`There is no workflow "${name}".`);
+    if (kind === 'operation' && !listOperations(root).some((o) => o.id === name)) throw new ServiceError(`There is no operation "${name}".`);
+    const files = (FILES_RULES.includes(String(r.files) as FilesRule) ? String(r.files) : 'optional') as FilesRule;
+    const label = cleanPrompt(String(r.label ?? '')).slice(0, 80);
+    if (!label) throw new ServiceError('Give the activity a name.');
+    const tags = Array.isArray(r.tags) ? r.tags.map(String) : [];
+    const template = String(r.template ?? '').replace(/\r\n/g, '\n').slice(0, 4000);
+    if (/^---/m.test(template)) throw new ServiceError('The text of the request cannot have a line with ---.');
+    return { label, text: activityMarkdown({ label, description: cleanPrompt(String(r.description ?? '')).slice(0, 300), category: cleanPrompt(String(r.category ?? '')).slice(0, 40) || 'Other', target: { kind, name }, files, note: cleanPrompt(String(r.note ?? '')).slice(0, 200), tags, template }) };
+  };
   const linkedOperation = (project: string, id: unknown) => {
     const op = listOperations(root).find((o) => o.id === id);
     if (!op || !linkedOperations(project).includes(op.id)) throw new ServiceError('This operation is not linked to the project.');
@@ -685,13 +719,55 @@ export function createService(root: string, deps: Deps) {
 
     skills: () => listSkills(root),
 
-    activities: () => ({
-      activities: Object.entries(ACTIVITIES).map(([id, a]) => ({
-        id, label: a.label, hint: a.hint ?? '', skill: a.skill, needsFiles: a.needsFiles,
-        available: id === 'resume' || isUsable(a.skill, root), status: skillStatus(a.skill, root),
-      })),
-      languages: LANGUAGES,
-    }),
+    // Every activity, or the ones a project sees (by tags); favorites first in the app.
+    activities: (project?: unknown) => {
+      const id = typeof project === 'string' && listProjects(root).includes(project) ? project : undefined;
+      const stars = favorites(root);
+      return { activities: listActivities(root, id).map((a) => activityInfo(a, id, stars)), languages: LANGUAGES };
+    },
+    // What an activity of the person's own can use: the ready skills, the usable agents, the workflows, the operations.
+    activityTargets: () => {
+      const wf = join(root, 'skills', 'qa-orchestrator', 'references', 'workflows');
+      return {
+        skills: listSkills(root).filter((s) => isUsable(s.name, root)).map((s) => s.name),
+        agents: listAgents(root).filter(isUsableAgent).map((a) => a.name),
+        workflows: existsSync(wf) ? readdirSync(wf).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort() : [],
+        operations: listOperations(root).map((o) => ({ id: o.id, name: o.name })),
+      };
+    },
+    // One activity with its text, for its page in Settings.
+    activity: (id: unknown) => {
+      const a = getActivity(String(id ?? ''), root);
+      if (!a) throw new ServiceError('Unknown activity.');
+      return { ...activityInfo(a, undefined, favorites(root)), template: a.template, path: a.path ? relative(root, a.path).split(sep).join('/') : '' };
+    },
+    // A new activity of the person's own (id: free from the name), or a change to one of theirs.
+    saveActivity: (raw: unknown) => {
+      const r = (raw ?? {}) as { id?: unknown };
+      const { label, text } = activityText(raw);
+      const existing = typeof r.id === 'string' && r.id ? getActivity(r.id, root) : undefined;
+      if (existing && existing.source !== 'library') throw new ServiceError('An activity that comes with Moki cannot be changed: duplicate it.');
+      const id = existing ? existing.id : activityId(label, root);
+      return failing(() => saveLibraryActivity(id, text, root));
+    },
+    // A copy of any builtin or library activity, as one of the person's own.
+    duplicateActivity: (id: unknown) => {
+      const a = getActivity(String(id ?? ''), root);
+      if (!a || a.source === 'moki') throw new ServiceError('This activity cannot be duplicated.');
+      const copy = { ...a, label: `${a.label} (copy)` };
+      return failing(() => saveLibraryActivity(activityId(copy.label, root), activityMarkdown(copy), root));
+    },
+    deleteActivity: (id: unknown) => {
+      const a = getActivity(String(id ?? ''), root);
+      if (!a || a.source !== 'library') throw new ServiceError('Only your own activities can be deleted.');
+      failing(() => removeLibraryActivity(a.id, root));
+      return true;
+    },
+    setActivityFavorite: (id: unknown, on: unknown) => {
+      const a = typeof id === 'string' && ACTIVITY_ID.test(id) ? getActivity(id, root) : undefined;
+      if (!a) throw new ServiceError('Unknown activity.');
+      return setFavorite(a.id, on === true, root);
+    },
 
     integrations: () => {
       const available = (deps.detectTools ?? detectTools)();
@@ -1521,8 +1597,10 @@ export function createService(root: string, deps: Deps) {
       const project = typeof req?.project === 'string' && listProjects(root).includes(req.project) ? req.project : null;
       if (!project) throw new ServiceError('Unknown project.');
       const activity = String(req.activity ?? '');
-      if (!isActivity(activity)) throw new ServiceError('Unknown activity.');
-      if (activity !== 'resume' && !isUsable(ACTIVITIES[activity].skill, root)) throw new ServiceError(`The ${ACTIVITIES[activity].skill} skill is not available yet.`);
+      const def = listActivities(root, project).find((a) => a.id === activity); // only the activities this project sees
+      if (!def) throw new ServiceError('Unknown activity.');
+      if (def.target.kind === 'operation') throw new ServiceError(`The activity "${def.label}" starts the operation ${def.target.name}: start it from the Operations panel.`);
+      if (!activityInfo(def, project, []).available) throw new ServiceError(`The activity "${def.label}" is not available yet.`);
       const tool = String(req.tool ?? '');
       if (!isTool(tool)) throw new ServiceError('Unknown tool.');
       const language = LANGUAGES.includes(String(req.language)) ? String(req.language) : 'English';
@@ -1532,7 +1610,7 @@ export function createService(root: string, deps: Deps) {
       const names = Array.isArray(req.files) ? req.files.map(String) : [];
       const unknown = names.filter((n) => !available.has(n));
       if (unknown.length) throw new ServiceError(`Not in the project inbox: ${unknown.join(', ')}`);
-      if (ACTIVITIES[activity].needsFiles && !names.length) throw new ServiceError('This activity needs at least one file from the inbox.');
+      if (def.files === 'required' && !names.length) throw new ServiceError('This activity needs at least one file from the inbox.');
       const files = names.map((n) => `${workspaceLabel(root)}/projects/${project}/inbox/${n}`);
       let run = '';
       if (activity === 'resume') {
@@ -1545,6 +1623,11 @@ export function createService(root: string, deps: Deps) {
         if (!isUsableAgent(chosen)) throw new ServiceError(`The ${chosen.name} agent is not available yet.`);
         if (!enabledAgents(project).includes(chosen.name)) throw new ServiceError(`The ${chosen.name} agent is not enabled in this project.`);
         agent = { name: chosen.name, path: chosen.path };
+      } else if (def.target.kind === 'agent') {
+        // An activity of an agent: that agent, unless the person chose another.
+        const own = listAgents(root).find((a) => a.name === def.target.name);
+        if (!own || !isUsableAgent(own)) throw new ServiceError(`The ${def.target.name} agent is not available yet.`);
+        agent = { name: own.name, path: own.path };
       }
       // Shared context is worked out here again from the tags; the UI only says what to leave out.
       const exclude = new Set(Array.isArray(req.exclude) ? req.exclude.map(String) : []);
@@ -1558,7 +1641,7 @@ export function createService(root: string, deps: Deps) {
         paths: s.paths.filter((p) => !exclude.has(p) && !seen.has(p) && Boolean(seen.add(p))),
       }))).filter((s) => s.paths.length);
       const excluded = choice.own.filter((p) => exclude.has(p));
-      const prompt = buildPrompt({ project, activity, files: readableInputs(files, root), note, run, language, agent, repository: projectRepository(project, root), shared, excluded, workspace: workspaceLabel(root),
+      const prompt = buildPrompt({ project, activity, root, files: readableInputs(files, root), note, run, language, agent, repository: projectRepository(project, root), shared, excluded, workspace: workspaceLabel(root),
         skills: installedSkills(project, root), agents: installedAgents(project, root),
         description: cleanPrompt(projectSummary(project, root).description).slice(0, 2000), globalSkills: linkedGlobalSkills(project),
         available: activity === 'plan' ? { skills: [...linkableSkills()].sort(), agents: listAgents(root).filter(isUsableAgent).map((a) => a.name) } : undefined });

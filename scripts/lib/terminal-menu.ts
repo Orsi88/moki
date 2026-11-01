@@ -6,11 +6,12 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { ROOT, SLUG } from './repo.mjs';
 import {
-  ACTIVITIES, TOOLS, LANGUAGES, type ActivityKey, type ToolKey, type Request,
-  buildPrompt, projectRepository, cleanPath, copyToClipboard, copyToInbox, detectTools, isFile, isUsable, windowsSafePrompt,
-  launchTool, listProjects, loadPrefs, openRuns, projectsDir, savePrefs, skillStatus,
+  TOOLS, LANGUAGES, activityProblem, type ActivityKey, type ToolKey, type Request,
+  buildPrompt, projectRepository, cleanPath, copyToClipboard, copyToInbox, detectTools, isFile, windowsSafePrompt,
+  launchTool, listProjects, loadPrefs, openRuns, projectsDir, savePrefs,
 } from './core.ts';
 import { createUI, CancelError, c, type UI } from './tui.ts';
+import { getActivity, listActivities } from './activities.ts';
 import { readableInputs } from './docx.ts';
 
 export interface MenuArgs {
@@ -103,16 +104,12 @@ async function interactive(args: MenuArgs, ui: UI): Promise<number> {
   const runs = openRuns(project);
   const activity: ActivityKey = args.activity ?? await ui.select<ActivityKey>({
     message: 'What do you want to do?',
-    options: (Object.keys(ACTIVITIES) as ActivityKey[]).map((key) => {
-      const a = ACTIVITIES[key];
-      return {
-        value: key,
-        label: a.label,
-        hint: key === 'resume' ? `${runs.length} open` : a.hint,
-        disabled: key === 'resume' ? (runs.length ? '' : 'no open runs')
-          : isUsable(a.skill) ? '' : `not available yet: ${skillStatus(a.skill)}`,
-      };
-    }),
+    options: listActivities(undefined, project).map((a) => ({
+      value: a.id,
+      label: a.label,
+      hint: a.id === 'resume' ? `${runs.length} open` : a.description,
+      disabled: a.id === 'resume' ? (runs.length ? '' : 'no open runs') : activityProblem(a),
+    })),
   });
 
   let run = args.run || '';
@@ -125,7 +122,7 @@ async function interactive(args: MenuArgs, ui: UI): Promise<number> {
       });
     }
   } else if (!files.length) {
-    const required = ACTIVITIES[activity].needsFiles;
+    const required = getActivity(activity)?.files === 'required';
     for (;;) {
       const raw = await ui.text({
         message: files.length ? `Another file? (${files.length} added)` : `Input file${required ? '' : ' (optional)'}`,
@@ -162,7 +159,7 @@ async function interactive(args: MenuArgs, ui: UI): Promise<number> {
 
   ui.note('Summary', [
     ['Project', project],
-    ['Activity', ACTIVITIES[activity].label + (run ? ` · ${run}` : '')],
+    ['Activity', (getActivity(activity)?.label ?? activity) + (run ? ` · ${run}` : '')],
     ...(files.length ? files.map((f, i): [string, string] => [i ? '' : 'Files', f]) : [['Files', c.dim('none')] as [string, string]]),
     ...(note ? [['Note', note] as [string, string]] : []),
     ['Language', language],
