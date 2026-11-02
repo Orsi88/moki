@@ -58,11 +58,12 @@ Dependency direction: `app/` → (IPC) → `desktop/` → `scripts/lib/` → Nod
 | `pdfcraft.ts` | PDF comments and page edits through PdfCraft (`pdfcraft-cli run --script`, `--root` = project folder); the only writer of PDF bytes |
 | `open-with.ts` | "Open with" for Excel, Word and PDF: the programs the system offers (Linux GIO, macOS Launch Services via JXA, Windows its own dialog) and opening with one; never changes the system default (the program kept per type is a UI preference) |
 | `launcher.ts`, `run-tool.ts`, `terminals.ts` | Start AI tools from the fixed `TOOLS` list: terminal tab (node-pty), external terminal (Windows: UTF-8 JSON request file read by `run-tool.ts`; macOS/Linux: single-quoted bash script), editors with the request on the clipboard |
+| `claude-import.ts` | Upload of skills/agents from a `.claude` folder, `skills/`/`agents/` folder, single skill or `.zip`: reads and checks only (names, `SKILL.md`, secrets via `PATTERNS`, Moki names, limits, no symlinks, unsafe zip paths); the service's `claudeUploadApply` writes through `scopeFolders` after confirmation |
 | `skill-registry.ts` | SkillMD registry search and install, sha256 per file, writes only inside the chosen skills folder |
 | `search.ts`, `workspaces.ts` | Workspace search; workspace registry |
 | `framework.ts`, `boot.ts` | Installer sync; `PATH` from the login shell on macOS/Linux |
 
-`deps` injected into `createService` (`launch`, `openFolder`, `openPath`, `appChooser`, `pdfcraft`, `pickFolder`, `home`, `fetch`, `trash`, `onWorkspace`) are the test seams: `tests/desktop.test.ts` runs the service without Electron and never starts real tools.
+`deps` injected into `createService` (`launch`, `openFolder`, `openPath`, `appChooser`, `pdfcraft`, `pickFolder`, `pickFile`, `home`, `fetch`, `trash`, `onWorkspace`) are the test seams: `tests/desktop.test.ts` runs the service without Electron and never starts real tools.
 
 ## Extension points — extend these instead of adding branches
 

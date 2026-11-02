@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { api, type PdfChange, type PdfComment, type PdfMark } from '../api';
 import { t } from '../i18n';
-import { stackCards } from '../pdf-quads';
+import { selectionNote, stackCards } from '../pdf-quads';
 import { IconChat, IconHighlight, IconPlus, IconSearch, IconTrash, IconX } from './Icons';
 import { recall, remember } from '../prefs';
 import { PdfPages } from './PdfPages';
@@ -48,7 +48,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [hit, setHit] = useState(0);
   const pdf = useRef<PDFDocumentProxy | null>(null);
   const onDoc = useCallback((d: PDFDocumentProxy | null) => { pdf.current = d; setHits(null); }, []);
-  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string } | null>(null);
+  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string; quote: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; mode: 'reply' | 'edit'; text: string } | null>(null);
   const [active, setActive] = useState('');
   // The comment column, opened or closed from the bar (remembered); closed, the pages take the room and marks on their edge show where comments are.
@@ -153,7 +153,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     if (!marks || !box || !sel?.rangeCount) { setComposer((c) => (c && !c.text ? null : c)); return; }
     const r = sel.getRangeAt(0).getBoundingClientRect();
     const origin = box.getBoundingClientRect();
-    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '' });
+    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '', quote: sel.toString() });
   };
   const highlightSelection = () => {
     if (!composer) return;
@@ -162,6 +162,15 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
       setComposer(null);
       window.getSelection()?.removeAllRanges();
     });
+  };
+  // The selected text as a note of this project (notes/), opened in the notebook; the PDF is not changed.
+  const noteFromSelection = () => {
+    if (!composer?.quote.trim()) return;
+    const { title, text } = selectionNote(path, composer.marks, composer.quote);
+    setError('');
+    api.createNote(project, title, text)
+      .then((created) => { setComposer(null); window.getSelection()?.removeAllRanges(); return api.openNoteWindow({ project, path: created }); })
+      .catch((e: Error) => setError(e.message));
   };
   // Every match of the field's text in the document, from each page's text (case ignored).
   const runSearch = async (text: string): Promise<{ page: number; nth: number }[]> => {
@@ -411,6 +420,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
                   onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); highlightSelection(); } }} />
                 <div className="pdf-actions">
                   <button type="button" className="btn btn-sm" disabled={off} onClick={highlightSelection}>{busy ? t('Saving…') : composer.text.trim() ? t('Add the comment') : t('Highlight')}</button>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={!composer.quote.trim()} onClick={noteFromSelection}>{t('Create a note from here')}</button>
                   <span className="muted small">{t('Ctrl+Enter')}</span>
                 </div>
               </div>

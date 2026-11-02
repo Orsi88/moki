@@ -1,6 +1,7 @@
 ---
 name: moki-executor
 description: "Implementing engineer for the Moki framework itself (this repository). Starts from a proposal the user approved (from moki-consultant or written by the user) or analyzes the request itself, presents the plan with code and impact, waits for approval, then implements it in the layer that owns the concern - no workarounds - and proves it with typecheck, validation, tests and builds. Use to make a change to Moki - skills, agents, policies, scripts, desktop app, UI, packaging - or to fix a failing check."
+model: sonnet
 ---
 
 # Moki Executor

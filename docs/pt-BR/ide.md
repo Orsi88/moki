@@ -83,6 +83,8 @@ Para ligar uma pasta de vez, abra o projeto no app desktop e use **Escolher minh
 
 ### 3. Escolher o que a IA pode ler
 
+Em **Atividades**, **Agentes** e **Operações** o painel lista só os itens com estrela (as mesmas do app) e os 5 mais usados, contados quando você inicia algo pelo painel. A caixa de busca encontra os outros. Sem estrela nem uso ainda, aparecem os 5 primeiros.
+
 Em **Contexto**, cada arquivo de contexto, nota e arquivo compartilhado por tags tem um botão de ligar. Desligado, ele fica fora dos pedidos e fora do que a IA consegue ler pelo servidor MCP do Moki. A estrela dá prioridade: a IA recebe o arquivo primeiro, com o texto, no pacote de contexto. Arquivos compartilhados por tags com outros projetos começam desligados e esperam você ligar. As escolhas ficam por projeto em `workspace/projects/<id>/companion.json`.
 
 ## O painel
@@ -180,7 +182,7 @@ As mensagens da extensão aparecem em inglês.
 | **MCPs: 0 ligados** | Nenhum servidor cadastrado no app vale para este projeto e está ligado | Esperado quando você usa só o servidor do Moki; senão, cadastre ou ligue servidores no app |
 | *This project has no linked folder on this computer* (Sync to Cursor) | A pasta do projeto nunca foi ligada neste computador | Ligue no app (**Escolher minha pasta**) |
 | *project.json does not allow writing to …* | O projeto define `writeAllowed: false` para a pasta | Grave o arquivo você mesmo, ou permita a escrita no `project.json` |
-| *… is not installed on this computer (command "…" not found).* | A IA escolhida (para o pedido ou para um passo) não está instalada ou não está no PATH | Instale, ou escolha outra IA. Um passo que não consegue abrir falha uma vez e espera: **Tentar de novo** oferece as IAs instaladas |
+| *… is not installed on this computer (command "…" not found).* | A IA escolhida (para o pedido ou para um passo) não está instalada ou não está no PATH | Instale, ou escolha outra IA (no app desktop, uma aba de terminal de Claude Code ou Codex ausente oferece instalar depois que você digita `y`). Um passo que não consegue abrir falha uma vez e espera: **Tentar de novo** oferece as IAs instaladas |
 | *The terminal of this step is not open in VS Code.* | O terminal do passo foi fechado, ou o VS Code foi reiniciado | Responda o passo no painel (ele reabre com a resposta) ou use **Reabrir o passo** |
 | Um passo aparece como **Falhou** | O terminal fechou antes do resumo, ou a IA dele não abriu | **Tentar de novo**, com a mesma IA ou outra; o que ele entregou fica na pasta dele |
 | *No AI tool that runs in a terminal is installed* | As operações precisam de uma IA de terminal (Claude Code, Codex, Gemini CLI, Antigravity CLI, Cursor Agent) | Instale uma |
@@ -205,6 +207,7 @@ As mensagens da extensão aparecem em inglês.
 | `workspace/projects/<id>/logs/companion.log` | A IA lê algo pelo servidor do Moki |
 | `<pasta>/.mcp.json` e `<pasta>/.moki-backup/` | **Conectar ao Claude Code**, depois que você confirma |
 | `<pasta ligada>/.cursor/mcp.json` e `.moki-backup/` | **Sync MCP Servers to Cursor**, depois que você confirma |
+| `workspace/library/usage.json` | Você inicia uma atividade, agente ou operação pelo painel (a contagem das "mais usadas") |
 | `workspace/projects/<id>/runs/…` | Atividades e operações iniciadas pelo painel, como no app |
 | `<Documentos>/Moki` | A cópia do framework, atualizada quando uma versão nova da extensão inicia |
 

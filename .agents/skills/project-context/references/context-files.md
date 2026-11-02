@@ -29,7 +29,8 @@ Load only what the activity needs. Within a file, load only the sections for the
 | requirements-review | glossary, system-characteristics, business-rules (affected modules), actors-and-permissions, conventions | modules, flows, integrations |
 | test-design | glossary, business-rules (affected modules), flows, conventions, system-characteristics | actors-and-permissions, integrations |
 | failure-analysis | environments-and-tools (logs section), modules (affected module), integrations | flows |
-| evidence-collection | environments-and-tools (trackers, MCP servers), conventions (id formats, deliverable templates) | modules |
+| api-testing | environments-and-tools (environments, credentials source), integrations (APIs), conventions | business-rules, modules |
+| evidence-collection | environments-and-tools (trackers, MCP servers, whether the tracker MCP can write), conventions (id formats, deliverable templates) | modules |
 | evidence-sheet, evidence-document | conventions (deliverable language, deliverable templates) | — |
 | documentation (planned) | conventions, business-rules, flows | modules |
 | automation (pending migration) | `project.json` (repositories, knowledgeSources), conventions (automation architecture), environments-and-tools | modules, flows, business-rules, actors-and-permissions, integrations |

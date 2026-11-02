@@ -23,6 +23,7 @@ import { IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, Ic
 import { NewEntryDialog } from '../components/NewEntryDialog';
 import { favoriteNotes, hideProject, isFavorite, setFavorite } from '../side-menu';
 import { AddButton } from '../components/AddButton';
+import { CraftDownloads } from '../components/CraftDownloads';
 import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
@@ -94,6 +95,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const [opsTick, setOpsTick] = useState(0);
   const advanceRef = useRef<() => void>(() => {});
   const [termMenu, setTermMenu] = useState<{ left: number; top: number } | null>(null);
+  const [craftOpen, setCraftOpen] = useState(false); // download of the ArtCraft apps
   // The tree item menu (right click or ⋯); path '' is the project folder. canCreate: a folder outside runs/.
   const [itemMenu, setItemMenu] = useState<{ path: string; canCreate: boolean; left: number; top: number } | null>(null);
   const [creating, setCreating] = useState<{ parent: string; kind: 'file' | 'folder' } | null>(null);
@@ -587,14 +589,17 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
             <li><button type="button" role="menuitem" autoFocus onClick={() => newTerminal('')}><IconTerminal size={15} /> {t('Terminal')} <span className="muted small">{t('your shell')}</span></button></li>
             {tools.filter((ai) => ai.kind === 'terminal').map((ai) => (
               <li key={ai.id}>
-                <button type="button" role="menuitem" disabled={!ai.available} onClick={() => newTerminal(ai.id)}>
-                  <IconPlay size={15} /> {ai.label} <span className="muted small">{ai.available ? ai.command : t('not installed')}</span>
+                <button type="button" role="menuitem" disabled={!ai.available && !ai.installable} onClick={() => newTerminal(ai.id)}>
+                  <IconPlay size={15} /> {ai.label} <span className="muted small">{ai.available ? ai.command : ai.installable ? t('not installed · click to install') : t('not installed')}</span>
                 </button>
               </li>
             ))}
+            <li className="ws-menu-sep" />
+            <li><button type="button" role="menuitem" onClick={() => { setTermMenu(null); setCraftOpen(true); }}><IconExternal size={15} /> {t('Download ArtCraft apps…')}</button></li>
           </ul>
         </div>
       )}
+      {craftOpen && <CraftDownloads onClose={() => setCraftOpen(false)} />}
       {itemMenu && (
         <div className="menu-backdrop" onMouseDown={() => setItemMenu(null)} onContextMenu={(e) => { e.preventDefault(); setItemMenu(null); }}>
           <ul className="term-menu item-menu" role="menu" style={{ left: itemMenu.left, top: itemMenu.top }} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') setItemMenu(null); }}>

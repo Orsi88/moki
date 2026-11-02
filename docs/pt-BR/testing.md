@@ -70,7 +70,7 @@ O Playwright abre o app Electron compilado (o `npm run test:ui` compila antes). 
 | Moki MCP servers list | O botão Global, a escolha de projetos, os chips e tirar um projeto |
 | Moki activities | Criar uma atividade em Configurações, marcar com estrela e encontrar ela primeiro ao abrir a ferramenta de IA |
 | Moki favorites | A estrela nos cards de Agentes, Operações, Templates e Skills, e os favoritos primeiro |
-| Moki settings without a project | Num workspace sem projetos, a aba Skills mostra a lista e só o Adicionar skill espera um projeto |
+| Moki settings without a project | Num workspace sem projetos, a aba Skills mostra a lista e, sem projeto, só o envio de skills adiciona (para todos os projetos) |
 | Moki PDF comments | Comentar uma seleção numa página de PDF e num arquivo Markdown |
 
 ### Como são escritos

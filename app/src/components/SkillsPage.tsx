@@ -3,7 +3,8 @@
 // project's skill-proposals/), the ones installed from the registry, and the app plugins —
 // with filter tabs and a search bar. Choosing one opens its detail: where it is installed,
 // install or remove it, and for a plugin the projects that use it. "Add a skill" opens the
-// registry search and the Create skill form (SkillsDialog, embedded), installing for every project.
+// registry search, the Create skill form and the Upload tab (SkillsDialog, embedded), installing for every project.
+// Without a project only the upload is offered.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type ProjectSummary, type TerminalRef, type ToolInfo } from '../api';
@@ -15,6 +16,7 @@ import { BackArrow, ListHead, ListTabs, ListTools, countLabel, matchesQuery } fr
 import { StarButton, useFavorites } from './Favorites';
 import { SkillCat } from './SkillCat';
 import { SkillsDialog, pluginList } from './SkillsDialog';
+import { ClaudeUpload } from './ClaudeUpload';
 
 type Kind = 'all' | 'native' | 'created' | 'installed' | 'plugin';
 type Place = { kind: 'global'; linkedBy: string[] } | { kind: 'project'; project: ProjectSummary };
@@ -132,6 +134,16 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
     </>
   );
 
+  // Without a project only the upload can run (it installs for every project, in your user folder).
+  if (adding && !project) {
+    return (
+      <div className="skills-add">
+        <div className="list-back"><BackArrow label={t('Skills')} onBack={() => { setAdding(false); void load(); }} /><span className="list-back-title">{t('Upload skills or a .claude folder')}</span></div>
+        <div className="skills-embedded"><div className="modal-body"><ClaudeUpload project={null} scopes={['global']} onInstalled={() => { void load(); }} /></div></div>
+      </div>
+    );
+  }
+
   if (adding && project) {
     return (
       <div className="skills-add">
@@ -214,7 +226,7 @@ export function SkillsPage({ project, projects, tools, onTerminal, startOnAdd = 
   return (
     <div className="list-page">
       <ListHead title={t('Skills')} intro={t('What your agents and activities know how to do: the skills that come with Moki, the ones you created and the ones installed in each project or for all of them.')}
-        action={<button type="button" className="btn" disabled={!project} title={project ? '' : t('Create a project before installing skills or agents.')} onClick={() => setAdding(true)}>{t('Add a skill')}</button>} />
+        action={<button type="button" className="btn" onClick={() => setAdding(true)}>{project ? t('Add a skill') : t('Upload skills or a .claude folder')}</button>} />
       <ListTabs label={t('Skills')} value={kind} onChange={setKind} tabs={[
         { id: 'all', label: t('All'), count: all.length },
         { id: 'native', label: t('Native skills'), count: all.filter((s) => ofKind(s, 'native')).length },

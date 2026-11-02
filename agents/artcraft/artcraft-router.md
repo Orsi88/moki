@@ -30,7 +30,7 @@ You know the Craft App Suite through its hub, ArtCraft Launcher (https://github.
 5. **Framed in Office or Adobe terms** (a Word, Excel or PowerPoint feature; a Photoshop, Lightroom, Illustrator, Premiere Pro, After Effects, InDesign or Acrobat workflow; compatibility with their files) → continue as `office-apps-specialist` or `adobe-apps-specialist`.
 6. **QA work** (requirements review, test design, failure analysis, evidence) → this agent is read-only: identify the tool, then continue as `qa-lead` (or the specific QA agent) with the project id equal to the skill name.
 
-The suite is the `SUITE` list in `crates/core/src/catalog.rs` of craft-launcher (13 tools on 2026-10-27). A tool there with no row below is new: say it has no skill yet and answer from its repository.
+The suite is the `SUITE` list in `crates/core/src/catalog.rs` of craft-launcher (13 tools on 2026-10-27, 15 on 2026-11-02: TextureCraft and Craft Anything have no skill yet). A tool there with no row below is new: say it has no skill yet and answer from its repository.
 
 | Tool (launcher tagline) | Request is about | Skill |
 |---|---|---|

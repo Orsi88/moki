@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { allFavorites, favoritesOf, isFavoriteKind, setFavoriteOf } from '../scripts/lib/favorites.ts';
+import { allFavorites, favoritesOf, isFavoriteKind, mostUsed, recordUse, setFavoriteOf } from '../scripts/lib/favorites.ts';
 import { favorites as activityFavorites } from '../scripts/lib/activities.ts';
 import { createService } from '../desktop/service.ts';
 
@@ -36,4 +36,15 @@ test('only the known kinds and safe ids', () => {
   assert.throws(() => svc.setFavorite('projects', 'x', true), /Unknown list/);
   assert.deepEqual(svc.setFavorite('skills', 'failure-analysis', true), ['test-design', 'failure-analysis']);
   assert.deepEqual(svc.favorites().skills, ['test-design', 'failure-analysis']);
+});
+
+test('most used: counted per kind, the top 5, ties by id, unsafe ids ignored', () => {
+  const r = mkdtempSync(join(tmpdir(), 'qa-usage-'));
+  try {
+    for (const id of ['f', 'e', 'd', 'c', 'b', 'a']) recordUse('activities', id, r);
+    recordUse('activities', 'f', r);
+    recordUse('activities', '../x', r);
+    assert.deepEqual(mostUsed('activities', r), ['f', 'a', 'b', 'c', 'd']);
+    assert.deepEqual(mostUsed('agents', r), []);
+  } finally { rmSync(r, { recursive: true, force: true }); }
 });

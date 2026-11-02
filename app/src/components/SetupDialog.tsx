@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type AgentInfo, type Plan, type ProjectSummary } from '../api';
 import { t } from '../i18n';
 import { SkillsDialog, pluginList } from './SkillsDialog';
+import { ClaudeUpload } from './ClaudeUpload';
 import { IconCheck, IconSearch, IconX } from './Icons';
 
 interface Props {
@@ -32,6 +33,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
   const [files, setFiles] = useState<string[]>([]);
   const [prepare, setPrepare] = useState(true);
   const [finding, setFinding] = useState<string | null>(null); // Find skills query while open
+  const [uploading, setUploading] = useState(false); // the upload of skills or a .claude folder is open on top
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,10 +55,10 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
 
   // While Find skills is open on top, Escape belongs to it.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && finding === null) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && finding === null && !uploading) onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [finding, onClose]);
+  }, [finding, uploading, onClose]);
 
   const flip = (list: string[], name: string) => (list.includes(name) ? list.filter((x) => x !== name) : [...list, name]);
   const pending = Boolean(plan && !plan.approved);
@@ -124,6 +126,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
                 <button key={q} type="button" className="btn btn-ghost btn-sm" onClick={() => setFinding(q)} title={t('Suggested by the AI: not installed yet')}><IconSearch size={15} /> {t('Find “{q}”', { q })}</button>
               ))}
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFinding(description)}><IconSearch size={15} /> {t('Find new skills')}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setUploading(true)}>{t('Upload skills or a .claude folder')}</button>
             </div>
           </div>
 
@@ -207,6 +210,18 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
         </footer>
       </div>
     </div>
+    {uploading && (
+      <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) { setUploading(false); loadGlobal(); } }}>
+        <div className="modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
+          <header className="modal-head">
+            <h2 id="upload-title">{t('Upload skills or a .claude folder')}</h2>
+            <button type="button" className="icon-btn" onClick={() => { setUploading(false); loadGlobal(); }} title={t('Close')}><IconX size={18} /></button>
+          </header>
+          <div className="modal-body"><ClaudeUpload project={project} scopes={['project', 'global']} onInstalled={loadGlobal} /></div>
+          <footer className="modal-foot"><button type="button" className="btn btn-ghost" onClick={() => { setUploading(false); loadGlobal(); }}>{t('Close')}</button></footer>
+        </div>
+      </div>
+    )}
     {finding !== null && <SkillsDialog project={project} initialQuery={finding} onClose={() => { setFinding(null); loadGlobal(); }} />}
   </>);
 }

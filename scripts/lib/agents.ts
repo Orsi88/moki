@@ -13,10 +13,12 @@ import { parseFrontmatter } from './frontmatter.mjs';
 
 export const ACCESS_LEVELS = ['read-only', 'project-write', 'repository-write'] as const;
 export const AGENT_SECTIONS = ['Role', 'When to use', 'How to work', 'Boundaries'];
-const AGENT_KEYS = ['name', 'description', 'category', 'skills', 'access', 'inputs', 'outputs', 'outcomes', 'mcps', 'ai', 'metadata'];
+const AGENT_KEYS = ['name', 'description', 'category', 'skills', 'access', 'inputs', 'outputs', 'outcomes', 'mcps', 'ai', 'model', 'metadata'];
 // AI tools that can run an agent on their own, in a terminal (core.ts TOOLS); '' = the project's or the user's choice.
 export const AGENT_AIS = ['claude', 'codex', 'cursor-agent', 'gemini', 'antigravity'] as const;
-export const MCP_MODES = ['read', 'execute'] as const; // read: queries data; execute: changes something outside Moki
+// Claude Code subagent model aliases; left out = the session's model.
+export const AGENT_MODELS = ['haiku', 'sonnet', 'opus', 'fable', 'inherit'] as const;
+export const MCP_MODES =['read', 'execute'] as const; // read: queries data; execute: changes something outside Moki
 const MCP_NAME = /^[A-Za-z0-9][\w.-]{0,63}$/;
 const OUTCOME = /^[\p{L}\p{N}][\p{L}\p{N} -]{0,39}$/u;
 const OUTPUT_FILE = /^[^/\\:"<>|?]{1,120}\.[A-Za-z0-9*]{1,10}$/; // a file name in the run's outputs folder; * matches any text
@@ -33,6 +35,7 @@ export interface Agent {
   outcomes: string[]; // the results it ends with (e.g. "approved", "rejected"); an operation can branch on them
   mcps: AgentMcp[];
   ai: string; // default AI tool (AGENT_AIS), or ''
+  model: string; // Claude Code subagent model (AGENT_MODELS), or ''
   version: string;
   status: string;
   basedOn: string;
@@ -69,6 +72,7 @@ export function parseAgent(text: string, source: Agent['source'], path: string):
     outcomes: list(data.outcomes),
     mcps: mcpList(data.mcps),
     ai: String(data.ai ?? ''),
+    model: String(data.model ?? ''),
     version: String(meta.version ?? ''),
     status: String(meta.status ?? ''),
     basedOn: String(meta.basedOn ?? ''),
@@ -92,6 +96,7 @@ export function validateAgent(agent: Agent, ctx: { skills: string[]; categories:
   if (!agent.skills.length) errors.push('list at least one skill');
   for (const s of agent.skills) if (!ctx.skills.includes(s)) errors.push(`unknown skill "${s}"`);
   if (!(ACCESS_LEVELS as readonly string[]).includes(agent.access)) errors.push(`access must be one of ${ACCESS_LEVELS.join(', ')}`);
+  if (agent.model && !(AGENT_MODELS as readonly string[]).includes(agent.model)) errors.push(`model must be one of ${AGENT_MODELS.join(', ')} (or left out)`);
   if (!/^\d+\.\d+\.\d+$/.test(agent.version)) errors.push('metadata.version must be semver (e.g. "1.0.0")');
   if (!(agent.status in STATUS_PREFIX)) errors.push(`metadata.status must be one of ${Object.keys(STATUS_PREFIX).join(', ')}`);
   else if (STATUS_PREFIX[agent.status] && !agent.description.startsWith(STATUS_PREFIX[agent.status])) {
@@ -230,7 +235,13 @@ export function listCategories(root = ROOT): Category[] {
   return cats;
 }
 
-export const isUsableAgent = (a: Agent): boolean => ['stable', 'draft'].includes(a.status);
+// Built-in agents of this category maintain Moki itself: they are never linked to, offered to or run for a project.
+export const DEVELOPMENT_CATEGORY = 'framework';
+export const isDevelopmentAgent = (a: Agent): boolean => a.source === 'builtin' && a.category === DEVELOPMENT_CATEGORY;
+// Status only: the agent's procedure is complete (what the Claude Code subagent mirror needs).
+export const hasUsableStatus = (a: Agent): boolean => ['stable', 'draft'].includes(a.status);
+// Usable by a project: usable status and not a development agent.
+export const isUsableAgent = (a: Agent): boolean => hasUsableStatus(a) && !isDevelopmentAgent(a);
 
 // Copies an agent into the user's library for customization; the original never changes.
 export function duplicateAgent(name: string, root = ROOT): Agent {
@@ -258,5 +269,6 @@ export function claudeSubagent(agent: Agent): string {
   const description = agent.description.replace(/^\[[A-Z ]+\]\s*/, '').replace(/\n/g, ' ');
   const skills = agent.skills.map((s) => `- \`${s}\`: read and follow \`.claude/skills/${s}/SKILL.md\``).join('\n');
   const tools = agent.access === 'read-only' ? 'disallowedTools: Edit, Write, NotebookEdit\n' : '';
-  return `---\nname: ${agent.name}\ndescription: ${JSON.stringify(description)}\n${tools}---\n${agent.body.trimEnd()}\n\n## Skills\n\n${skills}\n`;
+  const model = agent.model ? `model: ${agent.model}\n` : '';
+  return `---\nname: ${agent.name}\ndescription: ${JSON.stringify(description)}\n${tools}${model}---\n${agent.body.trimEnd()}\n\n## Skills\n\n${skills}\n`;
 }

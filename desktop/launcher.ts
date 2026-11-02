@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { TOOLS, copyToClipboard, which, type ToolKey } from '../scripts/lib/core.ts';
 import type { TermSpec } from './terminals.ts';
+import { fixToolPath } from './tool-path.ts';
 
 export interface LaunchResult { opened: boolean; message: string; copied?: boolean; terminal?: { id: string; title: string } }
 
@@ -74,7 +75,9 @@ const LINUX_TERMINALS: [string, string[]][] = [
 export const launchTool: Launcher = (tool, prompt, root, plugins = [], extra = []) => {
   const t = TOOLS[tool];
   if (!t.command || !t.args) throw new Error(`${t.label} is not started from the app.`);
-  if (!which(t.command)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
+  const hint = t.install ? ` Install it: ${t.install.docs}` : '';
+  // Windows: a terminal tool with an install option goes through run-tool, which offers to install it.
+  if (!which(t.command) && !(process.platform === 'win32' && !t.clipboard && t.install)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).${hint}` };
 
   if (t.clipboard) {
     const copied = copyToClipboard(prompt);
@@ -121,7 +124,7 @@ function requestFile(tool: ToolKey, args: string[], root: string, title: string)
   const dir = join(root, 'workspace', 'temporary');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `open-${tool}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ command: TOOLS[tool].command, args, cwd: root, title }), 'utf8');
+  writeFileSync(file, JSON.stringify({ command: TOOLS[tool].command, args, cwd: root, title, tool }), 'utf8');
   return file;
 }
 
@@ -131,10 +134,13 @@ function requestFile(tool: ToolKey, args: string[], root: string, title: string)
 export function launchInTerminal(tool: ToolKey, prompt: string, root: string, prepare: (spec: TermSpec) => string, plugins: string[] = [], extra: string[] = []): LaunchResult {
   const t = TOOLS[tool];
   if (!t.command || !t.args || t.clipboard) throw new Error(`${t.label} does not run in a terminal.`);
-  if (!which(t.command)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
+  // A missing tool that can be installed starts run-tool in the tab, which asks the user first.
+  const found = which(t.command) ?? (t.install ? (fixToolPath(), which(t.command)) : null);
+  if (!found && !t.install) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
   const args = [...pluginArgs(tool, root, plugins), ...extra, ...(prompt ? t.args(cleanPrompt(prompt)) : [])];
-  const id = prepare(process.platform === 'win32'
-    ? { file: which('node') ?? process.execPath, args: [runToolPath(), requestFile(tool, args, root, t.label)], cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, title: t.label }
+  const win = process.platform === 'win32';
+  const id = prepare(win || !found
+    ? { file: win ? (which('node') ?? process.execPath) : process.execPath, args: [runToolPath(), requestFile(tool, args, root, t.label)], cwd: root, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, title: t.label }
     : { file: t.command, args, cwd: root, title: t.label });
   return { opened: true, message: `${t.label} opened in a terminal tab${prompt ? ' with your request' : ''}.`, terminal: { id, title: t.label } };
 }

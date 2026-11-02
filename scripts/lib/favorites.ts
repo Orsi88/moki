@@ -35,3 +35,30 @@ export function setFavoriteOf(kind: FavoriteKind, id: string, on: boolean, root 
   writeFileSync(file(root), `${JSON.stringify({ ...read(root), [kind]: next }, null, 2)}\n`);
   return next;
 }
+
+// Usage counts of the workspace, <workspace>/library/usage.json: {"activities": {"<id>": n}, ...}.
+// Only what is started from the IDE panel counts. The most used of a kind come with the favorites.
+const USAGE_TOP = 5;
+const usageFile = (root: string) => join(workspaceDir(root), 'library', 'usage.json');
+function readUsage(root: string): Record<string, Record<string, number>> {
+  try { const data = JSON.parse(readFileSync(usageFile(root), 'utf8')); return data && typeof data === 'object' && !Array.isArray(data) ? data : {}; } catch { return {}; }
+}
+
+export function recordUse(kind: FavoriteKind, id: string, root = ROOT): void {
+  if (!ITEM.test(id)) return;
+  const all = readUsage(root);
+  const counts = all[kind] && typeof all[kind] === 'object' ? all[kind] : {};
+  counts[id] = (Number(counts[id]) || 0) + 1;
+  mkdirSync(join(workspaceDir(root), 'library'), { recursive: true });
+  writeFileSync(usageFile(root), `${JSON.stringify({ ...all, [kind]: counts }, null, 2)}\n`);
+}
+
+// The ids used most (ties by id), at most USAGE_TOP.
+export function mostUsed(kind: FavoriteKind, root = ROOT): string[] {
+  const counts = readUsage(root)[kind] ?? {};
+  return Object.entries(counts).filter(([id, n]) => ITEM.test(id) && Number(n) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]) || a[0].localeCompare(b[0])).slice(0, USAGE_TOP).map(([id]) => id);
+}
+
+export const allMostUsed = (root = ROOT): Record<FavoriteKind, string[]> =>
+  Object.fromEntries(FAVORITE_KINDS.map((k) => [k, mostUsed(k, root)])) as Record<FavoriteKind, string[]>;

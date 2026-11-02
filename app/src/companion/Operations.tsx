@@ -11,6 +11,7 @@ import { t } from '../i18n';
 import { CatIcon } from '../components/CatIcon';
 import { IconPlay, IconTerminal } from '../components/Icons';
 import { call } from './bridge';
+import { useShortlist } from './Shortlist';
 
 type Notify = (text: string, warn?: boolean) => void;
 const fail = (notify: Notify) => (e: unknown) => notify(e instanceof Error ? e.message : String(e), true);
@@ -31,6 +32,7 @@ export function OperationStarter({ inbox, onStarted, notify }: { inbox: InboxFil
   const [operations, setOperations] = useState<(Operation & { linked: boolean })[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [open, setOpen] = useState('');
+  const list = useShortlist('operations', operations, (o) => o.id, (o) => `${o.name} ${o.description}`);
   useEffect(() => {
     call<(Operation & { linked: boolean })[]>('operations').then(setOperations).catch(fail(notify));
     call<ToolInfo[]>('aiTools').then(setTools).catch(() => setTools([]));
@@ -38,8 +40,10 @@ export function OperationStarter({ inbox, onStarted, notify }: { inbox: InboxFil
   if (!operations.length) return <p className="muted small">{t('This workspace has no operations yet. Create one in the Moki app (Settings › Operations).')}</p>;
   return (
     <div className="mk-list">
-      {operations.map((op) => (
+      {list.search}
+      {list.shown.map((op) => (
         <div key={op.id} className={`mk-card${open === op.id ? ' on' : ''}`}>
+          <span className="mk-star">{list.star(op.id, op.name)}</span>
           <button type="button" className="mk-card-head" onClick={() => setOpen((o) => (o === op.id ? '' : op.id))} aria-expanded={open === op.id}>
             <span className="mk-card-icon"><CatIcon id="flow" size={40} /></span>
             <span className="mk-card-text">

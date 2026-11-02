@@ -81,6 +81,8 @@ To link a folder for good, open the project in the desktop app and use **Choose 
 
 ### 3. Choose what the AI may read
 
+In **Activities**, **Agents** and **Operations** the panel lists only the starred items (the same stars as in the app) and the 5 most used ones, counted when you start something from the panel. A search box finds the others. With no star or use yet, the first 5 show.
+
 In **Context**, each context file, note and file shared by tags has a switch. Off, it stays out of the requests and out of what the AI can read through Moki's MCP server. The star makes it a priority: the AI gets it first, with its text, in the context pack. Files shared by tags with other projects wait for you (off) until you switch them on. The choices are kept per project in `workspace/projects/<id>/companion.json`.
 
 ## The panel
@@ -176,7 +178,7 @@ Any tool that speaks MCP over stdio can use Moki's server: `npm run mcp -- --pro
 | **MCPs: 0 on** | No server registered in the app applies to this project and is on | Expected when you use only Moki's server; otherwise register or enable servers in the app |
 | *This project has no linked folder on this computer* (Sync to Cursor) | The project's folder was never linked on this computer | Link it in the app (**Choose my folder**) |
 | *project.json does not allow writing to …* | The project sets `writeAllowed: false` for its folder | Write the file yourself, or allow writing in `project.json` |
-| *… is not installed on this computer (command "…" not found).* | The AI tool chosen (for the request or for a step) is not installed or not on the PATH | Install it, or choose another AI. A step that cannot start fails once and waits: **Try again** offers the installed AIs |
+| *… is not installed on this computer (command "…" not found).* | The AI tool chosen (for the request or for a step) is not installed or not on the PATH | Install it, or choose another AI (in the desktop app, a terminal tab of a missing Claude Code or Codex offers to install it after you type `y`). A step that cannot start fails once and waits: **Try again** offers the installed AIs |
 | *The terminal of this step is not open in VS Code.* | The step's terminal was closed, or VS Code was restarted | Answer the step in the panel (it reopens with your answer) or **Reopen the step** |
 | A step shows **Failed** | Its terminal closed before it wrote its summary, or its AI could not open | **Try again**, with the same or another AI; what it delivered stays in its folder |
 | *No AI tool that runs in a terminal is installed* | Operations need a terminal AI (Claude Code, Codex, Gemini CLI, Antigravity CLI, Cursor Agent) | Install one |
@@ -201,6 +203,7 @@ Any tool that speaks MCP over stdio can use Moki's server: `npm run mcp -- --pro
 | `workspace/projects/<id>/logs/companion.log` | The AI reads something through Moki's server |
 | `<folder>/.mcp.json` and `<folder>/.moki-backup/` | **Connect Claude Code**, after you confirm |
 | `<linked folder>/.cursor/mcp.json` and `.moki-backup/` | **Sync MCP Servers to Cursor**, after you confirm |
+| `workspace/library/usage.json` | You start an activity, agent or operation from the panel (the count behind "most used") |
 | `workspace/projects/<id>/runs/…` | Activities and operations started from the panel, as in the app |
 | `<Documents>/Moki` | The framework copy, refreshed when a new version of the extension starts |
 

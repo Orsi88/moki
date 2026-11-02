@@ -19,7 +19,7 @@ import { ActivityCatalog } from './ActivityCatalog';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
 import { FileIcon } from '../icons';
-import { IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconLink, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
+import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
 import { ToolCatalog } from './ToolCatalog';
 import { TagPicker } from './TagPicker';
 import { TABLE_ICON, useMarkdownEditing } from './useMarkdownEditing';
@@ -76,6 +76,8 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [savedAt, setSavedAt] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [exportMenu, setExportMenu] = useState<{ left: number; top: number } | null>(null);
+  const [exported, setExported] = useState('');
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [html, setHtml] = useState('');
   const [pos, setPos] = useState({ x: 0, y: 0 }); // offset from the centered position
@@ -208,6 +210,14 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       void api.openNoteWindow('loose' in at ? { loose: at.loose } : at);
       onClose();
     }).catch(() => { /* the error is shown */ });
+  };
+
+  // A project note saved as PDF, Markdown or text where the user chooses (native dialog); saved first.
+  const exportAs = (format: 'pdf' | 'md' | 'txt') => {
+    setExportMenu(null); setError(''); setExported('');
+    persist().then(() => (project && curPath ? api.exportNote(project, curPath, format) : null))
+      .then((dest) => { if (dest) setExported(dest); })
+      .catch((e: Error) => setError(e.message));
   };
 
   // A loose note sent to a project: it becomes a note of that project and leaves the loose notes.
@@ -387,6 +397,12 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               <IconExternal size={17} />
             </button>
           )}
+          {project && curPath && (
+            <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={Boolean(exportMenu)} title={t('Export the note')} aria-label={t('Export the note')}
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportMenu({ left: Math.max(8, r.right - 200), top: r.bottom + 4 }); }}>
+              <IconFile size={17} />
+            </button>
+          )}
           {ref && (
             <button type="button" className={`icon-btn star-btn${favorite ? ' on' : ''}`} onClick={toggleFavorite} aria-pressed={favorite}
               title={favorite ? t('Remove from favorites') : t('Add to favorites')} aria-label={favorite ? t('Remove from favorites') : t('Add to favorites')}>
@@ -508,10 +524,20 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
             {t('{n} words', { n: words(text) })}
           </span>
           <span className="statusbar-spacer" />
+          {exported && <span className="note-status" role="status">{t('Exported to {path}', { path: exported })}</span>}
           <span className="note-status" role="status">
             {saving || dirty ? t('Saving…') : savedAt ? t('Saved at {time}', { time: clock(savedAt) }) : ref ? t('Saved') : ''}
           </span>
         </footer>
+        {exportMenu && (
+          <div className="menu-backdrop" onMouseDown={() => setExportMenu(null)}>
+            <ul className="term-menu item-menu" role="menu" style={exportMenu} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setExportMenu(null); } }}>
+              <li><button type="button" role="menuitem" autoFocus onClick={() => exportAs('pdf')}>{t('PDF document')}</button></li>
+              <li><button type="button" role="menuitem" onClick={() => exportAs('md')}>{t('Markdown file')}</button></li>
+              <li><button type="button" role="menuitem" onClick={() => exportAs('txt')}>{t('Text file')}</button></li>
+            </ul>
+          </div>
+        )}
         {catalog === 'activity' && (
           <ActivityCatalog activities={activities} selected={activity?.id ?? ''} onPick={setActivityId} onClose={() => setCatalog(null)}
             blocked={(a) => (a.needsFiles ? t('Uses inbox files: start it from the project panel') : null)} />

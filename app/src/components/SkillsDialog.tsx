@@ -13,10 +13,11 @@ import { IconCheck, IconExternal, IconSearch, IconX } from './Icons';
 import { InstalledSkills } from './InstalledSkills';
 import { SkillLibrary } from './SkillLibrary';
 import { SkillForm } from './SkillForm';
+import { ClaudeUpload } from './ClaudeUpload';
 
 export type SkillDialogTab = 'installed' | 'library' | 'add' | 'plugins';
 type Tab = SkillDialogTab;
-type AddMode = 'find' | 'create';
+type AddMode = 'find' | 'create' | 'upload';
 
 // tools and onTerminal enable the Create skill tab (it opens the AI tool in a terminal tab).
 interface Props {
@@ -182,10 +183,11 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
             </button>
           ))}
         </div>}
-        {tab === 'add' && canCreate && (
+        {tab === 'add' && (
           <div className="dialog-tabs" role="tablist" aria-label={t('Add a skill')}>
             <button type="button" role="tab" aria-selected={addMode === 'find'} className={`dialog-tab${addMode === 'find' ? ' on' : ''}`} onClick={() => setAddMode('find')}>{t('Find skills')}</button>
-            <button type="button" role="tab" aria-selected={addMode === 'create'} className={`dialog-tab${addMode === 'create' ? ' on' : ''}`} onClick={() => setAddMode('create')}>{t('Create skill')}</button>
+            {canCreate && <button type="button" role="tab" aria-selected={addMode === 'create'} className={`dialog-tab${addMode === 'create' ? ' on' : ''}`} onClick={() => setAddMode('create')}>{t('Create skill')}</button>}
+            <button type="button" role="tab" aria-selected={addMode === 'upload'} className={`dialog-tab${addMode === 'upload' ? ' on' : ''}`} onClick={() => setAddMode('upload')}>{t('Upload')}</button>
           </div>
         )}
 
@@ -211,6 +213,7 @@ export function SkillsDialog({ project, initialQuery = '', onClose, tools, onTer
           {tab === 'installed' ? <InstalledSkills projects={projects} />
             : tab === 'plugins' ? <PluginsPanel projects={projects} />
             : tab === 'library' ? <SkillLibrary project={project} scope={scope} />
+            : tab === 'add' && addMode === 'upload' ? <ClaudeUpload key={scope} project={project} scopes={[scope]} onInstalled={loadInstalled} />
             : tab === 'add' && addMode === 'create' && canCreate && tools && onTerminal ? <SkillForm project={project} scope={scope} tools={tools} onTerminal={onTerminal} /> : (<>
           <form className="skill-search" onSubmit={submit}>
             <input type="search" value={query} maxLength={200} autoFocus onChange={(e) => setQuery(e.target.value)} placeholder={t('e.g. skills to help me write code')} />

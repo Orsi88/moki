@@ -28,6 +28,7 @@ outcomes: approved, rejected                # optional: the results it can end w
 mcps:                                       # optional: MCP servers it uses
   jira: read                                #   read = only queries data; execute = changes something outside Moki
 ai: claude                                  # optional: default AI tool
+model: sonnet                               # optional: Claude Code subagent model
 metadata:
   version: "1.0.0"
   status: draft
@@ -49,6 +50,7 @@ Rules (checked by `npm run validate` for built-in agents and by the app when you
 - `access`: `read-only` (reads the project, writes nothing), `project-write` (writes only inside `workspace/projects/<project-id>/`) or `repository-write` (may also change a linked code repository, after an approved plan).
 - `metadata.status`: `stable`, `draft`, `pending-migration` or `planned`. Only `stable` and `draft` agents can be used; the description of the others starts with `[PENDING MIGRATION]` or `[PLANNED]`.
 - The four sections `Role`, `When to use`, `How to work` and `Boundaries` are required.
+- `model` (optional): `haiku`, `sonnet`, `opus`, `fable` or `inherit`, written into the agent's Claude Code subagent; left out, the subagent uses the session's model. Other AI tools ignore it.
 - Optional, for multi-agent operations (an operation passes the files one agent delivers to the next):
   - `inputs`: comma-separated, in words (max 80 characters each).
   - `outputs`: comma-separated file names with an extension, no folders; `*` matches any name (`*.pdf`).
@@ -62,7 +64,7 @@ Rules (checked by `npm run validate` for built-in agents and by the app when you
 
 ## Framework agents
 
-The `framework` category maintains Moki itself, not a project. `moki-consultant` (read-only) explains how Moki works and analyzes a change, a diff or a failing check, ending with a proposal that shows the code and its impact. `moki-executor` (repository-write) implements a proposal the user approved — or analyzes the request itself and stops for approval first — and runs the checks. Both share the `moki-architecture` skill (layers, business rules, invariants) and the `moki-change` skill (impact checklist, proposal format, best practices, playbooks, verification), so they differ only in role, where they stop and access.
+The `framework` category maintains Moki itself, not a project: its agents are for developing this repository only — they get a Claude Code subagent here, but cannot be linked to a project, enabled, chosen in an operation, recommended by the plan or run from an activity (`isUsableAgent` is false for them). `moki-consultant` (read-only) explains how Moki works and analyzes a change, a diff or a failing check, ending with a proposal that shows the code and its impact. `moki-executor` (repository-write) implements a proposal the user approved — or analyzes the request itself and stops for approval first — and runs the checks. Both share the `moki-architecture` skill (layers, business rules, invariants) and the `moki-change` skill (impact checklist, proposal format, best practices, playbooks, verification), so they differ only in role, where they stop and access. `moki-orquestrador` (repository-write, runs on the session's model) coordinates them: it asks `moki-consultant` for the proposal, stops for the user's approval, splits the approved proposal into tasks, runs each with `moki-executor` (on a cheaper model) in its own git worktree when the tasks touch different files, then integrates and runs the checks on the whole.
 
 ## Agents per project
 

@@ -8,9 +8,10 @@
 import { openSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { which } from '../scripts/lib/core.ts';
+import { TOOLS, installPlan, isTool, which, type ToolKey } from '../scripts/lib/core.ts';
+import { fixToolPath } from './tool-path.ts';
 
-interface LaunchFile { command: string; args: string[]; cwd: string; title: string }
+interface LaunchFile { command: string; args: string[]; cwd: string; title: string; tool?: string }
 
 // Quoting for cmd.exe when the tool is a .cmd/.bat shim: inside "..." the
 // metacharacters & | < > ^ are literal; " and % are neutralized.
@@ -20,6 +21,7 @@ function waitForKey(message: string): void {
   console.error(`\n${message}\nPress Enter to close this window.`);
   process.stdin.resume();
   process.stdin.once('data', () => process.exit(1));
+  process.stdin.once('end', () => process.exit(1)); // input closed: nothing to wait for
 }
 
 function consoleStdio(): 'inherit' | number[] {
@@ -39,8 +41,34 @@ function main(): void {
   process.stdout.write(`\x1b]0;${req.title}\x07`);
 
   const path = which(req.command);
-  if (!path) { waitForKey(`"${req.command}" was not found. Is it installed?`); return; }
+  if (path) start(req, path);
+  else if (req.tool && isTool(req.tool) && TOOLS[req.tool].install) offerInstall(req, req.tool);
+  else waitForKey(`"${req.command}" was not found. Is it installed?`);
+}
 
+// The tool is missing: show how to install it and, only when the user types y, run the
+// fixed vendor command of the TOOLS table. Nothing here comes from user text.
+function offerInstall(req: LaunchFile, tool: ToolKey): void {
+  const { label, install } = TOOLS[tool];
+  console.log(`\n${label} is not installed.\nInstallation instructions: ${install!.docs}`);
+  const plan = installPlan(tool);
+  if (!plan) { waitForKey('Moki cannot install it automatically. Follow the instructions above.'); return; }
+  console.log(`Moki will run: ${plan.shown}`);
+  process.stdout.write(`Install ${label}? [y/N] `);
+  process.stdin.resume();
+  process.stdin.once('data', (d) => {
+    process.stdin.pause();
+    if (!/^\s*y(es)?\s*$/i.test(String(d))) { waitForKey('Not installed. Close this tab, or open another AI from the + menu.'); return; }
+    const r = spawnSync(plan.file, plan.args, { stdio: consoleStdio() });
+    if (r.status !== 0) { waitForKey(`The installer failed (exit ${r.status ?? r.error?.message ?? 'unknown'}). Try the instructions above.`); return; }
+    fixToolPath();
+    const path = which(req.command);
+    if (path) start(req, path);
+    else waitForKey(`Installed, but "${req.command}" is not on this app's PATH yet. Restart Moki and open it again.`);
+  });
+}
+
+function start(req: LaunchFile, path: string): void {
   // Native executables get the arguments as-is; shims go through cmd.exe,
   // which converts arguments with the console code page — switch this
   // window's console to UTF-8 first so accents survive.

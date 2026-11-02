@@ -25,7 +25,8 @@ Canonical definitions are in `skills/<name>/SKILL.md` (tools load the generated 
 | `requirements-review` | draft | Review/refine/validate user stories before development (never writes test cases) | One or more user stories | `project-context` |
 | `test-design` | draft | Map scenarios, then (after OK) write manual test cases | Stories/rules/criteria | `project-context`; optionally `requirements-review` output |
 | `failure-analysis` | draft | Pre-analysis of an error from description + log | Item description, failure moment, date/time, log | `project-context` (optional) |
-| `evidence-collection` | draft | Assemble the evidence of an executed test: work item (MCP or pasted), Jam recordings, prints → approved `evidence.json` | Source item, execution data, result per test case, Jam link or print | `project-context` |
+| `evidence-collection` | draft | Assemble the evidence of an executed test: work item (MCP or pasted), Jam recordings, prints → approved `evidence.json`; optionally link it to the tracker item after explicit approval | Source item, execution data, result per test case, Jam link or print | `project-context` |
+| `api-testing` | draft | Run API test cases/collections against an approved environment and validate status, schema and body → results with masked evidence | Test cases or requests, target environment, authentication | `project-context` |
 | `evidence-sheet` | draft | Evidence spreadsheet, one row per test case, in the user's xlsx model, project standard or default | Approved `evidence.json` | `evidence-collection` |
 | `evidence-document` | draft | Evidence Word document with images per step, in the user's docx model, project standard or default | Approved `evidence.json` | `evidence-collection` |
 | `documentation` | planned | Propose updates to the official scenario base | — | not available |
@@ -49,10 +50,12 @@ An **agent** is a role with instructions that uses one or more skills and asks f
 | `test-designer` | quality | draft | test-design, project-context | project-write |
 | `failure-analyst` | quality | draft | failure-analysis, project-context | project-write |
 | `evidence-builder` | quality | draft | evidence-collection, evidence-sheet, evidence-document, project-context | project-write |
+| `api-tester` | quality | draft | api-testing, project-context | project-write |
 | `automation-engineer` | quality | pending-migration | automation, project-context | repository-write |
 | `quality-agents-expert` | framework | draft | project-context (reference only) | repository-write |
 | `moki-consultant` | framework | draft | moki-architecture, moki-change | read-only |
 | `moki-executor` | framework | draft | moki-architecture, moki-change | repository-write |
+| `moki-orquestrador` | framework | draft | moki-architecture, moki-change | repository-write |
 | `artcraft-router` | artcraft | draft | craft-launcher and the 13 Craft tool skills | read-only |
 | `craft-launcher-specialist` | artcraft | draft | craft-launcher | read-only |
 | `office-apps-specialist` | artcraft | draft | wordcraft, gridcraft, deckcraft | read-only |
@@ -118,4 +121,4 @@ Edit `skills/` and `core/` only; then `npm run build` (regenerates `.agents/skil
 
 Documentation is edited in `docs/` (guides in English, user guides also in `docs/pt-BR/`) and published to the GitHub wiki by `.github/workflows/wiki.yml` (`npm run wiki` builds it locally); a new page goes in `docs/wiki.json`. The README stays a short introduction; `README.md` and `README.pt-BR.md` change together.
 
-Changes to Moki itself follow the `moki-change` skill (with `moki-architecture`): impact analysis, a proposal with code and impact, approval, then implementation and checks. Act as `moki-consultant` (read-only, ends at the proposal) to analyze or plan, and as `moki-executor` to implement an approved plan.
+Changes to Moki itself follow the `moki-change` skill (with `moki-architecture`): impact analysis, a proposal with code and impact, approval, then implementation and checks. Act as `moki-consultant` (read-only, ends at the proposal) to analyze or plan, as `moki-executor` to implement an approved plan, and as `moki-orquestrador` to run both on a larger change (consult, approval, tasks split into worktrees).

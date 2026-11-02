@@ -124,6 +124,17 @@ test('launch: Claude Code with the request, the exclusions and --mcp-config, for
   await assert.rejects(call('launch', { activity: 'tests', files: ['../secret.md'] }), /Not in the project inbox/);
 });
 
+test('favorites and most used: stars are shared, a launch counts as a use, resuming does not', async () => {
+  await call('launch', { activity: 'tests', files: ['us-1.md'], language: 'English' });
+  await call('copyRequest', { activity: 'open', agent: 'test-designer', language: 'English' });
+  const used = await call('mostUsed') as Record<string, string[]>;
+  assert.deepEqual(used.activities, ['tests']);
+  assert.deepEqual(used.agents, ['test-designer']);
+  assert.deepEqual(await call('setFavorite', 'agents', 'test-designer', true), ['test-designer']);
+  assert.deepEqual(((await call('favorites')) as Record<string, string[]>).agents, ['test-designer']);
+  await assert.rejects(call('setFavorite', 'projects', 'x', true), /Unknown list/);
+});
+
 test('copy for the chat: the same request copied, nothing started', async () => {
   launched.length = 0;
   const r = await call('copyRequest', { activity: 'open', agent: 'test-designer', language: 'English' }) as { prompt: string; chat: string };

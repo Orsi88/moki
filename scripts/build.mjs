@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync
 import { join, dirname, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ROOT, MIRRORS, listSkillDirs, walkFiles, relPosix } from './lib/repo.mjs';
-import { claudeSubagent, isUsableAgent, listAgents } from './lib/agents.ts';
+import { claudeSubagent, hasUsableStatus, listAgents } from './lib/agents.ts';
 
 // Built-in agents become native Claude Code subagents (usable ones only).
 // claude-agents/*.md are copied unchanged into the same mirror (framework
@@ -41,7 +41,7 @@ export function expectedFiles(root = ROOT) {
       }
     }
   }
-  for (const agent of listAgents(root).filter((a) => a.source === 'builtin' && isUsableAgent(a))) {
+  for (const agent of listAgents(root).filter((a) => a.source === 'builtin' && hasUsableStatus(a))) {
     files.set(`${AGENT_MIRROR}/${agent.name}.md`, Buffer.from(claudeSubagent(agent)));
   }
   const extraDir = join(root, CLAUDE_AGENTS);

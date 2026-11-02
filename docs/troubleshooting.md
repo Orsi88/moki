@@ -14,7 +14,7 @@ Common problems, why they happen and what to do. Problems specific to the VS Cod
 
 | What you see | Why | What to do |
 |---|---|---|
-| *… is not installed on this computer (command "…" not found).* | The tool is not installed, or its command is not on the PATH | Install it, or pick another tool |
+| *… is not installed on this computer (command "…" not found).* | The tool is not installed, or its command is not on the PATH | Install it, or pick another tool. In the app, a terminal tab (the **+** menu) of a missing Claude Code or Codex asks `Install …? [y/N]` and installs only when you type `y`, running the fixed vendor command it shows; the other AIs show the instructions link. Steps of an operation still need an installed AI |
 | The wizard says opening is still running | The tool takes more than about 20 seconds to start | Wait, or look at the tool's own window or terminal |
 | A chat tool (ChatGPT, claude.ai, Gemini web) does not open by itself | These tools get the request as text to copy | Copy the request shown on screen and paste it in the chat |
 
@@ -37,6 +37,24 @@ Common problems, why they happen and what to do. Problems specific to the VS Cod
 | A step waits for approval although its arrow is direct | Its agent executes through an MCP server | Expected: review and approve |
 
 Operations, agents and their contracts: [Agents and operations](agents.md).
+
+## Downloading ArtCraft apps
+
+In the **+** menu, **Download ArtCraft apps…**. Moki only downloads the file and checks its SHA-256; you open it to install.
+
+| What you see | Why | What to do |
+|---|---|---|
+| *Could not reach GitHub (api.github.com).* | No internet connection | Check the connection and try again |
+| *GitHub did not answer in time.* | GitHub was slow | Try again in a moment |
+| *GitHub is limiting requests from this computer.* | GitHub allows few requests per hour without an account | Try again in a few minutes |
+| *GitHub is unavailable right now (…).* | GitHub failed | Try again in a moment |
+| *… has no published release yet.* | The app has no release | Open the link in the message |
+| *… has no file for … …* | The release has no file for this system | Open the link in the message |
+| *… publishes no SHA-256 for …* | Nothing vouches for the file, so Moki does not download it | Download it from the release page and check it yourself |
+| *A newer release of … came out.* | The release changed after you reviewed it | Review the download again |
+| *Integrity check failed for … The file was removed.* | The downloaded file does not match its SHA-256 | Try again; if it repeats, do not use the file |
+| *Could not save in …* or *Not enough free space in …* | The folder is not writable, does not exist or the disk is full | Choose another folder |
+| *The connection dropped during the download.* / *The download took too long* | The network failed | Try again (a download restarts from the beginning) |
 
 ## Terminals
 
