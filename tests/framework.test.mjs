@@ -17,7 +17,7 @@ import { checkPreAnalysis, checkMissingInfo, checkTestCases, checkReviewMatrix }
 import { markdownToHtml } from '../scripts/pdf.mjs';
 import { buildPrompt, cleanPath, copyToInbox, isUsable } from '../scripts/lib/core.ts';
 import { listActivities } from '../scripts/lib/activities.ts';
-import { claudeSubagent } from '../scripts/lib/agents.ts';
+import { claudeSubagent, isUsableAgent, listAgents } from '../scripts/lib/agents.ts';
 
 // A temporary copy of the framework with one skill, to mutate safely.
 function fixture() {
@@ -112,6 +112,15 @@ test('read-only agents become Claude Code subagents without the editing tools', 
   const agent = { name: 'a', description: 'd', skills: ['failure-analysis'], access: 'read-only', body: '# A\n' };
   assert.match(claudeSubagent(agent), /^disallowedTools: Edit, Write, NotebookEdit$/m);
   assert.doesNotMatch(claudeSubagent({ ...agent, access: 'repository-write' }), /disallowedTools/);
+  assert.match(claudeSubagent({ ...agent, model: 'sonnet' }), /^model: sonnet$/m);
+  assert.doesNotMatch(claudeSubagent(agent), /^model:/m);
+});
+
+test('framework agents are for developing Moki only: no project can use them', () => {
+  const dev = listAgents(ROOT).filter((a) => a.category === 'framework');
+  assert.ok(dev.some((a) => a.name === 'moki-orquestrador') && dev.every((a) => !isUsableAgent(a)));
+  assert.ok(listAgents(ROOT).filter((a) => a.category === 'quality' && a.status === 'draft').every(isUsableAgent));
+  for (const a of dev) assert.ok(existsSync(join(ROOT, '.claude/agents', `${a.name}.md`))); // still a subagent of this repository
 });
 
 test('artifact check', () => {

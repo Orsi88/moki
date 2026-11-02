@@ -33,7 +33,7 @@ A team may version `workspace/projects/<project-id>/` as its **own private Git r
 
 ## Desktop app
 
-The `qa` desktop app reads and writes only inside the open project's folder, never opens executables or scripts, and does not send anything over the network: it opens the AI tool you choose, and that tool talks to its provider under your own account and settings. Details: [desktop-app.md](desktop-app.md).
+The `qa` desktop app reads and writes only inside the open project's folder, never opens executables or scripts, and sends no project data over the network: it opens the AI tool you choose, and that tool talks to its provider under your own account and settings. An upload of skills or a `.claude` folder is read from the file or folder you choose in the system dialog, checked (secrets, `.env*`, keys and local settings are never installed; settings, hooks, commands and MCP files are never imported) and installed only after you pick the items and confirm. The app contacts the network only when you ask: the SkillMD registry (`api.skillmd.com`) and GitHub (`api.github.com`, `github.com`, to download an ArtCraft app, checked by SHA-256 and saved where you choose in the system dialog, never installed or run by Moki). Details: [desktop-app.md](desktop-app.md).
 
 ## Target repositories
 

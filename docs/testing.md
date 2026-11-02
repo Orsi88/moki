@@ -70,7 +70,7 @@ Playwright opens the built Electron app (`npm run test:ui` builds it first). Eac
 | Moki MCP servers list | The Global switch, the project picker, the chips and removing a project |
 | Moki activities | Creating an activity in Settings, starring it, and finding it first when opening the AI tool |
 | Moki favorites | The star on the cards of Agents, Operations, Templates and Skills, and favorites first |
-| Moki settings without a project | In a workspace with no project, Skills shows its list and only Add a skill waits for a project |
+| Moki settings without a project | In a workspace with no project, Skills shows its list and without a project only the upload adds skills (for every project) |
 | Moki PDF comments | Commenting a selection on a PDF page and in a Markdown file |
 
 ### How they are written

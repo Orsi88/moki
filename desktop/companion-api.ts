@@ -12,6 +12,7 @@ import { enabledServers, generatedEntries, syncToolFolder, toolFile, type McpSer
 import type { Companion, Resource } from './companion.ts';
 import { AGENT_AIS } from '../scripts/lib/agents.ts';
 import type { Service } from './service.ts';
+import { allFavorites, allMostUsed, isFavoriteKind, recordUse, setFavoriteOf } from '../scripts/lib/favorites.ts';
 
 // What the extension host gives: the active project, the clipboard, the chat, a confirmation dialog, the open folder.
 export interface CompanionHost {
@@ -57,11 +58,15 @@ export function createCompanionApi(root: string, service: Service, host: Compani
     const choice = service.contextChoice(c.project);
     const offered = new Set([...choice.own, ...choice.shared.flatMap((g) => g.sources.flatMap((s) => s.paths))]);
     const exclude = contextFiles(c).filter((f) => !f.included && offered.has(f.id)).map((f) => f.id);
-    return service.launch({
+    const result = service.launch({
       project: c.project, activity: String(input.activity ?? 'open'), tool, files: strings(input.files), note: String(input.note ?? ''),
       language: String(input.language ?? 'English'), run: input.run ? String(input.run) : undefined, agent: input.agent ? String(input.agent) : undefined,
       exclude: input.activity === 'resume' ? [] : exclude,
     });
+    // Counts as a use (the panel's "most used"): the card's agent, or the activity; resuming a run does not.
+    if (input.agent) recordUse('agents', String(input.agent), root);
+    else if (input.activity !== 'resume') recordUse('activities', String(input.activity ?? 'open'), root);
+    return result;
   };
 
   // The app's operation loop. One pass at a time; a step that cannot start is marked failed by the engine.
@@ -124,7 +129,14 @@ export function createCompanionApi(root: string, service: Service, host: Compani
     },
     // The AI tools a step can run in: the terminal ones the agents may name, and whether each is installed.
     aiTools: () => service.integrations().filter((t) => (AGENT_AIS as readonly string[]).includes(t.id)),
-    startOperation: (id, request) => act((p) => service.startOperation(p, id, request)),
+    startOperation: (id, request) => act((p) => { const r = service.startOperation(p, id, request); recordUse('operations', String(id), root); return r; }),
+    // Stars (shared with the app) and the most used, for the lists that show only those until you search.
+    favorites: () => allFavorites(root),
+    setFavorite: (kind, id, on) => {
+      if (!isFavoriteKind(kind)) throw new Error('Unknown list.');
+      return setFavoriteOf(kind, String(id ?? ''), on === true, root);
+    },
+    mostUsed: () => allMostUsed(root),
     operationRun: (runId) => runOf(runId),
     approveOperationStep: (runId) => act((p) => service.approveOperationStep(p, runId)),
     rejectOperationStep: (runId, notes, redo) => act((p) => service.rejectOperationStep(p, runId, notes, redo)),

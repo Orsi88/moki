@@ -172,6 +172,8 @@ test.describe.serial('Moki settings', () => {
 
     await page.getByRole('button', { name: 'Adicionar skill' }).click();
     await expect(page.getByRole('tab', { name: 'Criar skill' })).toBeVisible();
+    await page.getByRole('tab', { name: 'Enviar', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Escolher um arquivo .zip' })).toBeVisible();
     await expect(page.getByText('Instalar para')).toHaveCount(0); // Settings installs for every project
     await page.getByRole('button', { name: 'Voltar para Skills' }).click();
   });
@@ -866,6 +868,19 @@ test.describe.serial('Moki terminals outlive the project screen', () => {
     await termPage.locator('.tab-close[title="Fechar o terminal"]').first().click();
     await expect(termPage.locator('.term-pane')).toHaveCount(0);
   });
+
+  // The download itself needs GitHub (main-process fetch is not faked here); the unit tests cover it.
+  test('the + menu offers the ArtCraft apps: 16 apps, launcher first, and a Download button for each', async () => {
+    await termPage.getByTitle('Novo terminal').first().click();
+    await termPage.getByRole('menuitem', { name: /Baixar apps ArtCraft/ }).click();
+    const dialog = termPage.getByRole('dialog', { name: 'Baixar apps ArtCraft' });
+    await expect(dialog.locator('.skill-row')).toHaveCount(16);
+    await expect(dialog.locator('.skill-row').first()).toContainText('ArtCraft Launcher');
+    await expect(dialog.locator('.skill-row').first()).toContainText('Recomendado');
+    await expect(dialog.getByRole('button', { name: 'Baixar' })).toHaveCount(16);
+    await termPage.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+  });
 });
 
 // MCP servers: where each one applies is set right in the list (Global switch, project picker, chips).
@@ -1131,7 +1146,7 @@ test.describe.serial('Moki settings without a project', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  test('Skills lists the skills of Moki; only Add a skill waits for a project', async () => {
+  test('Skills lists the skills of Moki; without a project only the upload can add (for every project)', async () => {
     await emptyPage.getByRole('button', { name: 'Criar' }).click();
     await emptyPage.getByPlaceholder('ex.: Cliente X').fill('Vazio');
     await emptyPage.getByRole('button', { name: 'Criar workspace' }).click();
@@ -1140,7 +1155,11 @@ test.describe.serial('Moki settings without a project', () => {
     await emptyPage.getByRole('tab', { name: 'Skills' }).click();
     await expect(emptyPage.getByRole('heading', { name: 'Skills', level: 1 })).toBeVisible();
     await expect(emptyPage.locator('.list-card-title').getByText('test-design', { exact: true })).toBeVisible();
-    await expect(emptyPage.getByRole('button', { name: 'Adicionar skill' })).toBeDisabled();
+    await expect(emptyPage.getByRole('button', { name: 'Adicionar skill' })).toHaveCount(0);
+    await emptyPage.getByRole('button', { name: 'Enviar skills ou uma pasta .claude' }).click();
+    await expect(emptyPage.getByRole('button', { name: 'Escolher uma pasta' })).toBeEnabled();
+    await expect(emptyPage.getByText('Instalar para')).toHaveCount(0); // no project: every project only
+    await emptyPage.getByRole('button', { name: 'Voltar para Skills' }).click();
     await emptyPage.getByRole('tab', { name: 'Atividades' }).click();
     await expect(emptyPage.locator('.activity-item .list-card-title').getByText('Desenhar testes', { exact: true })).toBeVisible();
   });

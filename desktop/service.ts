@@ -3,14 +3,18 @@
 // folder, choices come from fixed lists. It reuses the shared core — no QA
 // logic lives here; the AI tools do the QA work following the skills.
 
-import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
-  LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects,
+  CRAFT_APPS, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects,
   listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, which, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
+import { checksum, chooseAsset, chooseAssets, download, latestRelease, systemFamily } from './craft-download.ts';
+import { LIMITS, readFolder, readZip, scan, type Scan } from './claude-import.ts';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
 import { setWorkspaceDir, workspaceDir, workspaceLabel } from '../scripts/lib/repo.mjs';
 import { searchWorkspace } from './search.ts';
@@ -45,6 +49,9 @@ export interface Deps {
   appChooser?: AppChooser; // "Open with" for Excel, Word and PDF files (desktop/open-with.ts); tests pass a fake
   pdfcraft?: { available: () => boolean; run: PdfRunner }; // PDF comments (desktop/pdfcraft.ts); tests pass a fake
   pickFolder?: () => Promise<string | null>; // native folder dialog; the UI never sends paths
+  saveFile?: (name: string, extension: string, title?: string) => Promise<string | null>; // native save dialog (exporting a note, downloading an app); the UI never sends paths
+  craftSystem?: { platform: string; arch: string; family?: string }; // which release files fit this computer; family = 'rpm' | 'deb' | '' (tests fake it)
+  pickFile?: () => Promise<string | null>; // native dialog for a .zip (an uploaded .claude); the UI never sends paths
   home?: string; // user folder for skills and agents for all projects (tests point it elsewhere)
   fetch?: typeof fetch;
   trash?: (path: string) => Promise<void>; // removing skills/agents moves them to the trash (tests delete)
@@ -284,7 +291,15 @@ export function createService(root: string, deps: Deps) {
   };
   const trash = deps.trash ?? (async (p: string) => rmSync(p, { recursive: true, force: true }));
   const doFetch = deps.fetch ?? fetch;
-
+  const craftSystem = () => {
+    const { platform, arch, family } = deps.craftSystem ?? { platform: process.platform, arch: process.arch };
+    return { platform, arch, family: family ?? systemFamily(platform) };
+  };
+  const craftApp = (id: unknown) => {
+    const app = CRAFT_APPS.find((a) => a.id === id);
+    if (!app) throw new ServiceError('Unknown app.');
+    return app;
+  };
   // Moki's own skills that can run (draft or stable), for project and repository agents.
   const frameworkSkills = () => listSkills(root).filter((s) => isUsable(s.name, root)).map(({ name, description }) => ({ name, description }));
 
@@ -334,6 +349,25 @@ export function createService(root: string, deps: Deps) {
     if (linked && allow !== true) throw new ServiceError(`${verb} changes ${repo}/.claude. Confirm the ${what === 'remove' ? 'removal' : what} to allow it.`);
     if (repo && !existsSync(repo)) throw new ServiceError(`The linked folder was not found: ${repo}. Link it again.`);
     return repo;
+  };
+
+  // An upload read from the user's computer, waiting for the user to choose items and confirm (see claudeUploadPick).
+  let upload: Scan | null = null;
+  // Moki's own skills and agents: an upload may not take their names.
+  const reservedNames = () => ({ skills: new Set(listSkills(root).map((x) => x.name)), agents: new Set(listAgents(root).filter((a) => a.source === 'builtin').map((a) => a.name)) });
+  const uploadPreview = (project: unknown, scope: unknown) => {
+    if (!upload) throw new ServiceError('Choose what to upload first.');
+    const id = typeof project === 'string' ? project : '';
+    const f = scopeFolders(id, scope);
+    const repo = scope === 'project' ? projectRepository(id, root) : '';
+    const items = upload.entries.map((e) => {
+      const taken = !e.blocked && (e.kind === 'skill' ? f.skills.some((d) => existsSync(join(d, e.name))) : existsSync(join(f.agents, `${e.name}.md`)));
+      return {
+        kind: e.kind, name: e.name, description: e.description.slice(0, 300), files: e.files.length, bytes: e.files.reduce((n, x) => n + x.data.length, 0),
+        discarded: e.discarded, blocked: e.blocked ?? (taken ? { reason: 'installed' as const } : undefined),
+      };
+    });
+    return { items, ignored: upload.ignored, skillsFolders: f.skills, agentsFolder: f.agents, linked: repo };
   };
 
   function inboxFiles(dir: string) {
@@ -781,7 +815,7 @@ export function createService(root: string, deps: Deps) {
       return (Object.keys(TOOLS) as ToolKey[]).map((k) => ({
         id: k, label: TOOLS[k].label, hint: TOOLS[k].hint ?? '', command: TOOLS[k].command ?? '',
         kind: TOOLS[k].chat ? 'chat' : TOOLS[k].print ? 'print' : TOOLS[k].clipboard ? 'editor' : 'terminal',
-        available: available[k],
+        available: available[k], installable: Boolean(TOOLS[k].install),
       }));
     },
 
@@ -840,6 +874,45 @@ export function createService(root: string, deps: Deps) {
       for (let i = 2; existsSync(inside(dir, rel)); i++) rel = `notes/${slug}-${i}.md`;
       writeFileSync(inside(dir, rel), text, 'utf8');
       return rel;
+    },
+
+    // A note saved as a file of the user's choice, outside the workspace: only here, through the save dialog
+    // (the UI never sends the destination). pdf: scripts/pdf.mjs in a child process (Edge/Chrome/Chromium
+    // prints it) in a temporary folder, so no .html lands next to the file. Returns the path, or null when cancelled.
+    exportNote: async (project: string, path: unknown, format: unknown) => {
+      const rel = String(path ?? '');
+      if (!/^notes\/[^/]+\.md$/.test(rel)) throw new ServiceError('Only notes can be exported here.');
+      if (format !== 'pdf' && format !== 'md' && format !== 'txt') throw new ServiceError('Choose PDF, Markdown or text.');
+      const dir = projectDir(project);
+      const file = inside(dir, rel);
+      if (!existsSync(file)) throw new ServiceError('This note no longer exists.');
+      if (!deps.saveFile) throw new ServiceError('Choosing a file is not available here.');
+      const chosen = await deps.saveFile(basename(rel, '.md'), format);
+      if (!chosen) return null;
+      const out = chosen.toLowerCase().endsWith(`.${format}`) ? chosen : `${chosen}.${format}`;
+      const text = readFileSync(file, 'utf8');
+      if (format === 'md') writeFileSync(out, text, 'utf8');
+      // Images are stored inside the note as data: URLs; a text file keeps only their description.
+      else if (format === 'txt') writeFileSync(out, text.replace(/!\[([^\]]*)\]\(data:[^)]*\)/g, (_, alt: string) => `[${alt || 'image'}]`), 'utf8');
+      else {
+        const tmp = mkdtempSync(join(tmpdir(), 'moki-note-'));
+        try {
+          writeFileSync(join(tmp, 'note.md'), text, 'utf8');
+          const style = templateFor(project, root)?.style;
+          if (style) writeFileSync(join(tmp, 'style.json'), JSON.stringify(style), 'utf8');
+          const args = [join(root, 'scripts', 'pdf.mjs'), join(tmp, 'note.md'), join(tmp, 'note.pdf'), ...(style ? ['--style', join(tmp, 'style.json')] : [])];
+          try {
+            await promisify(execFile)(process.execPath, args, { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 150000 });
+          } catch (e) {
+            if ((e as { code?: unknown }).code === 2) throw new ServiceError('No Edge, Chrome or Chromium found to create the PDF. Install one, or export as Markdown or text.');
+            throw new ServiceError('Could not create the PDF.');
+          }
+          cpSync(join(tmp, 'note.pdf'), out);
+        } finally {
+          rmSync(tmp, { recursive: true, force: true });
+        }
+      }
+      return out;
     },
 
     // A project note, deleted from the start screen: only files under notes/, moved to the trash.
@@ -1379,6 +1452,39 @@ export function createService(root: string, deps: Deps) {
       return searchSkills(q, cat, page as number, doFetch);
     },
 
+    // ArtCraft Launcher apps (desktop/craft-download.ts): Moki downloads and verifies the SHA-256, it never installs or runs the file.
+    craftApps: () => CRAFT_APPS.map(({ id, label }) => ({ id, label })),
+    craftDownloadInfo: async (id: unknown) => {
+      const app = craftApp(id);
+      const { platform, arch, family } = craftSystem();
+      return failingAsync(async () => {
+        const options = chooseAssets(app, await latestRelease(app, doFetch), platform, arch, family);
+        const { release } = options[0];
+        return { id: app.id, label: app.label, tag: release.tag, page: release.page, options: options.map((o) => ({ file: o.asset.name, size: o.asset.size, url: o.url })) };
+      });
+    },
+    // The tag must still be the latest and the file one of those offered for this system; the destination comes only from the save dialog. null = cancelled.
+    craftDownload: async (id: unknown, tag: unknown, file: unknown) => {
+      const app = craftApp(id);
+      const { platform, arch, family } = craftSystem();
+      const choice = await failingAsync(async () => {
+        const release = await latestRelease(app, doFetch);
+        if (release.tag !== tag) throw new ServiceError(`A newer release of ${app.label} came out (${release.tag}). Review the download again.`);
+        return chooseAsset(app, release, platform, arch, family, String(file));
+      });
+      const sha256 = await failingAsync(() => checksum(app, choice, doFetch));
+      if (!sha256) throw new ServiceError(`${app.label} ${choice.release.tag} publishes no SHA-256 for ${choice.asset.name}, and Moki does not download a file nothing vouches for.`);
+      if (!deps.saveFile) throw new ServiceError('Choosing a file is not available here.');
+      const dot = choice.asset.name.lastIndexOf('.');
+      const ext = choice.asset.name.slice(dot + 1);
+      const chosen = await deps.saveFile(choice.asset.name.slice(0, dot), ext, `Save ${app.label}`);
+      if (!chosen) return null;
+      const dest = chosen.toLowerCase().endsWith(`.${ext.toLowerCase()}`) ? chosen : `${chosen}.${ext}`;
+      await failingAsync(() => download(choice, sha256, dest, doFetch));
+      if (deps.reveal) deps.reveal(dest); else deps.openFolder(dirname(dest));
+      return { path: dest, sha256 };
+    },
+
     installedSkills: (project: string) => {
       projectDir(project);
       return { project: installedSkills(project, root), global: [...new Set(globalSkillDirs.flatMap(skillFolders))], artcraft: artcraftSkills() };
@@ -1433,6 +1539,74 @@ export function createService(root: string, deps: Deps) {
       const backup = repo ? backupAiConfig(backupsDir(project), repo, 'claude', ['.claude']) : undefined;
       for (const t of targets) cpSync(join(dir, n), join(t, n), { recursive: true });
       return { name: n, folders: targets.map((t) => join(t, n)), backup };
+    },
+
+    // Upload of skills and agents (a .claude folder, a skills/ or agents/ folder, a single skill, or a .zip of those).
+    // The source is chosen in the native dialog and read here; nothing is written until claudeUploadApply, after the
+    // user marked items and confirmed. Destinations are the existing install scopes (scopeFolders).
+    claudeUploadPick: async (source: unknown, project: unknown = '', scope: unknown = 'global') => {
+      if (source !== 'folder' && source !== 'zip') throw new ServiceError('Choose a folder or a .zip file.');
+      const pick = source === 'zip' ? deps.pickFile : deps.pickFolder;
+      if (!pick) throw new ServiceError('Choosing a file or folder is not available here.');
+      const chosen = await pick();
+      if (!chosen) return null;
+      if (!existsSync(chosen)) throw new ServiceError('Not found.');
+      const st = statSync(chosen);
+      if (source === 'zip' && (!st.isFile() || st.size > LIMITS.maxTotalBytes)) throw new ServiceError(`Choose a .zip file of up to ${LIMITS.maxTotalBytes / 1048576} MB.`);
+      if (source === 'folder' && !st.isDirectory()) throw new ServiceError('Choose a folder.');
+      upload = failing(() => scan(source === 'zip' ? readZip(readFileSync(chosen)) : readFolder(chosen), reservedNames()));
+      return uploadPreview(project, scope);
+    },
+
+    // The same upload seen for another destination (the user changed the scope): items already installed there are blocked.
+    claudeUploadPreview: (project: unknown = '', scope: unknown = 'global') => uploadPreview(project, scope),
+
+    claudeUploadApply: (project: unknown, scope: unknown, selected: unknown, allowClaudeWrite: unknown = false) => {
+      const view = uploadPreview(project, scope);
+      const keys = Array.isArray(selected) ? [...new Set(selected.map(String))] : [];
+      if (!keys.length) throw new ServiceError('Choose at least one item.');
+      const items = keys.map((k) => view.items.find((i) => `${i.kind}:${i.name}` === k) ?? null);
+      if (items.some((i) => !i)) throw new ServiceError('Unknown item in this upload.');
+      const bad = items.find((i) => i?.blocked);
+      if (bad) throw new ServiceError(`"${bad.name}" cannot be installed (${bad.blocked?.reason}).`);
+      const id = typeof project === 'string' ? project : '';
+      const repo = linkedWrite(id, scope, allowClaudeWrite, 'install');
+      const f = scopeFolders(id, scope);
+      const entries = (upload as Scan).entries.filter((e) => keys.includes(`${e.kind}:${e.name}`));
+      const backup = repo ? backupAiConfig(backupsDir(id), repo, 'claude', ['.claude']) : undefined;
+      // Everything is new (installed names are blocked), so undoing a failure is removing what was created.
+      const created: string[] = [];
+      const make = (dir: string) => { let top = ''; for (let d = dir; !existsSync(d); d = dirname(d)) top = d; mkdirSync(dir, { recursive: true }); if (top) created.push(top); };
+      const installed: { kind: string; name: string; folders: string[] }[] = [];
+      try {
+        for (const e of entries) {
+          const folders: string[] = [];
+          if (e.kind === 'skill') {
+            for (const base of f.skills) {
+              const dir = join(base, e.name);
+              make(dir);
+              folders.push(dir);
+              for (const file of e.files) {
+                const target = inside(dir, file.path); // refuses ../ and absolute paths
+                mkdirSync(dirname(target), { recursive: true });
+                writeFileSync(target, file.data);
+              }
+            }
+          } else {
+            make(f.agents);
+            const target = inside(f.agents, `${e.name}.md`);
+            writeFileSync(target, e.files[0].data);
+            created.push(target);
+            folders.push(target);
+          }
+          installed.push({ kind: e.kind, name: e.name, folders });
+        }
+      } catch (e) {
+        for (const c of created.reverse()) rmSync(c, { recursive: true, force: true });
+        throw new ServiceError(`Could not install: ${e instanceof Error ? e.message : String(e)}. Nothing was installed.`);
+      }
+      upload = null;
+      return { installed, backup };
     },
 
     // Agents may only use skills already installed in their own scope's folder.

@@ -14,7 +14,10 @@ rmSync(out, { recursive: true, force: true });
 await viteBuild({ configFile: join(ROOT, 'app', 'vite.config.ts'), logLevel: 'warn' });
 
 // node-pty is native: it is not bundled but shipped as a module next to the app.
-const common = { bundle: true, platform: 'node', target: 'node22', sourcemap: false, logLevel: 'warning', external: ['electron', 'node-pty'] };
+// pdf.js tries to load the native @napi-rs/canvas at import; inside Electron 43 it crashes the
+// process (SIGTRAP). Moki only reads annotations and text, so pdf.js runs without it.
+const noCanvas = { name: 'no-napi-canvas', setup: (b) => b.onLoad({ filter: /pdfjs-dist[\\/].*pdf\.mjs$/ }, (a) => ({ contents: readFileSync(a.path, 'utf8').replaceAll('require("@napi-rs/canvas")', 'require("moki-no-canvas")'), loader: 'js' })) };
+const common = { plugins: [noCanvas], bundle: true, platform: 'node', target: 'node22', sourcemap: false, logLevel: 'warning', external: ['electron', 'node-pty'] };
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'boot.ts')], outfile: join(out, 'boot.mjs'), format: 'esm', external: ['electron', './main.mjs'] });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'main.ts')], outfile: join(out, 'main.mjs'), format: 'esm' });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'preload.ts')], outfile: join(out, 'preload.cjs'), format: 'cjs' });

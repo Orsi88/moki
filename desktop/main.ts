@@ -53,6 +53,17 @@ const service = createService(ROOT, {
     const r = await dialog.showOpenDialog(win, { title: 'Choose a folder', properties: ['openDirectory', 'createDirectory'] });
     return r.canceled ? null : r.filePaths[0] ?? null;
   },
+  saveFile: async (name, extension, title) => {
+    const parent = BrowserWindow.getFocusedWindow() ?? win; // the note window or the main one
+    if (!parent) return null;
+    const r = await dialog.showSaveDialog(parent, { title: title ?? 'Export the note', defaultPath: `${name}.${extension}`, filters: [{ name: extension.toUpperCase(), extensions: [extension] }] });
+    return r.canceled ? null : r.filePath ?? null;
+  },
+  pickFile: async () => {
+    if (!win) return null;
+    const r = await dialog.showOpenDialog(win, { title: 'Choose a .zip file', properties: ['openFile'], filters: [{ name: 'ZIP', extensions: ['zip'] }] });
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  },
   onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
   killTerminal: (id) => terminals.kill(id),
   terminalAlive: (id) => terminals.alive(id),

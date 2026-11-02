@@ -37,3 +37,20 @@ export function stackCards(cards: { id: string; top: number; height: number }[],
   }
   return out;
 }
+
+// A note from a selection: titled "<file> p<N>" (the first page selected), the quote, and the source line with
+// the file mention the notes already use, the page and the rect (pt, from the page's top-left) that holds the
+// selection on it. Pure; the text selected is the quote, so the note is only as exact as the browser's text.
+export function selectionNote(file: string, marks: { page: number; quads: number[][] }[], quote: string): { title: string; text: string } {
+  const first = [...marks].sort((a, b) => a.page - b.page)[0];
+  const page = first?.page ?? 1;
+  const xs = (first?.quads ?? []).flatMap((q) => [q[0], q[2], q[4], q[6]]);
+  const ys = (first?.quads ?? []).flatMap((q) => [q[1], q[3], q[5], q[7]]);
+  const rect = xs.length ? `[${Math.min(...xs)}, ${Math.min(...ys)}, ${Math.max(...xs)}, ${Math.max(...ys)}]` : '[]';
+  const name = file.split('/').pop() ?? file;
+  const quoted = quote.trim().split(/\r?\n/).map((line) => `> ${line}`).join('\n');
+  return {
+    title: `${name.replace(/\.pdf$/i, '')} p${page}`,
+    text: `${quoted}\n\nSource: [@${name}](${file}) · page ${page} · rect ${rect} pt\n`,
+  };
+}

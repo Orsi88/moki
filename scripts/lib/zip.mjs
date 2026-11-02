@@ -62,7 +62,11 @@ export function zip(entries) {
 
 // Returns Map<name, Buffer>. Reads sizes from the central directory, so it
 // also handles archives written with data descriptors (Excel, LibreOffice).
-export function unzip(buf) {
+// `limits` is for archives the user did not make (an uploaded .claude): { maxFiles, maxFileBytes, maxTotalBytes }
+// are checked against the declared sizes before anything is inflated and enforced while inflating; a name with
+// "..", a drive or leading "/", or a "\\" is refused; symbolic links are not followed and their names go to
+// limits.skipped. Without `limits` nothing changes.
+export function unzip(buf, limits) {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -71,21 +75,35 @@ export function unzip(buf) {
   const count = buf.readUInt16LE(eocd + 10);
   let ptr = buf.readUInt32LE(eocd + 16);
   const files = new Map();
+  if (limits?.maxFiles && count > limits.maxFiles) throw new Error(`the ZIP has more than ${limits.maxFiles} files`);
+  let total = 0;
   for (let i = 0; i < count; i++) {
     if (buf.readUInt32LE(ptr) !== 0x02014b50) throw new Error('corrupt ZIP central directory');
     const method = buf.readUInt16LE(ptr + 10);
     const compSize = buf.readUInt32LE(ptr + 20);
+    const size = buf.readUInt32LE(ptr + 24);
+    const unixMode = buf.readUInt32LE(ptr + 38) >>> 16;
     const nameLen = buf.readUInt16LE(ptr + 28);
     const extraLen = buf.readUInt16LE(ptr + 30);
     const commentLen = buf.readUInt16LE(ptr + 32);
     const localOffset = buf.readUInt32LE(ptr + 42);
     const name = buf.toString('utf8', ptr + 46, ptr + 46 + nameLen);
+    if (limits) {
+      if (name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-zA-Z]:/.test(name) || name.split('/').includes('..')) throw new Error(`unsafe path in the ZIP: ${name}`);
+      if ((unixMode & 0xf000) === 0xa000) { limits.skipped?.push(name); ptr += 46 + nameLen + extraLen + commentLen; continue; }
+      if (limits.maxFileBytes && size > limits.maxFileBytes) throw new Error(`${name} is larger than ${limits.maxFileBytes / 1048576} MB`);
+      total += size;
+      if (limits.maxTotalBytes && total > limits.maxTotalBytes) throw new Error(`the ZIP is larger than ${limits.maxTotalBytes / 1048576} MB`);
+    }
     const localNameLen = buf.readUInt16LE(localOffset + 26);
     const localExtraLen = buf.readUInt16LE(localOffset + 28);
     const start = localOffset + 30 + localNameLen + localExtraLen;
     const raw = buf.subarray(start, start + compSize);
-    if (method === 0) files.set(name, Buffer.from(raw));
-    else if (method === 8) files.set(name, inflateRawSync(raw));
+    if (method === 0) {
+      if (limits?.maxFileBytes && raw.length > limits.maxFileBytes) throw new Error(`${name} is larger than ${limits.maxFileBytes / 1048576} MB`);
+      files.set(name, Buffer.from(raw));
+    }
+    else if (method === 8) files.set(name, inflateRawSync(raw, limits?.maxFileBytes ? { maxOutputLength: limits.maxFileBytes } : undefined));
     else throw new Error(`unsupported ZIP compression method ${method} for ${name}`);
     ptr += 46 + nameLen + extraLen + commentLen;
   }

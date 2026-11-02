@@ -28,7 +28,7 @@ export interface Plan {
 }
 export interface SkillInfo { name: string; status: string; description: string }
 export type ToolKind = 'terminal' | 'editor' | 'chat' | 'print';
-export interface ToolInfo { id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean }
+export interface ToolInfo { id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean; installable?: boolean }
 // An activity (scripts/lib/activities.ts): the app's own (moki), one that comes with Moki (builtin) or the person's (library).
 export type ActivityTarget = { kind: 'moki' | 'skill' | 'agent' | 'workflow' | 'operation'; name: string };
 export interface ActivityInfo {
@@ -54,6 +54,8 @@ export type PdfChange =
   | { op: 'move-page'; page: number; to: number }
   | { op: 'insert-blank'; at: number }
   | { op: 'set-info'; title: string; author: string };
+export interface CraftOption { file: string; size: number; url: string }
+export interface CraftDownloadInfo { id: string; label: string; tag: string; page: string; options: CraftOption[] } // options[0] is the recommended file
 export interface InboxFile { name: string; size: number; modified: string }
 export interface OpenRun { id: string; status: string; currentStep: string }
 
@@ -171,6 +173,16 @@ export interface RegistrySkill {
 export interface SkillSearchPage { items: RegistrySkill[]; page: number; pages: number; total: number; capped: boolean }
 export interface InstallResult { name: string; files: number; folders: string[]; unverified: string[]; backup?: string }
 export type SkillScope = 'project' | 'global';
+// Upload of skills and agents from a .claude folder or a .zip (desktop/claude-import.ts). reason: why an item cannot be installed.
+export type UploadBlock = 'invalid-name' | 'no-skill-md' | 'no-description' | 'secret' | 'moki-name' | 'installed';
+export interface UploadItem {
+  kind: 'skill' | 'agent'; name: string; description: string; files: number; bytes: number; discarded: string[];
+  blocked?: { reason: UploadBlock; detail?: string; file?: string };
+}
+export interface UploadPreview {
+  items: UploadItem[]; ignored: { path: string; reason: 'config' | 'symlink' | 'other' }[];
+  skillsFolders: string[]; agentsFolder: string; linked: string;
+}
 export interface ScopeAgents { skills: string[]; builtin: { name: string; description: string }[]; agents: string[]; folder: string; agentsFolder: string }
 export interface ScopeAgentRequest { name: string; description: string; skills: string[]; scope: SkillScope; contract?: AgentContract }
 export interface ProjectItems {
@@ -291,6 +303,7 @@ export const api = {
   setAgentTags: (name: string, tags: string[]) => call<string[]>('setAgentTags', name, tags),
   saveAgentProfile: (name: string, profile: AgentProfile) => call<boolean>('saveAgentProfile', name, profile),
   createNote: (project: string, title: string, text: string) => call<string>('createNote', project, title, text),
+  exportNote: (project: string, path: string, format: 'pdf' | 'md' | 'txt') => call<string | null>('exportNote', project, path, format),
   run: (project: string, runId: string) => call<RunState>('run', project, runId),
   inbox: (project: string) => call<InboxFile[]>('inbox', project),
   importFiles: (project: string, paths: string[]) => call<{ saved: string[]; skipped: string[] }>('importFiles', project, paths),
@@ -353,6 +366,13 @@ export const api = {
   searchSkills: (query: string, category = '', page = 1) => call<SkillSearchPage>('searchSkills', query, category, page),
   installedSkills: (project: string) => call<{ project: string[]; global: string[]; artcraft: string[] }>('installedSkills', project),
   installSkill: (project: string, slug: string, scope: SkillScope, allowClaudeWrite = false) => call<InstallResult>('installSkill', project, slug, scope, allowClaudeWrite),
+  craftApps: () => call<{ id: string; label: string }[]>('craftApps'),
+  craftDownloadInfo: (id: string) => call<CraftDownloadInfo>('craftDownloadInfo', id),
+  craftDownload: (id: string, tag: string, file: string) => call<{ path: string; sha256: string } | null>('craftDownload', id, tag, file),
+  claudeUploadPick: (source: 'folder' | 'zip', project: string, scope: SkillScope) => call<UploadPreview | null>('claudeUploadPick', source, project, scope),
+  claudeUploadPreview: (project: string, scope: SkillScope) => call<UploadPreview>('claudeUploadPreview', project, scope),
+  claudeUploadApply: (project: string, scope: SkillScope, selected: string[], allowClaudeWrite = false) =>
+    call<{ installed: { kind: string; name: string; folders: string[] }[]; backup?: string }>('claudeUploadApply', project, scope, selected, allowClaudeWrite),
   proposeSkill: (project: string, req: { name: string; prompt: string; tool: string; language: string }) => call<LaunchResult>('proposeSkill', project, req),
   skillProposals: (project: string) => call<{ name: string; description: string }[]>('skillProposals', project),
   installProposal: (project: string, name: string, scope: SkillScope, allowClaudeWrite = false) => call<{ name: string; folders: string[]; backup?: string }>('installProposal', project, name, scope, allowClaudeWrite),

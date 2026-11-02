@@ -21,13 +21,15 @@ Then you talk in that tool as usual. The request names the project, the linked f
 | **Agents** | Roles that use one or more skills. Duplicate a built-in one, or create your own; tags say which projects it reaches. |
 | **Activities** | The ready-made requests you pick in "Open in your AI tool": the ones of Moki, and your own (what to ask, of which skill, agent, workflow or operation, with which files). See [Activities](activities.md). |
 | **Operations** | Agents linked by arrows into a multi-agent operation. See [Agents and operations](agents.md). |
-| **Skills** | What is already installed, what ships with Moki, the app plugins (in purple), and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry or describe one for your AI tool to draft. |
+| **Skills** | What is already installed, what ships with Moki, the app plugins (in purple), and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry, describe one for your AI tool to draft, or **Upload** skills and agents from a `.claude` folder (or a `.zip`) on your computer. The same upload is in **Set up project** (for the project or for every project) and on the start screen without a project open (for every project). You choose the items and confirm before anything is installed. |
 | **MCP servers** | The tools the AI gets, global or for chosen projects. See [MCP servers](mcp-servers.md). |
 | **Templates** | Font, colours, header, footer, logo and watermark for the PDF, Word and Excel files activities generate; tags say which projects use each one. |
 
+**ArtCraft apps.** The **+** menu of the terminals ends with **Download ArtCraft apps…**: the 16 apps of the [ArtCraft Launcher](https://github.com/storytold/craft-launcher) suite (the launcher first: it installs and updates the others). **Download** shows the file, the release and the address, and asks you to confirm; Moki then downloads the file for your computer, checks its SHA-256, saves it where you choose in the system dialog and shows the folder. When your system has more than one format (on Linux, the package of your distro such as .rpm or .deb, an AppImage or a .tar.gz; on Windows, an .msi or a portable .zip), you choose which one, with the best fit marked as recommended. It never installs or runs it: open the file yourself (an .rpm or .deb runs its install scripts when you open it). Messages: [Troubleshooting](troubleshooting.md).
+
 **Favorites.** The star on a card of Activities, Agents, Operations, Templates or Skills makes it a favorite: favorites come first in their list, and starred activities come first wherever an activity is picked. They are kept per workspace in `library/favorites.json`.
 
-Notes on a project are Markdown files under `notes/` and open in their own window. Loose notes on the start screen stay in the app until you send one to a project.
+Notes on a project are Markdown files under `notes/` and open in their own window. Loose notes on the start screen stay in the app until you send one to a project. In a PDF, selecting text offers **Create a note from here**: a note in the same project's `notes/`, titled `<file> p<page>`, with the quote and a source line (file, page, rect in points); the PDF is not changed. A project note can be exported from its window as **PDF** (needs Edge, Chrome or Chromium), **Markdown** or **text**: a save dialog asks where, and the file goes there (outside the workspace, only by that choice); images embedded in the note are kept in the PDF and Markdown and left as `[description]` in text.
 
 ## Projects
 

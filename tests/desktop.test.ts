@@ -1,16 +1,17 @@
 import { test, after, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, symlinkSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, symlinkSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { callService, createService, ServiceError, type FileContent, type TreeNode } from '../desktop/service.ts';
 import { PathError, resolveInside, isEditable, isOpenable } from '../desktop/fs-guard.ts';
 import { launchInTerminal, pluginArgs, scriptFor, windowsStartArgs, type LaunchResult } from '../desktop/launcher.ts';
 import type { TermSpec } from '../desktop/terminals.ts';
 import { parseGioMime } from '../desktop/open-with.ts';
 import { parsePdfChange, pdfcraftCandidates, pdfScript, toComments, type PdfChange, type PdfStep } from '../desktop/pdfcraft.ts';
-import { selectionMarks, stackCards } from '../app/src/pdf-quads.ts';
+import { selectionMarks, selectionNote, stackCards } from '../app/src/pdf-quads.ts';
 import { docxToMarkdown, readableInputs } from '../scripts/lib/docx.ts';
 import { frameworkTarget, syncFramework } from '../desktop/framework.ts';
 import { noteKey, noteQuery, parseNoteRequest } from '../desktop/notes.ts';
@@ -18,7 +19,7 @@ import { markdownToHtml } from '../scripts/lib/markdown.mjs';
 import { formatNumber } from '../scripts/lib/numfmt.mjs';
 import { zip } from '../scripts/lib/zip.mjs';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { createProject, slugify, windowsSafePrompt, type ToolKey } from '../scripts/lib/core.ts';
+import { CRAFT_APPS, craftAssetEndings, createProject, installPlan, linuxPackageFamily, pickCraftAssets, slugify, TOOLS, windowsSafePrompt, type ToolKey } from '../scripts/lib/core.ts';
 
 // Fixture: a framework root with a few skills, the project template and one project.
 const root = mkdtempSync(join(tmpdir(), 'qa-desktop-'));
@@ -169,6 +170,53 @@ test('notes: one is deleted from the start screen; nothing outside notes/ is', a
   await assert.rejects(service.deleteNote('acme', rel), /no longer exists/);
   await assert.rejects(service.deleteNote('acme', 'project.json'), /Only notes/);
   await assert.rejects(service.deleteNote('acme', 'notes/../project.json'), /Only notes|outside/i);
+});
+
+test('notes: a selection of a PDF becomes a note titled by file and page, with its source', () => {
+  const n = selectionNote('inbox/Relatório final.pdf', [{ page: 3, quads: [[10, 20, 50, 20, 10, 30, 50, 30], [12, 32, 40, 32, 12, 42, 40, 42]] }, { page: 4, quads: [[1, 1, 2, 1, 1, 2, 2, 2]] }], 'linha um\nlinha dois');
+  assert.equal(n.title, 'Relatório final p3');
+  assert.equal(slugify(n.title), 'relatorio-final-p3');
+  assert.equal(n.text, '> linha um\n> linha dois\n\nSource: [@Relatório final.pdf](inbox/Relatório final.pdf) · page 3 · rect [10, 20, 50, 42] pt\n');
+  assert.equal(service.createNote('acme', n.title, n.text), 'notes/relatorio-final-p3.md');
+});
+
+test('notes: exported as md, txt and pdf to the file the save dialog returns; nothing else is exported', async (t) => {
+  const rel = service.createNote('acme', 'Exportar', '# Exportar\n\n![foto](data:image/png;base64,AAAA) fim');
+  const out = mkdtempSync(join(tmpdir(), 'moki-export-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  let name = '', ext = '', answer: string | null = null;
+  const exporter = createService(root, { launch: () => ({ opened: true, message: '' }), openFolder: () => {}, openPath: () => {}, saveFile: async (n, e) => { name = n; ext = e; return answer; } });
+  answer = join(out, 'a');
+  assert.equal(await exporter.exportNote('acme', rel, 'md'), join(out, 'a.md'));
+  assert.deepEqual([name, ext], ['exportar', 'md']);
+  assert.match(readFileSync(join(out, 'a.md'), 'utf8'), /data:image\/png/);
+  answer = join(out, 'b.txt');
+  await exporter.exportNote('acme', rel, 'txt');
+  assert.equal(readFileSync(join(out, 'b.txt'), 'utf8'), '# Exportar\n\n[foto] fim');
+  answer = null;
+  assert.equal(await exporter.exportNote('acme', rel, 'md'), null, 'cancelled dialog');
+  await assert.rejects(exporter.exportNote('acme', 'project.json', 'md'), /Only notes/);
+  await assert.rejects(exporter.exportNote('acme', 'notes/../project.json', 'md'), /Only notes/);
+  await assert.rejects(exporter.exportNote('acme', 'notes/a/b.md', 'md'), /Only notes/);
+  await assert.rejects(exporter.exportNote('acme', rel, 'docx'), /PDF, Markdown/);
+  await assert.rejects(service.exportNote('acme', rel, 'md'), /not available here/);
+  assert.deepEqual(readdirSync(join(root, 'workspace', 'projects', 'acme', 'notes')).filter((f) => !f.endsWith('.md')), [], 'no export lands in notes/');
+  if (process.platform === 'win32') return;
+  // pdf: a fake browser writes the file --print-to-pdf asks for; without a browser the error says so
+  const saved = process.env.QA_AGENTS_BROWSER, path = process.env.PATH;
+  t.after(() => { if (saved === undefined) delete process.env.QA_AGENTS_BROWSER; else process.env.QA_AGENTS_BROWSER = saved; process.env.PATH = path; });
+  if (!existsSync(join(root, 'scripts'))) cpSync(join(ROOT, 'scripts'), join(root, 'scripts'), { recursive: true }); // the framework folder has scripts/pdf.mjs
+  const fake = join(out, 'fake-browser.sh');
+  writeFileSync(fake, '#!/bin/sh\nfor a in "$@"; do case "$a" in --print-to-pdf=*) printf %s %PDF-fake > "${a#--print-to-pdf=}";; esac; done\n');
+  chmodSync(fake, 0o755);
+  process.env.QA_AGENTS_BROWSER = fake;
+  answer = join(out, 'c.pdf');
+  assert.equal(await exporter.exportNote('acme', rel, 'pdf'), join(out, 'c.pdf'));
+  assert.equal(readFileSync(join(out, 'c.pdf'), 'utf8'), '%PDF-fake');
+  assert.deepEqual(readdirSync(out).filter((f) => f.endsWith('.html')), [], 'no html next to the pdf');
+  delete process.env.QA_AGENTS_BROWSER;
+  process.env.PATH = '';
+  if (!existsSync('/Applications/Google Chrome.app')) await assert.rejects(exporter.exportNote('acme', rel, 'pdf'), /No Edge, Chrome or Chromium/);
 });
 
 test('MCPs: the last section lists the servers configured where the AI tools start', () => {
@@ -1463,6 +1511,140 @@ test('repository tab: installs, agents and removals in a linked .claude need con
   for (const dir of [repo, home, project]) rmSync(dir, { recursive: true, force: true });
 });
 
+test('upload of skills and agents: preview writes nothing, blocks per item, installs only what is confirmed', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'qa-up-home-'));
+  const src = mkdtempSync(join(tmpdir(), 'qa-up-src-'));
+  const put = (rel: string, text: string) => { mkdirSync(dirname(join(src, rel)), { recursive: true }); writeFileSync(join(src, rel), text); };
+  const skill = (name: string, extra = '') => `---\nname: ${name}\ndescription: Does ${name}${extra}\n---\nBody`;
+  put('proj/.claude/skills/good/SKILL.md', skill('good'));
+  put('proj/.claude/skills/good/references/a.md', 'A');
+  put('proj/.claude/skills/good/.env', 'TOKEN=1');
+  put('proj/.claude/skills/good/keys/server.pem', 'x');
+  put('proj/.claude/skills/leaky/SKILL.md', skill('leaky'));
+  put('proj/.claude/skills/leaky/run.sh', `echo ${'ghp_'}${'a'.repeat(36)}`);
+  put('proj/.claude/skills/nodesc/SKILL.md', '---\nname: nodesc\n---\nBody');
+  put('proj/.claude/skills/nofile/notes.md', 'x');
+  put('proj/.claude/skills/Bad_Name/SKILL.md', skill('Bad_Name'));
+  put('proj/.claude/skills/failure-analysis/SKILL.md', skill('failure-analysis'));
+  put('proj/.claude/agents/helper.md', '---\nname: helper\ndescription: >-\n  Helps with good\n  things\ntools: Read\n---\nUse good.');
+  put('proj/.claude/agents/qa-lead.md', '---\nname: qa-lead\ndescription: Takes the Moki name\n---');
+  put('proj/.claude/settings.json', '{"hooks":{}}');
+  put('proj/.claude/hooks/pre.sh', 'rm -rf /');
+  put('proj/.claude/commands/x.md', 'x');
+  put('proj/CLAUDE.md', 'x');
+  put('proj/.mcp.json', '{}');
+  symlinkSync(join(src, 'proj', 'CLAUDE.md'), join(src, 'proj', '.claude', 'skills', 'good', 'link.md'));
+  const svc = createService(root, { ...noLaunch, home, pickFolder: async () => join(src, 'proj') });
+
+  const view = await svc.claudeUploadPick('folder', '', 'global');
+  assert.ok(view);
+  const by = Object.fromEntries(view.items.map((i) => [`${i.kind}:${i.name}`, i]));
+  assert.equal(by['skill:good'].blocked, undefined);
+  assert.deepEqual(by['skill:good'].discarded.sort(), ['.env', 'keys/server.pem']);
+  assert.equal(by['skill:good'].files, 2, 'SKILL.md and the reference; the symlink is not followed');
+  assert.equal(by['agent:helper'].description, 'Helps with good things', 'multi-line descriptions are read');
+  assert.deepEqual(Object.fromEntries(view.items.filter((i) => i.blocked).map((i) => [i.name, i.blocked?.reason])), {
+    leaky: 'secret', nodesc: 'no-description', nofile: 'no-skill-md', Bad_Name: 'invalid-name', 'failure-analysis': 'moki-name', 'qa-lead': 'moki-name',
+  });
+  assert.equal(by['skill:leaky'].blocked?.detail, 'GitHub token');
+  assert.equal(by['skill:leaky'].blocked?.file, 'run.sh');
+  assert.ok(!JSON.stringify(view).includes('ghp_'), 'the secret value never leaves the main process');
+  const ignored = Object.fromEntries(view.ignored.map((i) => [i.path, i.reason]));
+  assert.equal(ignored['settings.json'], 'config');
+  assert.equal(ignored.hooks, 'config');
+  assert.equal(ignored.commands, 'config');
+  assert.equal(ignored['CLAUDE.md'], 'config');
+  assert.equal(ignored['.mcp.json'], 'config');
+  assert.equal(ignored['.claude/skills/good/link.md'], 'symlink');
+  assert.equal(existsSync(join(home, '.claude')), false, 'the preview writes nothing');
+
+  await assert.rejects(async () => svc.claudeUploadApply('', 'global', []), /at least one/);
+  await assert.rejects(async () => svc.claudeUploadApply('', 'global', ['skill:leaky']), /cannot be installed \(secret\)/);
+  await assert.rejects(async () => svc.claudeUploadApply('', 'global', ['skill:nope']), /Unknown item/);
+  assert.equal(existsSync(join(home, '.claude')), false);
+
+  const done = svc.claudeUploadApply('', 'global', ['skill:good', 'agent:helper']);
+  assert.deepEqual(done.installed.map((i) => i.name).sort(), ['good', 'helper']);
+  for (const base of ['.claude', '.agents']) {
+    assert.equal(readFileSync(join(home, base, 'skills', 'good', 'references', 'a.md'), 'utf8'), 'A');
+    assert.equal(existsSync(join(home, base, 'skills', 'good', '.env')), false);
+    assert.equal(existsSync(join(home, base, 'skills', 'good', 'keys')), false);
+  }
+  assert.ok(existsSync(join(home, '.claude', 'agents', 'helper.md')));
+  assert.equal(existsSync(join(home, '.agents', 'agents')), false);
+  assert.deepEqual(svc.installedSkills('acme').global, ['good']);
+  assert.throws(() => svc.claudeUploadPreview('', 'global'), /Choose what to upload first/, 'the upload is used once');
+
+  // Picking again: what is already installed is blocked, not replaced.
+  const again = await svc.claudeUploadPick('folder', '', 'global');
+  assert.deepEqual(again?.items.filter((i) => i.blocked?.reason === 'installed').map((i) => i.name).sort(), ['good', 'helper']);
+  await assert.rejects(async () => svc.claudeUploadApply('', 'global', ['skill:good']), /cannot be installed \(installed\)/);
+  // The same upload for a project without a linked folder goes to the project folder.
+  const forProject = svc.claudeUploadPreview('acme', 'project');
+  assert.equal(forProject.items.find((i) => i.name === 'good')?.blocked, undefined);
+  assert.throws(() => svc.claudeUploadPreview('nope', 'project'), /Unknown project/);
+  assert.throws(() => svc.claudeUploadPreview('acme', 'root'), /Choose where/);
+  svc.claudeUploadApply('acme', 'project', ['skill:good', 'agent:helper']);
+  const projectDir = join(root, 'workspace', 'projects', 'acme');
+  assert.ok(existsSync(join(projectDir, 'skills', 'good', 'SKILL.md')) && existsSync(join(projectDir, 'agents', 'helper.md')));
+  assert.deepEqual(svc.installedSkills('acme').project, ['good']);
+  assert.match(svc.launch(openAcme).prompt, /Skills installed for this project \(read workspace\/projects\/acme\/skills\/<name>\/SKILL\.md when one fits the task\): good\./);
+
+  // A linked folder: confirmation and a backup of its .claude first.
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), 'qa-up-repo-')));
+  createProject('up-linked', 'Up linked', root);
+  const json = join(root, 'workspace', 'projects', 'up-linked', 'project.json');
+  writeFileSync(json, JSON.stringify({ ...JSON.parse(readFileSync(json, 'utf8')), repositories: [{ name: 'app', localPath: repo, linkedFolder: true }] }));
+  mkdirSync(join(repo, '.claude'));
+  writeFileSync(join(repo, '.claude', 'settings.json'), '{"before":true}');
+  await svc.claudeUploadPick('folder', 'up-linked', 'project');
+  assert.throws(() => svc.claudeUploadApply('up-linked', 'project', ['skill:good']), /Confirm the install/);
+  assert.equal(existsSync(join(repo, '.claude', 'skills')), false);
+  const linked = svc.claudeUploadApply('up-linked', 'project', ['skill:good'], true);
+  assert.ok(existsSync(join(repo, '.claude', 'skills', 'good', 'SKILL.md')));
+  assert.equal(readFileSync(join(linked.backup!, '.claude', 'settings.json'), 'utf8'), '{"before":true}');
+  assert.equal(existsSync(join(linked.backup!, '.claude', 'skills')), false);
+
+  for (const dir of [home, src, repo, join(root, 'workspace', 'projects', 'up-linked'), join(projectDir, 'skills'), join(projectDir, 'agents')]) rmSync(dir, { recursive: true, force: true });
+});
+
+test('upload from a zip: layouts, limits, unsafe paths, and a failure undoes everything', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'qa-upz-home-'));
+  const dir = mkdtempSync(join(tmpdir(), 'qa-upz-'));
+  const skill = (name: string) => `---\nname: ${name}\ndescription: Does ${name}\n---`;
+  let file = join(dir, 'a.zip');
+  const svc = createService(root, { ...noLaunch, home, pickFile: async () => file });
+  const pick = (entries: [string, string][]) => { writeFileSync(file, zip(entries)); return svc.claudeUploadPick('zip', '', 'global'); };
+
+  // A zipped skill folder: the name comes from the header.
+  let view = await pick([['one/SKILL.md', skill('one')], ['one/refs/a.md', 'A']]);
+  assert.deepEqual(view?.items.map((i) => [i.kind, i.name, i.files]), [['skill', 'one', 2]]);
+  // skills/ and agents/ at the top, a .claude inside a folder.
+  view = await pick([['skills/s1/SKILL.md', skill('s1')], ['agents/a1.md', skill('a1')]]);
+  assert.deepEqual(view?.items.map((i) => i.name).sort(), ['a1', 's1']);
+  view = await pick([['p/.claude/skills/s2/SKILL.md', skill('s2')], ['p/.claude/settings.json', '{}'], ['p/CLAUDE.md', 'x']]);
+  assert.deepEqual(view?.items.map((i) => i.name), ['s2']);
+  assert.deepEqual(view?.ignored.map((i) => i.path).sort(), ['CLAUDE.md', 'settings.json']);
+
+  await assert.rejects(pick([['a/SKILL.md', skill('a')], ['../evil.md', 'x']]), /unsafe path/);
+  await assert.rejects(pick([['/abs/SKILL.md', skill('a')]]), /unsafe path/);
+  await assert.rejects(pick([['skills\\x\\SKILL.md', skill('x')]]), /unsafe path/);
+  await assert.rejects(pick([['readme.txt', 'x']]), /No \.claude folder/);
+  await assert.rejects(pick(Array.from({ length: 1001 }, (_, i): [string, string] => [`skills/s/f${i}`, 'x'])), /more than 1000 files/);
+  await assert.rejects(pick([['SKILL.md', skill('big')], ['big.bin', 'x'.repeat(5 * 1024 * 1024 + 1)]]), /larger than 5 MB/);
+  writeFileSync(file, 'not a zip');
+  await assert.rejects(svc.claudeUploadPick('zip', '', 'global'), /Could not read the ZIP|not a ZIP/);
+  await assert.rejects(svc.claudeUploadPick('other', '', 'global'), /folder or a \.zip/);
+  await assert.rejects(createService(root, { ...noLaunch, home }).claudeUploadPick('zip'), /not available here/);
+
+  // A failure in the second skill removes the first one too (a file and a folder with the same name).
+  await pick([['skills/aaa/SKILL.md', skill('aaa')], ['skills/zzz/SKILL.md', skill('zzz')], ['skills/zzz/x', 'file'], ['skills/zzz/x/y', 'under a file']]);
+  assert.throws(() => svc.claudeUploadApply('', 'global', ['skill:aaa', 'skill:zzz']), /Nothing was installed/);
+  assert.equal(existsSync(join(home, '.claude')), false, 'everything created was removed');
+  assert.equal(existsSync(join(home, '.agents')), false);
+  for (const d of [home, dir]) rmSync(d, { recursive: true, force: true });
+});
+
 test('non-ASCII prompts reach Windows tools through a UTF-8 request file', () => {
   const prompt = 'Review it. Additional instructions: permissões & ação "crítica".';
   assert.equal(windowsSafePrompt('plain ascii', 'acme', root, 'win32'), 'plain ascii');
@@ -1510,6 +1692,55 @@ test('launcher keeps user text out of any shell command line', () => {
   assert.ok(sh.split('\n').includes("gemini '-i' 'it'\\''s $(rm -rf ~) `x` ação'"));
   const win = windowsStartArgs('C:\\Program Files\\nodejs\\node.exe', 'C:\\Users\\Júlia\\qa\\run-tool.mjs', 'C:\\t\\open.json', 'Moki - "X"');
   assert.equal(win, '/d /s /c "start "Moki - X" "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Júlia\\qa\\run-tool.mjs" "C:\\t\\open.json""');
+});
+
+test('install plans: fixed vendor commands per system; link-only tools and gemini have none', () => {
+  assert.deepEqual(installPlan('claude', 'linux'), { file: '/bin/sh', args: ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], shown: 'curl -fsSL https://claude.ai/install.sh | bash' });
+  assert.equal(installPlan('claude', 'win32')?.file, 'powershell.exe');
+  assert.equal(installPlan('claude', 'win32')?.shown, 'irm https://claude.ai/install.ps1 | iex');
+  assert.equal(installPlan('codex', 'darwin')?.shown, 'npm install -g @openai/codex');
+  for (const t of ['cursor-agent', 'antigravity', 'gemini'] as ToolKey[]) { assert.equal(installPlan(t, 'linux'), null); assert.equal(installPlan(t, 'win32'), null); }
+  assert.equal(TOOLS.gemini.install, undefined);
+  for (const t of Object.values(TOOLS)) if (t.install) assert.match(t.install.docs, /^https:\/\//);
+});
+
+test('a missing installable tool opens run-tool in the tab; the request carries the tool and one prompt argument', { skip: process.platform === 'win32' }, () => {
+  const bin = mkdtempSync(join(tmpdir(), 'qa-empty-'));
+  const home = mkdtempSync(join(tmpdir(), 'qa-home-'));
+  const root = mkdtempSync(join(tmpdir(), 'qa-root-'));
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, SHELL: process.env.SHELL };
+  process.env.PATH = bin; process.env.HOME = home; process.env.SHELL = '/bin/false';
+  try {
+    const specs: TermSpec[] = [];
+    const r = launchInTerminal('claude', 'olá mundo', root, (spec) => { specs.push(spec); return 't1'; });
+    assert.equal(r.opened, true);
+    assert.equal(specs[0].file, process.execPath);
+    assert.equal(specs[0].env?.ELECTRON_RUN_AS_NODE, '1');
+    const req = JSON.parse(readFileSync(specs[0].args[1], 'utf8'));
+    assert.equal(req.tool, 'claude');
+    assert.equal(req.command, 'claude');
+    assert.equal(req.args.at(-1), 'olá mundo');
+    assert.equal(launchInTerminal('gemini', 'x', root, () => 'never').opened, false); // no install option: refused as before
+  } finally {
+    for (const [k, v] of Object.entries(env)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    for (const d of [bin, home, root]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('run-tool: a missing tool shows the instructions and asks; anything but y installs nothing', { skip: process.platform === 'win32' }, () => {
+  const bin = mkdtempSync(join(tmpdir(), 'qa-empty-'));
+  const dir = mkdtempSync(join(tmpdir(), 'qa-req-'));
+  const file = join(dir, 'req.json');
+  writeFileSync(file, JSON.stringify({ command: 'claude', args: ['--', 'x'], cwd: dir, title: 'Claude Code', tool: 'claude' }));
+  try {
+    const r = spawnSync(process.execPath, [join(ROOT, 'desktop', 'run-tool.ts'), file], { input: 'n\n\n', encoding: 'utf8', env: { PATH: bin, HOME: dir } });
+    assert.match(r.stdout, /Installation instructions: https:\/\/code\.claude\.com\/docs\/en\/setup/);
+    assert.match(r.stdout, /Install Claude Code\? \[y\/N\]/);
+    assert.match(r.stderr, /Not installed/);
+    assert.equal(r.status, 1);
+  } finally {
+    rmSync(bin, { recursive: true, force: true }); rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('terminal tabs start only the chosen tool, in the framework root, with the prompt as one argument', { skip: process.platform === 'win32' }, () => {
@@ -1803,3 +2034,177 @@ test('search: projects by name, files by name and text, filters by tag', () => {
     rmSync(join(root, 'workspace', 'tags.json'), { force: true });
   }
 });
+
+// ---- ArtCraft apps download (scripts/lib/core.ts CRAFT_APPS, desktop/craft-download.ts) ----
+
+test('craft apps: fixed list with unique ids and a storytold repo', () => {
+  assert.equal(CRAFT_APPS.length, 16);
+  assert.equal(CRAFT_APPS[0].id, 'artcraft-launcher');
+  assert.equal(new Set(CRAFT_APPS.map((a) => a.id)).size, CRAFT_APPS.length);
+  for (const a of CRAFT_APPS) assert.match(a.repo, /^storytold\/[a-z-]+$/);
+});
+
+test('craft apps: Linux package family from os-release', () => {
+  const fam = linuxPackageFamily;
+  assert.equal(fam('ID=fedora\nVERSION_ID=44'), 'rpm');
+  assert.equal(fam('NAME="Rocky Linux"\nID="rocky"\nID_LIKE="rhel centos fedora"'), 'rpm');
+  assert.equal(fam('ID=opensuse-tumbleweed\nID_LIKE="opensuse suse"'), 'rpm');
+  assert.equal(fam('ID=ubuntu\nID_LIKE=debian'), 'deb');
+  assert.equal(fam('ID=linuxmint\nID_LIKE="ubuntu debian"'), 'deb');
+  assert.equal(fam('ID=arch'), '');
+  assert.equal(fam(''), '');
+  assert.equal(fam("ID='debian'"), 'deb');
+});
+
+test('craft apps: the files for each system, recommended first, and exact names only', () => {
+  const ends = craftAssetEndings;
+  assert.deepEqual(ends('win32', 'x64', ''), ['windows-x64.msi', 'windows-x64-portable.zip']);
+  assert.deepEqual(ends('win32', 'arm64', ''), ['windows-arm64.msi', 'windows-arm64-portable.zip']);
+  assert.deepEqual(ends('win32', 'ia32', ''), ['windows-x86.msi', 'windows-x86-portable.zip']);
+  assert.deepEqual(ends('darwin', 'arm64', ''), ['macos-universal.dmg']);
+  assert.deepEqual(ends('linux', 'x64', 'rpm'), ['linux-x86_64.rpm', 'linux-x86_64.AppImage', 'linux-x86_64.tar.gz']);
+  assert.deepEqual(ends('linux', 'arm64', 'deb'), ['linux-aarch64.deb', 'linux-aarch64.AppImage', 'linux-aarch64.tar.gz']);
+  assert.deepEqual(ends('linux', 'riscv64', ''), ['linux-riscv64.AppImage', 'linux-riscv64.tar.gz']);
+  assert.deepEqual(ends('freebsd', 'x64', ''), []);
+  assert.deepEqual(ends('linux', 'ppc64', 'rpm'), []);
+  const app = CRAFT_APPS[1]; // wordcraft
+  const assets = ['wordcraft-1.0.0-linux-x86_64.tar.gz', 'wordcraft-cli-1.0.0-linux-x86_64.AppImage', 'wordcraft-1.0.0-linux-x86_64.deb', 'wordcraft-1.0.0-linux-x86_64.rpm', 'wordcraft-1.0.0-windows-x86.msi'].map((name) => ({ name }));
+  const names = (v: string, p: string, a: string, f: string) => pickCraftAssets(app, v, assets, p, a, f).map((x) => x.name);
+  assert.deepEqual(names('1.0.0', 'linux', 'x64', 'rpm'), ['wordcraft-1.0.0-linux-x86_64.rpm', 'wordcraft-1.0.0-linux-x86_64.tar.gz']); // .deb never for rpm; cli does not match
+  assert.deepEqual(names('1.0.0', 'linux', 'x64', ''), ['wordcraft-1.0.0-linux-x86_64.tar.gz']);
+  assert.deepEqual(names('1.0.0', 'win32', 'x64', ''), []); // no x64 -> x86 fallback
+  assert.deepEqual(names('2.0.0', 'linux', 'x64', 'rpm'), []);
+  assert.deepEqual(names('1.0.0', 'darwin', 'arm64', ''), []);
+});
+
+{
+  const BODY = Buffer.from('pretend installer');
+  const SHA = createHash('sha256').update(BODY).digest('hex');
+  const app = CRAFT_APPS.find((a) => a.id === 'wordcraft')!;
+  const NAME = 'wordcraft-1.2.3-linux-x86_64.AppImage';
+  const system = { platform: 'linux', arch: 'x64', family: '' };
+  type Opts = { status?: number; digest?: string | null; sums?: string | null; body?: Buffer; tag?: string; assets?: string[]; throws?: Error };
+  const release = (o: Opts) => ({
+    tag_name: o.tag ?? 'v1.2.3',
+    assets: [...(o.assets ?? [NAME]), ...(o.sums !== undefined && o.sums !== null ? ['SHA256SUMS.txt'] : [])]
+      .map((name) => ({ name, size: BODY.length, ...(name === NAME && o.digest !== null ? { digest: `sha256:${o.digest ?? SHA}` } : {}) })),
+  });
+  const calls: string[] = [];
+  const fakeFetch = (o: Opts = {}) => (async (url: string | URL | Request) => {
+    const u = String(url);
+    calls.push(u);
+    if (o.throws) throw o.throws;
+    if (o.status) return new Response('x', { status: o.status });
+    if (u.endsWith('/releases/latest')) return Response.json(release(o));
+    if (u.endsWith('/SHA256SUMS.txt')) return new Response(o.sums ?? '');
+    return new Response(o.body ?? BODY);
+  }) as typeof fetch;
+  const dir = mkdtempSync(join(tmpdir(), 'qa-craft-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  const mk = (o: Opts = {}, save: string | null = join(dir, NAME)) => {
+    const dialogs: string[] = [];
+    const revealed: string[] = [];
+    const svc = createService(root, {
+      launch: () => ({ opened: true, message: 'fake' }), openFolder: () => {}, openPath: () => {}, fetch: fakeFetch(o), craftSystem: system,
+      reveal: (p) => { revealed.push(p); }, saveFile: async (n, e, title) => { dialogs.push(`${n}|${e}|${title}`); return save; },
+    });
+    return { svc, dialogs, revealed };
+  };
+
+  test('craft download: lists the 16 apps and shows what would be downloaded', async () => {
+    const { svc } = mk();
+    assert.equal(svc.craftApps().length, 16);
+    assert.deepEqual(svc.craftApps()[0], { id: 'artcraft-launcher', label: 'ArtCraft Launcher' });
+    const info = await svc.craftDownloadInfo('wordcraft');
+    assert.deepEqual(info, { id: 'wordcraft', label: 'WordCraft', tag: 'v1.2.3', page: 'https://github.com/storytold/wordcraft/releases/tag/v1.2.3',
+      options: [{ file: NAME, size: BODY.length, url: `https://github.com/storytold/wordcraft/releases/download/v1.2.3/${NAME}` }] });
+    await assert.rejects(svc.craftDownloadInfo('solidcraft'), /Unknown app/);
+    await assert.rejects(svc.craftDownloadInfo('../x'), /Unknown app/);
+  });
+
+  test('craft download: GitHub digest verifies and the folder is revealed', async () => {
+    const { svc, dialogs, revealed } = mk();
+    const r = await svc.craftDownload('wordcraft', 'v1.2.3', NAME);
+    assert.deepEqual(r, { path: join(dir, NAME), sha256: SHA });
+    assert.deepEqual(readFileSync(join(dir, NAME)), BODY);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.part')), []);
+    assert.deepEqual(revealed, [join(dir, NAME)]);
+    assert.deepEqual(dialogs, ['wordcraft-1.2.3-linux-x86_64|AppImage|Save WordCraft']);
+    rmSync(join(dir, NAME));
+  });
+
+  test('craft download: SHA256SUMS.txt is used when there is no digest', async () => {
+    const { svc } = mk({ digest: null, sums: `${'0'.repeat(64)}  other.deb\n${SHA} *${NAME}\n` });
+    assert.equal((await svc.craftDownload('wordcraft', 'v1.2.3', NAME))?.sha256, SHA);
+    rmSync(join(dir, NAME));
+  });
+
+  test('craft download: no digest and no listed checksum is refused before the dialog', async () => {
+    for (const o of [{ digest: null }, { digest: null, sums: `${SHA}  other.deb\n` }] as Opts[]) {
+      const { svc, dialogs } = mk(o);
+      await assert.rejects(svc.craftDownload('wordcraft', 'v1.2.3', NAME), /publishes no SHA-256 for wordcraft-1\.2\.3-linux-x86_64\.AppImage/);
+      assert.deepEqual(dialogs, []);
+    }
+  });
+
+  test('craft download: a hash that does not match removes the file', async () => {
+    const { svc } = mk({ body: Buffer.from('tampered') });
+    await assert.rejects(svc.craftDownload('wordcraft', 'v1.2.3', NAME), /Integrity check failed for .* The file was removed/);
+    assert.deepEqual(readdirSync(dir), []);
+  });
+
+  test('craft download: GitHub errors and no network say what to do', async () => {
+    const msg = async (o: Opts) => (await mk(o).svc.craftDownloadInfo('wordcraft').then(() => '', (e: Error) => e.message));
+    assert.equal(await msg({ status: 404 }), 'WordCraft has no published release yet. See https://github.com/storytold/wordcraft/releases.');
+    assert.match(await msg({ status: 403 }), /limiting requests/);
+    assert.match(await msg({ status: 429 }), /limiting requests/);
+    assert.match(await msg({ status: 503 }), /unavailable right now \(503\)/);
+    assert.match(await msg({ throws: new TypeError('fetch failed') }), /Could not reach GitHub \(api\.github\.com\)/);
+    assert.match(await msg({ throws: Object.assign(new Error('t'), { name: 'TimeoutError' }) }), /did not answer in time/);
+  });
+
+  test('craft download: no file for this system, and unsafe names are ignored', async () => {
+    await assert.rejects(mk({ assets: ['wordcraft-1.2.3-windows-x64.msi'] }).svc.craftDownloadInfo('wordcraft'), /WordCraft v1\.2\.3 has no file for linux x64\. See https:\/\/github\.com\/storytold\/wordcraft\/releases\/tag\/v1\.2\.3\./);
+    await assert.rejects(mk({ assets: [`../${NAME}`, `x/${NAME}`, `..`] }).svc.craftDownloadInfo('wordcraft'), /no file for linux x64/);
+    await assert.rejects(mk({ tag: '../v1' }).svc.craftDownloadInfo('wordcraft'), /no published release/);
+  });
+
+  test('craft download: Fedora is offered rpm first, AppImage second, never deb or unknown names', async () => {
+    const RPM = 'wordcraft-1.2.3-linux-x86_64.rpm';
+    const DEB = 'wordcraft-1.2.3-linux-x86_64.deb';
+    const fedora = { ...system, family: 'rpm' };
+    const all = { assets: [NAME, DEB, RPM] };
+    const mkF = (o: Opts) => createService(root, {
+      launch: () => ({ opened: true, message: 'fake' }), openFolder: () => {}, openPath: () => {}, fetch: fakeFetch(o), craftSystem: fedora,
+      reveal: () => {}, saveFile: async () => join(dir, RPM),
+    });
+    const info = await mkF({ ...all, digest: null, sums: `${SHA}  ${RPM}\n` }).craftDownloadInfo('wordcraft');
+    assert.deepEqual(info.options.map((o: { file: string }) => o.file), [RPM, NAME]);
+    const svc = mkF({ ...all, digest: null, sums: `${SHA}  ${RPM}\n` });
+    assert.equal((await svc.craftDownload('wordcraft', 'v1.2.3', RPM))?.path, join(dir, RPM));
+    rmSync(join(dir, RPM));
+    await assert.rejects(svc.craftDownload('wordcraft', 'v1.2.3', DEB), /wordcraft-1\.2\.3-linux-x86_64\.deb is not available for this system in v1\.2\.3\. Review the download again\./);
+    await assert.rejects(svc.craftDownload('wordcraft', 'v1.2.3', 'evil.sh'), /evil\.sh is not available/);
+    assert.deepEqual(readdirSync(dir), []);
+  });
+
+  test('craft download: a newer release after the review, and a cancelled dialog', async () => {
+    const { svc, dialogs } = mk({ tag: 'v1.2.4', assets: ['wordcraft-1.2.4-linux-x86_64.AppImage'] });
+    await assert.rejects(svc.craftDownload('wordcraft', 'v1.2.3', NAME), /A newer release of WordCraft came out \(v1\.2\.4\)\. Review the download again\./);
+    assert.deepEqual(dialogs, []);
+    calls.length = 0;
+    assert.equal(await mk({}, null).svc.craftDownload('wordcraft', 'v1.2.3', NAME), null);
+    assert.deepEqual(calls.filter((u) => u.includes('/releases/download/')), []); // nothing fetched after cancel
+    assert.deepEqual(readdirSync(dir), []);
+  });
+
+  test('craft download: the URL is built by Moki, the extension is added, a failed write leaves nothing', async () => {
+    calls.length = 0;
+    const { svc } = mk({}, join(dir, 'chosen'));
+    assert.equal((await svc.craftDownload('wordcraft', 'v1.2.3', NAME))?.path, join(dir, 'chosen.AppImage'));
+    assert.ok(calls.includes(`https://github.com/${app.repo}/releases/download/v1.2.3/${NAME}`));
+    rmSync(join(dir, 'chosen.AppImage'));
+    await assert.rejects(mk({}, join(dir, 'missing', NAME)).svc.craftDownload('wordcraft', 'v1.2.3', NAME), /Could not save in .*missing: the folder does not exist/);
+    assert.deepEqual(readdirSync(dir), []);
+  });
+}

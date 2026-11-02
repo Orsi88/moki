@@ -29,21 +29,69 @@ export interface Tool {
   clipboard?: boolean;
   chat?: boolean;
   print?: boolean;
+  // Fixed here, never from user text. Run only after the user types y in the terminal tab (desktop/run-tool.ts);
+  // a tool without a command for the system gets the instructions link only.
+  install?: { docs: string; posix?: string; windows?: string };
 }
 
 
 export const TOOLS: Record<ToolKey, Tool> = {
   // "--": the prompt is never taken by an option before it (--mcp-config and --plugin-dir take several values).
-  claude: { label: 'Claude Code', command: 'claude', args: (p) => ['--', p] },
-  codex: { label: 'OpenAI Codex CLI', command: 'codex', args: (p) => [p] },
-  'cursor-agent': { label: 'Cursor Agent CLI', command: 'cursor-agent', args: (p) => [p] },
+  claude: {
+    label: 'Claude Code', command: 'claude', args: (p) => ['--', p],
+    install: { docs: 'https://code.claude.com/docs/en/setup', posix: 'curl -fsSL https://claude.ai/install.sh | bash', windows: 'irm https://claude.ai/install.ps1 | iex' },
+  },
+  codex: {
+    label: 'OpenAI Codex CLI', command: 'codex', args: (p) => [p],
+    install: { docs: 'https://github.com/openai/codex', posix: 'npm install -g @openai/codex', windows: 'npm install -g @openai/codex' }, // needs Node/npm
+  },
+  // Install command pending: the docs name the binary "agent".
+  'cursor-agent': { label: 'Cursor Agent CLI', command: 'cursor-agent', args: (p) => [p], install: { docs: 'https://cursor.com/docs/cli/installation' } },
   gemini: { label: 'Gemini CLI', command: 'gemini', args: (p) => ['-i', p] },
-  antigravity: { label: 'Antigravity CLI', command: 'agy', args: (p) => ['-i', p] },
+  antigravity: { label: 'Antigravity CLI', command: 'agy', args: (p) => ['-i', p], install: { docs: 'https://antigravity.google' } },
   cursor: { label: 'Cursor editor', hint: 'opens the folder, request copied to clipboard', command: 'cursor', args: () => [ROOT], clipboard: true },
   vscode: { label: 'VS Code (Claude Code / Codex extensions)', hint: 'opens the folder, request copied to clipboard', command: 'code', args: () => [ROOT], clipboard: true },
   chat: { label: 'ChatGPT / claude.ai / Gemini web', hint: 'request copied, files listed', chat: true },
   print: { label: 'Just show the request', print: true },
 };
+
+// ArtCraft Launcher and the apps it installs. Moki downloads their releases (desktop/craft-download.ts);
+// repo and file names come from this table, never from user text.
+export interface CraftApp { id: string; label: string; repo: string }
+export const CRAFT_APPS: CraftApp[] = [
+  { id: 'artcraft-launcher', label: 'ArtCraft Launcher', repo: 'storytold/craft-launcher' },
+  ...[
+    ['wordcraft', 'WordCraft'], ['gridcraft', 'GridCraft'], ['deckcraft', 'DeckCraft'], ['photocraft', 'PhotoCraft'], ['lightcraft', 'LightCraft'],
+    ['vectorcraft', 'VectorCraft'], ['filmcraft', 'FilmCraft'], ['effectcraft', 'EffectCraft'], ['designcraft', 'DesignCraft'], ['pdfcraft', 'PdfCraft'],
+    ['soundcraft', 'SoundCraft'], ['figcraft', 'FigCraft'], ['cadcraft', 'CADCraft'], ['texturecraft', 'TextureCraft'], ['craft-anything', 'Craft Anything'],
+  ].map(([id, label]) => ({ id, label, repo: `storytold/${id}` })),
+];
+
+// Package family of a Linux distro from its os-release text: 'rpm', 'deb' or '' (unknown: only AppImage and tar.gz are offered).
+export function linuxPackageFamily(osRelease: string): 'rpm' | 'deb' | '' {
+  const value = (key: string) => new RegExp(`^${key}=(.*)$`, 'm').exec(osRelease)?.[1].trim().replace(/^["']|["']$/g, '').toLowerCase() ?? '';
+  const ids = [value('ID'), ...value('ID_LIKE').split(/\s+/)];
+  if (ids.some((i) => ['fedora', 'rhel', 'centos', 'suse', 'opensuse', 'sles'].includes(i))) return 'rpm';
+  if (ids.some((i) => ['debian', 'ubuntu'].includes(i))) return 'deb';
+  return '';
+}
+
+// File name endings of a release asset (<id>-<version>-<ending>) that run on this system, recommended first. [] = no download for it.
+export function craftAssetEndings(platform: string, arch: string, family: string): string[] {
+  if (platform === 'win32') {
+    const w = ({ x64: 'x64', arm64: 'arm64', ia32: 'x86' } as Record<string, string>)[arch];
+    return w ? [`windows-${w}.msi`, `windows-${w}-portable.zip`] : [];
+  }
+  if (platform === 'darwin') return ['macos-universal.dmg'];
+  const linux = ({ x64: 'x86_64', arm64: 'aarch64', riscv64: 'riscv64' } as Record<string, string>)[arch];
+  if (platform !== 'linux' || !linux) return [];
+  return [...(family ? [`linux-${linux}.${family}`] : []), `linux-${linux}.AppImage`, `linux-${linux}.tar.gz`];
+}
+
+// The assets to offer, recommended first: exact name <id>-<version>-<ending>, so nothing else in the release can be picked.
+export function pickCraftAssets<T extends { name: string }>(app: CraftApp, version: string, assets: T[], platform: string, arch: string, family: string): T[] {
+  return craftAssetEndings(platform, arch, family).flatMap((ending) => assets.filter((a) => a.name === `${app.id}-${version}-${ending}`));
+}
 
 export const LANGUAGES = ['English', 'Portuguese (pt-BR)', 'Spanish'];
 
@@ -480,6 +528,16 @@ export function which(command: string): string | null {
     const out = execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     return out.split(/\r?\n/).find(Boolean) || null;
   } catch { return null; }
+}
+
+// What the terminal tab runs to install a tool, after the user types y (null: instructions only).
+export function installPlan(tool: ToolKey, platform: string = process.platform): { file: string; args: string[]; shown: string } | null {
+  const i = TOOLS[tool].install;
+  const cmd = platform === 'win32' ? i?.windows : i?.posix;
+  if (!cmd) return null;
+  return platform === 'win32'
+    ? { file: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], shown: cmd }
+    : { file: '/bin/sh', args: ['-c', cmd], shown: cmd };
 }
 
 export function detectTools(): Record<ToolKey, boolean> {

@@ -164,5 +164,7 @@
   "one list per kind, kept apart, in the order they were starred; unstarring removes one": "uma lista por tipo, separadas, na ordem em que foram marcadas; desmarcar tira o item",
   "only the known kinds and safe ids": "só os tipos conhecidos e ids seguros",
   "agents, operations, templates and skills are starred from their cards and come first": "agentes, operações, templates e skills são marcados com estrela pelo card e aparecem primeiro",
-  "Skills lists the skills of Moki; only Add a skill waits for a project": "Skills lista as skills do Moki; só o Adicionar skill espera um projeto"
+  "Skills lists the skills of Moki; without a project only the upload can add (for every project)": "Skills lista as skills do Moki; sem projeto, só o envio de skills adiciona (para todos os projetos)",
+  "upload of skills and agents: preview writes nothing, blocks per item, installs only what is confirmed": "envio de skills e agentes: a prévia não grava nada, bloqueia por item e instala só o que foi confirmado",
+  "upload from a zip: layouts, limits, unsafe paths, and a failure undoes everything": "envio por .zip: formatos aceitos, limites, caminhos inseguros, e uma falha desfaz tudo"
 }

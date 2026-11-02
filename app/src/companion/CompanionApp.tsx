@@ -13,6 +13,7 @@ import { CatIcon } from '../components/CatIcon';
 import { IconCopy, IconMcp, IconPlay, IconRefresh, IconStar } from '../components/Icons';
 import { call, onVisible, setBadge } from './bridge';
 import { OperationRunScreen, OperationStarter, visitText } from './Operations';
+import { useShortlist } from './Shortlist';
 
 type Tab = 'activities' | 'agents' | 'context' | 'operations' | 'runs';
 interface State { project: { id: string; name: string; description: string; repository: string } | null; projects: { id: string; name: string }[]; folder: string | null; mcp: { id: string; name: string; access: string; transport: string }[] }
@@ -40,6 +41,8 @@ export function CompanionApp() {
   useEffect(() => onVisible(setVisible), []);
   const [seen, setSeen] = useState<Record<string, string> | null>(null);
 
+  const shownActivities = useShortlist('activities', useMemo(() => activities.filter((a) => a.available && a.id !== 'resume'), [activities]), (a) => a.id, (a) => `${t(a.label)} ${t(a.hint)}`);
+  const shownAgents = useShortlist('agents', agents, (a) => a.name, (a) => `${a.name} ${a.description}`);
   const fail = (e: unknown) => setNotice({ text: e instanceof Error ? e.message : String(e), warn: true });
   const notify = useCallback((text: string, warn?: boolean) => setNotice({ text, warn }), []);
   const load = useCallback(() => {
@@ -144,8 +147,9 @@ export function CompanionApp() {
 
         {tab === 'activities' && (
           <div className="mk-list">
-            {activities.filter((a) => a.available && a.id !== 'resume').map((a) => (
-              <Card key={a.id} on={open === a.id} icon={<CatIcon id={ACTIVITY_CAT[a.id] ?? 'puzzle'} size={40} />} title={t(a.label)} hint={t(a.hint)} onPick={() => toggle(a.id)}>
+            {shownActivities.search}
+            {shownActivities.shown.map((a) => (
+              <Card key={a.id} star={shownActivities.star(a.id, t(a.label))} on={open === a.id} icon={<CatIcon id={ACTIVITY_CAT[a.id] ?? 'puzzle'} size={40} />} title={t(a.label)} hint={t(a.hint)} onPick={() => toggle(a.id)}>
                 {launchBox({ key: a.id, activity: a.id, needsFiles: a.needsFiles })}
               </Card>
             ))}
@@ -155,8 +159,9 @@ export function CompanionApp() {
         {tab === 'agents' && (
           <div className="mk-list">
             {!agents.length && <p className="muted small">{t('No agents are enabled in this project. Choose them in the Moki app (Set up project).')}</p>}
-            {agents.map((a) => (
-              <Card key={a.name} on={open === `agent:${a.name}`} icon={<CatIcon id="robot" size={40} />} title={a.name} hint={a.description} onPick={() => toggle(`agent:${a.name}`)}
+            {shownAgents.search}
+            {shownAgents.shown.map((a) => (
+              <Card key={a.name} star={shownAgents.star(a.name, a.name)} on={open === `agent:${a.name}`} icon={<CatIcon id="robot" size={40} />} title={a.name} hint={a.description} onPick={() => toggle(`agent:${a.name}`)}
                 chips={a.skills}>
                 {launchBox({ key: `agent:${a.name}`, activity: 'open', agent: a.name })}
               </Card>
@@ -235,7 +240,7 @@ function runStates(operations: OperationRun[], runs: OpenRun[]): Record<string, 
   return out;
 }
 
-function Card({ on, fresh = false, icon, title, hint, pill, chips, onPick, children }: { on: boolean; fresh?: boolean; icon: ReactNode; title: string; hint: string; pill?: string; chips?: string[]; onPick?: () => void; children?: ReactNode }) {
+function Card({ star, on, fresh = false, icon, title, hint, pill, chips, onPick, children }: { star?: ReactNode; on: boolean; fresh?: boolean; icon: ReactNode; title: string; hint: string; pill?: string; chips?: string[]; onPick?: () => void; children?: ReactNode }) {
   return (
     <div className={`mk-card${on ? ' on' : ''}${fresh ? ' fresh' : ''}`}>
       <button type="button" className="mk-card-head" onClick={onPick} disabled={!onPick} aria-expanded={onPick ? on : undefined}>
@@ -247,6 +252,7 @@ function Card({ on, fresh = false, icon, title, hint, pill, chips, onPick, child
           {chips && chips.length > 0 && <span className="mk-chips">{chips.map((c) => <span key={c} className="mk-chip">{c}</span>)}</span>}
         </span>
       </button>
+      {star && <span className="mk-star">{star}</span>}
       {children}
     </div>
   );

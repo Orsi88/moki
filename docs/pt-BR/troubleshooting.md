@@ -14,7 +14,7 @@ Problemas comuns, por que acontecem e o que fazer. Os problemas específicos da 
 
 | O que aparece | Por quê | O que fazer |
 |---|---|---|
-| *… is not installed on this computer (command "…" not found).* | A ferramenta não está instalada, ou o comando dela não está no PATH | Instale, ou escolha outra ferramenta |
+| *… is not installed on this computer (command "…" not found).* | A ferramenta não está instalada, ou o comando dela não está no PATH | Instale, ou escolha outra ferramenta. No app, uma aba de terminal (menu **+**) de Claude Code ou Codex ausente pergunta `Install …? [y/N]` e só instala quando você digita `y`, executando o comando fixo do fabricante mostrado na tela; as outras IAs mostram o link das instruções. Os passos de uma operação ainda exigem uma IA instalada |
 | O assistente avisa que a abertura ainda está rodando | A ferramenta leva mais de uns 20 segundos para iniciar | Espere, ou olhe a janela ou o terminal da própria ferramenta |
 | Uma ferramenta de chat (ChatGPT, claude.ai, Gemini web) não abre sozinha | Essas ferramentas recebem o pedido como texto para copiar | Copie o pedido que aparece na tela e cole no chat |
 
@@ -37,6 +37,24 @@ Problemas comuns, por que acontecem e o que fazer. Os problemas específicos da 
 | Um passo espera aprovação mesmo com a seta direta | O agente dele executa por um servidor MCP | Esperado: revise e aprove |
 
 Operações, agentes e os contratos deles: [Agents and operations](../agents.md) (em inglês).
+
+## Baixar apps ArtCraft
+
+No menu **+**, **Baixar apps ArtCraft…**. O Moki só baixa o arquivo e confere o SHA-256; você abre o arquivo para instalar.
+
+| O que aparece | Por quê | O que fazer |
+|---|---|---|
+| *Could not reach GitHub (api.github.com).* | Sem conexão com a internet | Confira a conexão e tente de novo |
+| *GitHub did not answer in time.* | O GitHub demorou | Tente de novo em instantes |
+| *GitHub is limiting requests from this computer.* | O GitHub permite poucas requisições por hora sem conta | Tente de novo em alguns minutos |
+| *GitHub is unavailable right now (…).* | O GitHub falhou | Tente de novo em instantes |
+| *… has no published release yet.* | O app não tem release | Abra o link da mensagem |
+| *… has no file for … …* | A release não tem arquivo para este sistema | Abra o link da mensagem |
+| *… publishes no SHA-256 for …* | Nada garante o arquivo, então o Moki não o baixa | Baixe pela página da release e confira você mesmo |
+| *A newer release of … came out.* | A release mudou depois que você revisou | Revise o download de novo |
+| *Integrity check failed for … The file was removed.* | O arquivo baixado não bate com o SHA-256 | Tente de novo; se repetir, não use o arquivo |
+| *Could not save in …* ou *Not enough free space in …* | A pasta não aceita gravação, não existe ou o disco está cheio | Escolha outra pasta |
+| *The connection dropped during the download.* / *The download took too long* | A rede falhou | Tente de novo (o download recomeça do início) |
 
 ## Terminais
 

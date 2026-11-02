@@ -4,6 +4,7 @@ description: Implementing engineer for the Moki framework itself (this repositor
 category: framework
 skills: moki-architecture, moki-change
 access: repository-write
+model: sonnet
 metadata:
   version: "1.0.0"
   status: draft

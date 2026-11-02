@@ -3,7 +3,7 @@
 ## Test description (tracker)
 
 1. Check the project's `context/environments-and-tools.md` and `project.json` (`tools`) for the tracker and whether an MCP server is configured for it. Use only that one.
-2. With an id (for example `142`, `LIB-142`, a work item URL) and an MCP available, read the item and, when present, its linked test cases with their steps and expected results, acceptance criteria and attachments list. Read-only: never update the item, add comments or change states.
+2. With an id (for example `142`, `LIB-142`, a work item URL) and an MCP available, read the item and, when present, its linked test cases with their steps and expected results, acceptance criteria and attachments list. Read-only here: updating the item is only possible in the optional `link` step, see [linking](#linking-to-the-tracker).
 3. Without MCP, ask the QA to paste the item or attach its export (Azure DevOps "Export to CSV/Excel" of a query, Jira "Export Word/XML", a `.docx`/`.pdf`, or a screenshot). Word files in the inbox may already have a text copy in `inbox/.extracted/`.
 4. Save what was used as `inputs/work-item.md`: system, id, type, title, URL, state, description, steps with expected results, acceptance criteria. Keep the original wording.
 
@@ -37,3 +37,15 @@ Without the MCP, ask the QA for the actual result of each case; the link stays a
 ## Masking
 
 Before saving any log line or request: replace values of `Authorization`, `Cookie`, `Set-Cookie`, `token`, `password`, `secret`, `apiKey`, CPF/SSN, e-mails and phone numbers with `***`.
+
+## Linking to the tracker
+
+Optional, only when the QA asks, only after the deliverables exist and the evidence is approved.
+
+1. Use the tracker MCP of this project's tools, and only if it can write. Do not use another tool or service.
+2. List every action before doing anything: target item id (and URL), then either `attach <file>` or `comment <exact text>`. Attachments are the approved deliverables (`.xlsx`, `.docx`) and the evidence files the QA names; the comment is plain text with the status the QA confirmed and the file names. Show it exactly as it will be sent.
+3. Check that no listed file shows secrets or personal data (see the warnings from the earlier steps); if it does, remove it from the list or ask.
+4. Stop for approval. After "yes", run only the listed actions, in order, and stop at the first failure.
+5. Record in `state.json` each action with `done`, `failed` (reason) or `manual`. Never change the item's state, fields or test results.
+
+Manual fallback (no write MCP, denied or failed): give the QA the paths of the files and, per item, the instruction "attach these files to <item id> in <tracker>" plus the comment text ready to paste. Record `link` as `manual`.
