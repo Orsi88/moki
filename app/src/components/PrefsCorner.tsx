@@ -37,12 +37,12 @@ export function PrefsCorner({ language, theme, onLanguage, onTheme }: Props) {
   );
 }
 
-const UI_OF: Record<string, Lang> = { English: 'en', 'Portuguese (pt-BR)': 'pt-BR', Spanish: 'en' };
+const UI_OF: Record<string, Lang> = { English: 'en', 'Portuguese (pt-BR)': 'pt-BR', Spanish: 'es' };
 
 const savedConversation = (): string => {
   const saved = recall('qa-language');
   if (saved && saved in UI_OF) return saved;
-  return lang === 'pt-BR' ? 'Portuguese (pt-BR)' : 'English';
+  return lang === 'pt-BR' ? 'Portuguese (pt-BR)' : lang === 'es' ? 'Spanish' : 'English';
 };
 
 // The corner with its own state: the chosen language (also the app's) and theme are remembered.
