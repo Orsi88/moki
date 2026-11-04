@@ -56,6 +56,55 @@ npm run qa
 
 `npm run setup` installs the tools, builds the app, creates `workspace/` and turns on the check that blocks commits of project data or secrets. Run it again after `git pull`.
 
+### Troubleshooting: Unknown file extension `.ts` on Ubuntu/WSL
+
+When running `npm run qa` on Ubuntu or Linux WSL, you may encounter the following error:
+
+```text
+TypeError [ERR_UNKNOWN_FILE_EXTENSION]:
+Unknown file extension ".ts"
+```
+
+**Possible cause**
+
+Some Ubuntu-packaged Node.js builds may lack native TypeScript support (Amaro), even when using a compatible Node.js version.
+
+This issue was encountered with Node.js v22.22.1 installed at `/usr/bin/node`.
+
+**Solution (tested on Ubuntu WSL)**
+
+Installing the official Node.js distribution through [NVM](https://github.com/nvm-sh/nvm) resolved the issue.
+
+If NVM is already installed, run:
+
+```bash
+nvm install 22
+nvm use 22
+nvm alias default 22
+```
+
+Verify that native TypeScript support is available:
+
+```bash
+node -p "process.features.typescript"
+```
+
+Expected output:
+
+```text
+strip
+```
+
+Then run:
+
+```bash
+npm run qa
+```
+
+**Result:** The application launched successfully on Ubuntu WSL after replacing the system-provided Node.js installation with the official distribution managed by NVM.
+
+**Note:** Updating Ubuntu or checking the Node.js version alone may not resolve this issue. The Node.js distribution and its build configuration can also affect native TypeScript support.
+
 | Command | What it does |
 |---|---|
 | `npm run qa` | Open the app. `npm link` once, and `qa` works from any folder. |
