@@ -390,6 +390,54 @@ test.describe.serial('Moki tags', () => {
   });
 });
 
+test('ES translates the workspace picker and the rest of the app, survives reload, and keeps EN and PT-BR working', async () => {
+  const root = fixture();
+  const userData = mkdtempSync(join(tmpdir(), 'moki-language-'));
+  const { app: languageApp, page: languagePage } = await openApp(root, userData, null);
+  try {
+    const select = languagePage.locator('.lang-select');
+    const languages = [
+      { value: 'Spanish', code: 'es', title: 'Elige un espacio de trabajo', create: 'Crear un nuevo espacio de trabajo', open: 'Abrir una carpeta como espacio de trabajo' },
+      { value: 'English', code: 'en', title: 'Choose a workspace', create: 'Create a new workspace', open: 'Open a folder as a workspace' },
+      { value: 'Portuguese (pt-BR)', code: 'pt-BR', title: 'Escolha um workspace', create: 'Criar um novo workspace', open: 'Abrir uma pasta como workspace' },
+      { value: 'Spanish', code: 'es', title: 'Elige un espacio de trabajo', create: 'Crear un nuevo espacio de trabajo', open: 'Abrir una carpeta como espacio de trabajo' },
+    ];
+    for (const expected of languages) {
+      await select.selectOption(expected.value);
+      await expect(languagePage.locator('html')).toHaveAttribute('lang', expected.code);
+      await expect(languagePage.locator('.picker-main > p')).toContainText(expected.title);
+      await expect(languagePage.getByText(expected.create, { exact: true })).toBeVisible();
+      await expect(languagePage.getByRole('button', { name: expected.open })).toBeVisible();
+      expect(await languagePage.evaluate(() => [localStorage.getItem('qa-ui-language'), localStorage.getItem('qa-language')])).toEqual([expected.code, expected.value]);
+      await languagePage.reload();
+      await expect(select).toHaveValue(expected.value);
+      await expect(languagePage.locator('html')).toHaveAttribute('lang', expected.code);
+      await expect(languagePage.locator('.picker-main > p')).toContainText(expected.title);
+    }
+    await expect(languagePage.getByText('Un lugar separado para otros proyectos, con sus propias etiquetas y configuración.')).toBeVisible();
+    await expect(languagePage.getByText('Una carpeta que ya tienes. Moki añade una carpeta projects dentro de ella.')).toBeVisible();
+
+    // With no explicit conversation preference, the selector also follows the restored UI language.
+    await languagePage.evaluate(() => localStorage.removeItem('qa-language'));
+    await languagePage.reload();
+    await expect(select).toHaveValue('Spanish');
+    await languagePage.getByRole('button', { name: 'Crear', exact: true }).click();
+    await expect(languagePage.getByText('Nombre del espacio de trabajo', { exact: true })).toBeVisible();
+    await expect(languagePage.getByRole('button', { name: 'Crear espacio de trabajo', exact: true })).toBeDisabled();
+    await languagePage.getByRole('button', { name: 'Cancelar', exact: true }).click();
+
+    await languagePage.locator('.picker-open').first().click();
+    await expect(languagePage.getByText('Crear un nuevo proyecto', { exact: true })).toBeVisible();
+    await expect(select).toHaveValue('Spanish');
+    await languagePage.getByRole('button', { name: 'Configuración', exact: true }).click();
+    await expect(languagePage.getByRole('tab', { name: 'Plantillas', exact: true })).toBeVisible();
+    await expect(languagePage.getByRole('tab', { name: 'Agentes', exact: true })).toBeVisible();
+  } finally {
+    await languageApp.close();
+    for (const dir of [root, userData]) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test.describe.serial('Moki workspaces', () => {
   let wsApp: ElectronApplication;
   let wsPage: Page;
