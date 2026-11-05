@@ -279,6 +279,15 @@ test('markdown: deep lists, setext headings, rules and autolinks', () => {
   assert.doesNotMatch(markdownToHtml('![a](img.png)', { image: () => 'data:image/svg+xml;base64,AA==' }), /<img/);
 });
 
+test('markdown diagrams stay escaped until the app draws them', () => {
+  const html = markdownToHtml('```mermaid\nA --> B <img src=x onerror=alert(1)>\n```\n\n```js\nconst n = 1\n```');
+  assert.match(html, /<pre class="diagram" data-diagram="mermaid"><code>A --&gt; B &lt;img src=x onerror=alert\(1\)&gt;<\/code><\/pre>/);
+  assert.match(html, /<pre data-lang="js"><code>const n = 1<\/code><\/pre>/);
+  assert.doesNotMatch(markdownToHtml('```js" onclick="alert(1)\nconst n = 1\n```'), /onclick|data-lang/);
+  assert.doesNotMatch(html, /<img |onerror="/);
+  assert.match(markdownToHtml('```excalidraw\n{"type":"excalidraw"}\n```'), /data-diagram="excalidraw"/);
+});
+
 test('markdown to html', () => {
   const html = markdownToHtml('# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- x\n  - y\n\n**b** <i>');
   assert.match(html, /<h1>T<\/h1>/);

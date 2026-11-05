@@ -1,4 +1,5 @@
 // Small per-user UI preferences (last tool, language, skill scope). Storage may be unavailable.
+import { isHomeSectionId, type HomeSectionLayout } from './home-sections';
 
 export const remember = (key: string, value: string) => { try { window.localStorage.setItem(key, value); } catch { /* optional */ } };
 export const recall = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
@@ -43,6 +44,28 @@ export function featuredWorkspaces<T extends { id: string }>(list: T[]): T[] {
 const DEFAULT_TOOL = 'qa-tool';
 export const defaultTool = () => recall(DEFAULT_TOOL) ?? '';
 export const setDefaultTool = (id: string) => remember(DEFAULT_TOOL, id);
+
+const HOME_SECTIONS = 'qa-home-sections';
+export function homeSectionLayout(): HomeSectionLayout {
+  try {
+    const parsed: unknown = JSON.parse(recall(HOME_SECTIONS) ?? '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { collapsed: [], weights: {} };
+    const record = parsed as { collapsed?: unknown; weights?: unknown };
+    const collapsed = Array.isArray(record.collapsed) ? record.collapsed.filter(isHomeSectionId) : [];
+    const weights: HomeSectionLayout['weights'] = {};
+    if (record.weights && typeof record.weights === 'object' && !Array.isArray(record.weights)) {
+      for (const [id, value] of Object.entries(record.weights)) {
+        if (isHomeSectionId(id) && typeof value === 'number' && Number.isFinite(value) && value > 0) weights[id] = value;
+      }
+    }
+    return { collapsed, weights };
+  } catch {
+    return { collapsed: [], weights: {} };
+  }
+}
+export function saveHomeSectionLayout(layout: HomeSectionLayout): void {
+  remember(HOME_SECTIONS, JSON.stringify(layout));
+}
 
 // The AI an activity starts in: the default when it is usable here, otherwise the first usable one.
 // ponytail: the activity's own AI comes first once activities can name one.

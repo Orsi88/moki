@@ -25,7 +25,7 @@ The tab lists every activity with filters (All, Favorites, Comes with Moki, Your
 
 - **New activity**: a name, a description, a category, what it uses (a skill, an agent, a workflow or an operation, chosen from the ones that exist), which inbox files it needs (required, optional or none), the request sent to the AI, a hint for the note and the tags.
 - **The star** makes an activity a favorite: favorites come first wherever activities are picked.
-- An activity of an **operation** opens the operation's start form instead of a request; the operation must be linked to the project (its Operations panel).
+- An activity of an **operation** opens the operation's start form instead of a request.
 - An activity of an **agent** asks the AI to act as that agent, unless you choose another agent when you open it.
 
 ## The file
@@ -66,5 +66,5 @@ In the request, `{files}` becomes the chosen inbox files (a line with `{files}` 
 | *There is no agent "…"* / *There is no workflow "…"* / *There is no operation "…"* | What the activity uses does not exist | Choose one from the list |
 | *This activity needs at least one file from the inbox.* | Its `files` is `required` | Choose a file, or change it to `optional` |
 | *The activity "…" starts the operation …* | An activity of an operation does not become a request | Pick it in the app: it opens the operation's form |
-| The activity does not appear in a project | Its tags do not reach that project, or what it uses is not available yet | Check its tags; an operation must be linked to the project |
+| The activity does not appear in a project | Its tags do not reach that project, or what it uses is not available yet | Check its tags; an operation must exist on this computer |
 | An activity is shown as *Not available yet* | Its skill is planned, or its agent is not usable | Wait for the skill, or choose another target |

@@ -27,8 +27,9 @@ export function WorkspacePicker({ version, onOpen }: Props) {
   const [favorites, setFavorites] = useState<string[]>(workspaceFavorites);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
 
-  const load = () => api.workspaces().then((r) => { setList(r.list); setActive(r.active); }).catch((e) => setError(message(e)));
+  const load = () => api.workspaces().then((r) => { setList(r.list); setActive(r.active); }).catch((e) => setError(message(e))).finally(() => setReady(true));
   useEffect(() => { void load(); }, []);
 
   const run = async (fn: () => Promise<WorkspaceInfo | null>) => {
@@ -54,8 +55,42 @@ export function WorkspacePicker({ version, onOpen }: Props) {
   }, [list]);
   const featured = featuredWorkspaces(list);
   const allVisible = ranked.filter((w) => `${w.name} ${w.path}`.toLowerCase().includes(workspaceSearch.toLowerCase().trim()));
+  // The built-in workspace is always there. Create and open-folder stay on this screen only until the person adds another one; after that they live on Manage workspaces.
+  const showSetup = ready && list.every((w) => w.isDefault);
   const closeManager = () => { setManaging(false); setRenaming(null); setWorkspaceSearch(''); };
   const closeAll = () => { setListingAll(false); setWorkspaceSearch(''); };
+  const createDialog = (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) closeCreate(); }}>
+      <form className="modal quick-project" role="dialog" aria-modal="true" aria-labelledby="workspace-title" onSubmit={create}>
+        <header className="modal-head">
+          <div>
+            <h2 id="workspace-title">{t('Create a new workspace')}</h2>
+            <p className="muted small">{t('A separate place for other projects, with its own tags and settings.')}</p>
+          </div>
+          <button type="button" className="icon-btn" onClick={closeCreate} disabled={busy} title={t('Close (Esc)')}><IconX size={18} /></button>
+        </header>
+        <div className="modal-body">
+          <label className="field">
+            <strong>{t('Workspace name')}</strong>
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('e.g. Client X')} maxLength={60} onKeyDown={(e) => { if (e.key === 'Escape') closeCreate(); }} />
+          </label>
+          <div className="field">
+            <span className="label">{t('Where')}</span>
+            <span className="row-actions workspace-location">
+              <code className="small">{location ?? t('In the Moki folder (workspaces/)')}</code>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocation} disabled={busy}>{t('Change…')}</button>
+              {location && <button type="button" className="icon-btn" onClick={() => setLocation(null)} title={t('Back to the Moki folder')}><IconX size={14} /></button>}
+            </span>
+          </div>
+          {error && <p className="error small">{error}</p>}
+        </div>
+        <footer className="modal-foot">
+          <button type="button" className="btn btn-ghost" onClick={closeCreate} disabled={busy}>{t('Cancel')}</button>
+          <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : t('Create workspace')}</button>
+        </footer>
+      </form>
+    </div>
+  );
 
   if (managing) return (
     <div className="picker workspace-management-page">
@@ -86,6 +121,24 @@ export function WorkspacePicker({ version, onOpen }: Props) {
           ))}
           {allVisible.length === 0 && <p className="muted small">{t('No workspaces found.')}</p>}
         </div>
+        <div className="home-actions workspace-setup">
+          <div className="home-action">
+            <div>
+              <strong>{t('Create a new workspace')}</strong>
+              <p className="muted small">{t('A separate place for other projects, with its own tags and settings.')}</p>
+            </div>
+            <AddButton size="lg" title={t('Create')} onClick={() => setCreating(true)} />
+          </div>
+          <div className="home-action">
+            <div>
+              <strong>{t('Open a folder as a workspace')}</strong>
+              <p className="muted small">{t('A folder you already have. Moki adds a projects folder inside it.')}</p>
+            </div>
+            <button type="button" className="home-action-icon" disabled={busy} onClick={() => { void run(() => api.openWorkspaceFolder()); }}
+              title={t('Open a folder as a workspace')} aria-label={t('Open a folder as a workspace')}><IconOpenProject size={20} /></button>
+          </div>
+        </div>
+        {creating && createDialog}
       </main>
     </div>
   );
@@ -125,10 +178,15 @@ export function WorkspacePicker({ version, onOpen }: Props) {
             </li>
           ))}
         </ul>
-        <button type="button" className="picker-list-all" onClick={() => setListingAll(true)}>{t('Read all...')}</button>
+        <div className="picker-list-foot">
+          <button type="button" className="picker-list-all" onClick={() => setListingAll(true)}>{t('Read all...')}</button>
+        </div>
+        <button type="button" className="btn btn-ghost picker-manage" onClick={() => setManaging(true)} title={t('Manage')} aria-label={t('Manage')}>
+          <IconSettings size={18} />
+        </button>
 
-        <div className="home-actions picker-actions">
-          {!creating ? (
+        {showSetup && (
+          <div className="home-actions picker-actions">
             <div className="home-action">
               <div>
                 <strong>{t('Create a new workspace')}</strong>
@@ -136,70 +194,17 @@ export function WorkspacePicker({ version, onOpen }: Props) {
               </div>
               <AddButton size="lg" title={t('Create')} onClick={() => setCreating(true)} />
             </div>
-          ) : (false && (
-            <form className="home-action create" onSubmit={create}>
-              <label className="field">
-                <strong>{t('Workspace name')}</strong>
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('e.g. Client X')} maxLength={60} />
-              </label>
-              <div className="field">
-                <span className="label">{t('Where')}</span>
-                <span className="row-actions">
-                  <code className="small">{location ?? t('In the Moki folder (workspaces/)')}</code>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocation}>{t('Change…')}</button>
-                  {location && <button type="button" className="icon-btn" onClick={() => setLocation(null)} title={t('Back to the Moki folder')}><IconX size={14} /></button>}
-                </span>
+            <div className="home-action">
+              <div>
+                <strong>{t('Open a folder as a workspace')}</strong>
+                <p className="muted small">{t('A folder you already have. Moki adds a projects folder inside it.')}</p>
               </div>
-              <div className="row-actions">
-                <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : t('Create workspace')}</button>
-                <button type="button" className="btn btn-ghost" onClick={() => { setCreating(false); setName(''); setLocation(null); setError(''); }}>{t('Cancel')}</button>
-              </div>
-            </form>
-          ))}
-          <div className="home-action">
-            <div>
-              <strong>{t('Open a folder as a workspace')}</strong>
-              <p className="muted small">{t('A folder you already have. Moki adds a projects folder inside it.')}</p>
+              <button type="button" className="home-action-icon" disabled={busy} onClick={() => { void run(() => api.openWorkspaceFolder()); }}
+                title={t('Open a folder as a workspace')} aria-label={t('Open a folder as a workspace')}><IconOpenProject size={20} /></button>
             </div>
-            <button type="button" className="home-action-icon" disabled={busy} onClick={() => { void run(() => api.openWorkspaceFolder()); }}
-              title={t('Open a folder as a workspace')} aria-label={t('Open a folder as a workspace')}><IconOpenProject size={20} /></button>
-          </div>
-        </div>
-        <button type="button" className="btn btn-ghost picker-manage" onClick={() => setManaging(true)} title={t('Manage')} aria-label={t('Manage')}>
-          <IconSettings size={18} />
-        </button>
-        {creating && (
-          <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) closeCreate(); }}>
-            <form className="modal quick-project" role="dialog" aria-modal="true" aria-labelledby="workspace-title" onSubmit={create}>
-              <header className="modal-head">
-                <div>
-                  <h2 id="workspace-title">{t('Create a new workspace')}</h2>
-                  <p className="muted small">{t('A separate place for other projects, with its own tags and settings.')}</p>
-                </div>
-                <button type="button" className="icon-btn" onClick={closeCreate} disabled={busy} title={t('Close (Esc)')}><IconX size={18} /></button>
-              </header>
-              <div className="modal-body">
-                <label className="field">
-                  <strong>{t('Workspace name')}</strong>
-                  <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('e.g. Client X')} maxLength={60} onKeyDown={(e) => { if (e.key === 'Escape') closeCreate(); }} />
-                </label>
-                <div className="field">
-                  <span className="label">{t('Where')}</span>
-                  <span className="row-actions workspace-location">
-                    <code className="small">{location ?? t('In the Moki folder (workspaces/)')}</code>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={pickLocation} disabled={busy}>{t('Change…')}</button>
-                    {location && <button type="button" className="icon-btn" onClick={() => setLocation(null)} title={t('Back to the Moki folder')}><IconX size={14} /></button>}
-                  </span>
-                </div>
-                {error && <p className="error small">{error}</p>}
-              </div>
-              <footer className="modal-foot">
-                <button type="button" className="btn btn-ghost" onClick={closeCreate} disabled={busy}>{t('Cancel')}</button>
-                <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : t('Create workspace')}</button>
-              </footer>
-            </form>
           </div>
         )}
+        {creating && createDialog}
         {listingAll && (
           <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) closeAll(); }}>
             <section className="modal workspace-manager" role="dialog" aria-modal="true" aria-labelledby="workspace-list-title">

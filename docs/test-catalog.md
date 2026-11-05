@@ -426,7 +426,7 @@ Run with `npm run test:ui`. Each area is a block of `tests/ui/app.spec.ts`; its 
 
 | # | Scenario | Kind | Where |
 |---|---|---|---|
-| 1 | an operation is linked, started from its form, and moves on as each agent delivers its files | Interface | [ui/app.spec.ts:836](../tests/ui/app.spec.ts#L836) |
+| 1 | an operation is started from its form, and moves on as each agent delivers its files | Interface | [ui/app.spec.ts:836](../tests/ui/app.spec.ts#L836) |
 | 2 | a result picks the arrow: rejected goes to the fixer and back to the review; no valid result asks the user | Interface | [ui/app.spec.ts:935](../tests/ui/app.spec.ts#L935) |
 
 ### Terminals outlive the project screen (UI)

@@ -8,6 +8,7 @@ import { api, type OperationAnswer, type OperationPlan, type OperationRun, type 
 import { t } from '../i18n';
 import { defaultTool, recall, remember } from '../prefs';
 import { IconPlay, IconPlus, IconX } from './Icons';
+import { AiPick } from './ToolCatalog';
 
 interface Props {
   project: string;
@@ -23,7 +24,7 @@ export function OperationLaunch({ project, operation, tools, onClose, onStarted 
   const [plan, setPlan] = useState<OperationPlan | null>(null);
   const [mode, setMode] = useState<'agents' | 'single'>(() => (recall('qa-ops-ai-mode') === 'single' ? 'single' : 'agents'));
   const [single, setSingle] = useState(defaultTool);
-  const [chosen, setChosen] = useState<Record<string, string>>({}); // steps whose agent has no AI of its own
+  const [chosen, setChosen] = useState<Record<string, string>>({}); // steps whose AI was changed here (or whose agent has none of its own)
   const [answers, setAnswers] = useState<Record<string, OperationAnswer>>({});
   const [context, setContext] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,9 +37,11 @@ export function OperationLaunch({ project, operation, tools, onClose, onStarted 
 
   const installed = tools.filter((x) => AIS.includes(x.id) && x.available);
   const fallback = installed.find((x) => x.id === single)?.id ?? installed[0]?.id ?? '';
-  // The AI of each step: one for all, or the agent's own (when installed), or the one chosen here.
+  // The AI of each step: one for all, or the one chosen for the step here, or the agent's own (when installed). It arrives preset
+  // from the plan and is changed with the same AI picker as everywhere else.
   const toolOf = (step: { id: string; ai: string }) => (mode === 'single' ? fallback
-    : installed.some((x) => x.id === step.ai) ? step.ai : chosen[step.id] ?? fallback);
+    : chosen[step.id] && installed.some((x) => x.id === chosen[step.id]) ? chosen[step.id]
+    : installed.some((x) => x.id === step.ai) ? step.ai : fallback);
   const label = (id: string) => tools.find((x) => x.id === id)?.label.replace(/ \(.*\)$/, '') ?? id;
 
   const key = (step: string, input: string) => `${step}:${input}`;
@@ -100,12 +103,8 @@ export function OperationLaunch({ project, operation, tools, onClose, onStarted 
         <label className="field inline"><input type="radio" name="ai-mode" checked={mode === 'agents'} onChange={() => setMode('agents')} /> {t("Each agent's own AI")}</label>
         <label className="field inline">
           <input type="radio" name="ai-mode" checked={mode === 'single'} onChange={() => setMode('single')} /> {t('One AI for every step')}
-          {mode === 'single' && (
-            <select value={fallback} onChange={(e) => setSingle(e.target.value)} aria-label={t('AI for every step')}>
-              {installed.map((x) => <option key={x.id} value={x.id}>{label(x.id)}</option>)}
-            </select>
-          )}
         </label>
+        {mode === 'single' && <AiPick hideLabel label={t('AI for every step')} tools={tools} ids={AIS} value={fallback} onChange={setSingle} hint={false} />}
         <ol className="ops-run-steps">
           {plan.steps.map((s) => {
             const own = installed.some((x) => x.id === s.ai);
@@ -115,14 +114,10 @@ export function OperationLaunch({ project, operation, tools, onClose, onStarted 
                 {s.gate === 'approval' && <span className="pill pill-awaiting-approval">{t('After your approval')}</span>}
                 {s.mcps.some((m) => m.mode === 'execute') && <span className="pill pill-warn">{t('Executes via MCP')}</span>}
                 <span className="ops-run-ai">
-                  {mode === 'agents' && !own
-                    ? (
-                      <select value={toolOf(s)} onChange={(e) => setChosen((c) => ({ ...c, [s.id]: e.target.value }))} aria-label={t('AI for {agent}', { agent: s.agent })}>
-                        {installed.map((x) => <option key={x.id} value={x.id}>{label(x.id)}</option>)}
-                      </select>
-                    )
+                  {mode === 'agents'
+                    ? <AiPick hideLabel label={t('AI for {agent}', { agent: s.agent })} tools={tools} ids={AIS} value={toolOf(s)} onChange={(id) => setChosen((c) => ({ ...c, [s.id]: id }))} hint={false} />
                     : <span className="muted small">{label(toolOf(s))}</span>}
-                  {mode === 'agents' && s.ai && !own && <span className="muted small"> · {t('{ai} is not installed', { ai: label(s.ai) })}</span>}
+                  {mode === 'agents' && s.ai && !own && !chosen[s.id] && <span className="muted small"> · {t('{ai} is not installed', { ai: label(s.ai) })}</span>}
                 </span>
               </li>
             );

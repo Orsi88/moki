@@ -13,6 +13,21 @@ import { colorName } from './CommentColors';
 const SWATCH: Record<string, string> = COLOR_SWATCH;
 const CSS_UNITS = 96 / 72; // as PdfPages draws the pages
 const CARD_GAP = 10;
+const KEPT_SELECTION = 'pdf-selection';
+
+// The comment box takes focus, and the browser then hides the text selection. A cloned range painted
+// with the same colour stays on the passage until the box closes.
+const keepSelection = () => {
+  const sel = window.getSelection();
+  const marks = CSS as unknown as { highlights?: { set: (name: string, value: unknown) => void } };
+  const Highlight = (window as unknown as { Highlight?: new (range: Range) => unknown }).Highlight;
+  if (!sel?.rangeCount || !marks.highlights || !Highlight) return;
+  marks.highlights.set(KEPT_SELECTION, new Highlight(sel.getRangeAt(0).cloneRange()));
+};
+const dropSelection = () => {
+  (CSS as unknown as { highlights?: { delete: (name: string) => void } }).highlights?.delete(KEPT_SELECTION);
+  window.getSelection()?.removeAllRanges();
+};
 
 // The panel mode stays when a change opens the -edited copy in a new tab.
 let lastTab: 'comment' | 'edit' = 'comment';
@@ -88,7 +103,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [hit, setHit] = useState(0);
   const pdf = useRef<PDFDocumentProxy | null>(null);
   const onDoc = useCallback((d: PDFDocumentProxy | null) => { pdf.current = d; setHits(null); }, []);
-  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string; quote: string } | null>(null);
+  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string; quote: string; rects: { left: number; top: number; width: number; height: number }[] } | null>(null);
   const [editing, setEditing] = useState<{ id: string; mode: 'reply' | 'edit'; text: string } | null>(null);
   const [active, setActive] = useState('');
   // The comment column, opened or closed from the bar (remembered); closed, the pages take the room and marks on their edge show where comments are.
@@ -201,16 +216,20 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     const box = stage.current;
     const sel = window.getSelection();
     if (!marks || !box || !sel?.rangeCount) { setComposer((c) => (c && !c.text ? null : c)); return; }
+    keepSelection();
     const r = sel.getRangeAt(0).getBoundingClientRect();
     const origin = box.getBoundingClientRect();
-    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '', quote: sel.toString() });
+    const rects = [...sel.getRangeAt(0).getClientRects()].filter((item) => item.width > 1 && item.height > 1 && item.height < 80).map((item) => ({
+      left: item.left - origin.left, top: item.top - origin.top, width: item.width, height: item.height,
+    }));
+    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '', quote: sel.toString(), rects });
   };
   const highlightSelection = () => {
     if (!composer) return;
     void apply({ op: 'highlight', marks: composer.marks, contents: composer.text.trim() || undefined, color }).then((ok) => {
       if (!ok) return;
       setComposer(null);
-      window.getSelection()?.removeAllRanges();
+      dropSelection();
     });
   };
   // The selected text as a note of this project (notes/), opened in the notebook; the PDF is not changed.
@@ -219,7 +238,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     const { title, text } = selectionNote(path, composer.marks, composer.quote);
     setError('');
     api.createNote(project, title, text)
-      .then((created) => { setComposer(null); window.getSelection()?.removeAllRanges(); return api.openNoteWindow({ project, path: created }); })
+      .then((created) => { setComposer(null); dropSelection(); return api.openNoteWindow({ project, path: created }); })
       .catch((e: Error) => setError(e.message));
   };
   // Every match of the field's text in the document, from each page's text (case ignored).
@@ -512,12 +531,13 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
                   onClick={() => { setRailOff(false); setActive(p.id); }} />
               );
             })}
+            {composer?.rects.map((box, i) => <span key={i} className="pdf-kept-selection" aria-hidden="true" style={{ left: box.left, top: box.top, width: box.width, height: box.height }} />)}
             {composer && available && tab === 'comment' && (
               <div className="pdf-composer" style={{ left: composer.x, top: composer.y }} role="dialog" aria-label={t('Highlight and comment')}
-                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setComposer(null); } }}>
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setComposer(null); dropSelection(); } }}>
                 <div className="pdf-composer-head">
                   {swatches}
-                  <button type="button" className="icon-btn" onClick={() => setComposer(null)} aria-label={t('Close')} title={t('Close')}><IconX size={14} /></button>
+                  <button type="button" className="icon-btn" onClick={() => { setComposer(null); dropSelection(); }} aria-label={t('Close')} title={t('Close')}><IconX size={14} /></button>
                 </div>
                 <textarea autoFocus rows={3} maxLength={4000} value={composer.text} placeholder={t('Comment (optional)')}
                   onChange={(e) => setComposer({ ...composer, text: e.target.value })}

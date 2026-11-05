@@ -475,7 +475,7 @@ export function createService(root: string, deps: Deps) {
     const agent = a.target.kind === 'agent' ? listAgents(root).find((x) => x.name === a.target.name) : undefined;
     const available = a.id === 'resume' ? true
       : a.target.kind === 'agent' ? Boolean(agent && isUsableAgent(agent))
-      : a.target.kind === 'operation' ? (!project || linkedOperations(project).includes(a.target.name))
+      : a.target.kind === 'operation' ? listOperations(root).some((o) => o.id === a.target.name)
       : !frameworkSkill(skill) || isUsable(skill, root); // a skill installed by the person (not in the framework) is theirs to use
     return {
       id: a.id, label: a.label, hint: a.description, category: a.category, source: a.source, target: a.target, files: a.files,
@@ -501,9 +501,9 @@ export function createService(root: string, deps: Deps) {
     if (/^---/m.test(template)) throw new ServiceError('The text of the request cannot have a line with ---.');
     return { label, text: activityMarkdown({ label, description: cleanPrompt(String(r.description ?? '')).slice(0, 300), category: cleanPrompt(String(r.category ?? '')).slice(0, 40) || 'Other', target: { kind, name }, files, note: cleanPrompt(String(r.note ?? '')).slice(0, 200), tags, template }) };
   };
-  const linkedOperation = (project: string, id: unknown) => {
+  const knownOperation = (id: unknown) => {
     const op = listOperations(root).find((o) => o.id === id);
-    if (!op || !linkedOperations(project).includes(op.id)) throw new ServiceError('This operation is not linked to the project.');
+    if (!op) throw new ServiceError('Unknown operation.');
     return op;
   };
   const runDir = (project: string, runId: unknown): string => {
@@ -1120,7 +1120,7 @@ export function createService(root: string, deps: Deps) {
     },
     // What the start screen needs: the steps in order with their agent, default AI and MCP servers, and the MCP servers each AI tool has.
     operationPlan: (project: string, id: unknown) => {
-      const op = linkedOperation(project, id);
+      const op = knownOperation(id);
       const agents = operationAgents();
       const check = checkOperation(op, agents);
       const steps = check.order.map((sid) => {
@@ -1132,7 +1132,7 @@ export function createService(root: string, deps: Deps) {
       return { operation: { ...op, check }, steps, mcpsByTool: mcpsByTool(project), inbox: inboxFiles(projectDir(project)).map((f) => f.name) };
     },
     startOperation: (project: string, id: unknown, raw: unknown) => {
-      const op = linkedOperation(project, id);
+      const op = knownOperation(id);
       const agents = operationAgents();
       const check = checkOperation(op, agents);
       if (check.errors.length) throw new ServiceError(`This operation cannot start: ${check.errors.map(formatMessage).join(' ')}`);

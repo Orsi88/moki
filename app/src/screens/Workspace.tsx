@@ -13,6 +13,7 @@ import { LaunchDialog } from '../components/LaunchDialog';
 import { NoteDialog } from '../components/NoteDialog';
 import { OperationsPanel } from '../components/OperationsPanel';
 import { OperationLaunch } from '../components/OperationLaunch';
+import { ActivityRunView } from '../components/ActivityRunView';
 import { OperationRunView } from '../components/OperationRunView';
 import { SidePanel } from '../components/SidePanel';
 import { SetupDialog } from '../components/SetupDialog';
@@ -91,7 +92,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
     if (docSide) { window.dispatchEvent(new Event('moki:doc-side-close')); setPanelRail(false); return; }
     togglePanel();
   };
-  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean; tool?: string; startAtTool?: boolean } | null>(startSetup && project.starter === 'blank' ? { activity: 'plan', startAtTool: true } : launchOnOpen ? { activity: 'open' } : null);
+  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean; tool?: string; agent?: string; startAtTool?: boolean } | null>(startSetup && project.starter === 'blank' ? { activity: 'plan', startAtTool: true } : launchOnOpen ? { activity: 'open' } : null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(startNotice);
@@ -108,8 +109,18 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   const [note, setNote] = useState<{ path: string | null } | null>(null); // open note (main area); path null = new note
   // A multi-agent operation in the main area: its start screen, or one of its runs.
   const [opView, setOpView] = useState<{ kind: 'launch' | 'run'; id: string } | null>(null);
+  // An activity run, in the same place. The right panel stays on the project.
+  const [activityView, setActivityView] = useState<string | null>(null);
+  const showActivity = (id: string) => { setNote(null); setOpView(null); setActivityView(id); };
+  const showOperationRun = (id: string) => { setNote(null); setActivityView(null); setOpView({ kind: 'run', id }); };
   // An activity of an operation: its start form, in place of the request.
-  const startOperationForm = (id: string) => { setLaunch(null); setNote(null); setOpView({ kind: 'launch', id }); };
+  const startOperationForm = (id: string) => { setLaunch(null); setNote(null); setActivityView(null); setOpView({ kind: 'launch', id }); };
+  const openListedRun = (id: string) => {
+    setNote(null);
+    void api.run(project.id, id).then((run) => {
+      if (run.operation) showOperationRun(id); else showActivity(id);
+    }).catch((e: Error) => setError(e.message));
+  };
   const [opsTick, setOpsTick] = useState(0);
   const launchKey = `qa-activity-launches:${workspaceId}:${project.id}`;
   const [activityLaunches, setActivityLaunches] = useState<ActivityLaunch[]>(() => parseActivityLaunches(recall(launchKey)));
@@ -518,12 +529,16 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
       </aside>
 
       <main className="main">
-        {opView && !note && (
+        {(activityView || opView) && !note && (
           <div className="note-host ops-host">
-            {opView.kind === 'launch'
+            {activityView
+              ? <ActivityRunView key={activityView} project={project.id} run={activityView} onClose={() => setActivityView(null)}
+                  onResume={() => setLaunch({ activity: 'resume', run: activityView })}
+                  onOpenFile={(path) => { setActivityView(null); openPath(path); }} />
+              : opView?.kind === 'launch'
               ? <OperationLaunch key={opView.id} project={project.id} operation={opView.id} tools={tools} onClose={() => setOpView(null)}
                   onStarted={(run) => { setOpView({ kind: 'run', id: run.id }); advanceOps(); }} />
-              : <OperationRunView key={opView.id} project={project.id} run={opView.id} tick={opsTick} tools={tools}
+              : opView && <OperationRunView key={opView.id} project={project.id} run={opView.id} tick={opsTick} tools={tools}
                   hasTerminal={(id) => terms.some((x) => x.id === id)}
                   onTerminal={(term) => { setOpView(null); addTerminal(term); }}
                   onOpenFile={(path) => openPath(path)} onClose={() => setOpView(null)} onChanged={advanceOps} />}
@@ -614,13 +629,12 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
         )}
       </main>
 
-      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onOperationRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} onTerminal={addTerminal} onActivityStart={beginActivity} onActivityUpdate={updateActivity} onSetup={() => setShowSetup(true)} onProjectChanged={onProjectChanged} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} onMyAis={() => onSettings('ai')}
+      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onOperationRun={showOperationRun} onOpenRun={openListedRun} onTerminal={addTerminal} onActivityStart={beginActivity} onActivityUpdate={updateActivity} onSetup={() => setShowSetup(true)} onProjectChanged={onProjectChanged} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} onMyAis={() => onSettings('ai')}
         operations={(
-          <OperationsPanel project={project.id} tick={opsTick} active={opView?.id ?? null} launches={activityLaunches} activityLaunchTick={activityLaunchTick}
-            onDismissLaunch={(id) => setActivityLaunches((items) => items.filter((item) => item.id !== id))} onActivityRun={(id) => openPath(`runs/${id}/state.json`)}
+          <OperationsPanel project={project.id} tick={opsTick} active={activityView ?? opView?.id ?? null} launches={activityLaunches} activityLaunchTick={activityLaunchTick}
+            onDismissLaunch={(id) => setActivityLaunches((items) => items.filter((item) => item.id !== id))} onActivityRun={showActivity}
             onResumeActivity={(id) => setLaunch({ activity: 'resume', run: id })}
-            onStart={(id) => { setNote(null); setOpView({ kind: 'launch', id }); }}
-            onRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} />
+            onRun={showOperationRun} />
         )} />
       </>}
 

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as 
 import { createPortal } from 'react-dom';
 import { t } from '../i18n';
 import { IconCode, IconLink } from './Icons';
+import { EXCALIDRAW_STARTER, MERMAID_STARTER } from '../diagram-source';
 
 export const TABLE_ICON = <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" /><path d="M3.5 10h17M3.5 14.5h17M9.5 10v9M15 10v9" /></svg>;
 
@@ -132,6 +133,12 @@ export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>
   };
   const divider = () => insert(`${lineStart() ? '' : '\n'}\n---\n\n`);
   const codeBlock = () => insert(`${lineStart() ? '' : '\n'}\`\`\`\n\n\`\`\`\n`, [lineStart() ? 4 : 5, lineStart() ? 4 : 5]);
+  const fence = (lang: string, body: string) => {
+    const lead = lineStart() ? '' : '\n';
+    const block = `${lead}\`\`\`${lang}\n${body}\n\`\`\`\n`;
+    const start = lead.length + lang.length + 4;
+    insert(block, [start, start + body.length]);
+  };
 
   const commands: SlashCommand[] = [
     { id: 'checklist', label: t('Checklist'), glyph: <span className="note-check-glyph" aria-hidden="true">✓</span>, words: 'checkbox todo task tarefa caixa', run: checks, line: true },
@@ -142,6 +149,8 @@ export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>
     { id: 'numbered', label: t('Numbered list'), glyph: '1.', words: 'number ordered numerada', run: numbers, line: true },
     { id: 'quote', label: t('Quote'), glyph: '❝', words: 'citacao', run: quote, line: true },
     { id: 'code', label: t('Code block'), glyph: <IconCode size={15} />, words: 'codigo', run: codeBlock },
+    { id: 'diagram', label: t('Diagram'), glyph: '◇', words: 'mermaid diagrama flowchart', run: () => fence('mermaid', MERMAID_STARTER) },
+    { id: 'drawing', label: t('Drawing'), glyph: '✎', words: 'excalidraw desenho drawing', run: () => fence('excalidraw', EXCALIDRAW_STARTER) },
     { id: 'table', label: t('Table'), glyph: TABLE_ICON, words: 'tabela', run: table },
     { id: 'divider', label: t('Divider'), glyph: '—', words: 'line separator linha divisor', run: divider },
     { id: 'link', label: t('Link'), glyph: <IconLink size={15} />, words: 'url', run: link },

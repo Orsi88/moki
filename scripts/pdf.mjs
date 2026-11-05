@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { markdownToHtml, escHtml } from './lib/markdown.mjs';
+import { applyDiagramImages, diagramSources, photographDiagrams } from './lib/diagram-images.mjs';
 import { DEFAULT_STYLE, fillVars, hasFooter, hasHeader, styleFor } from './lib/doc-style.mjs';
 
 export { markdownToHtml };
@@ -53,15 +54,20 @@ th, td { border: 1px solid ${s.table.border}; padding: 4px 6px; vertical-align: 
 tr { page-break-inside: avoid; }
 code { background: #f2f2f2; padding: 0 3px; }
 blockquote { border-left: 3px solid ${s.accent}; margin: 6pt 0; padding: 2pt 8pt; color: #333; }
+img.diagram { display: block; max-width: 100%; height: auto; margin: 8pt 0; }
 .watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 10; }
 .watermark span { transform: rotate(-35deg); font: 700 80pt ${font}; color: ${s.watermark.color}; opacity: ${s.watermark.opacity}; white-space: nowrap; }
 `;
 }
 
-export function renderHtml(md, title, { style = DEFAULT_STYLE, vars = {} } = {}) {
+export async function renderHtml(md, title, { style = DEFAULT_STYLE, vars = {}, browser = null } = {}) {
   const v = { title, ...vars };
   const mark = style.watermark.text ? `<div class="watermark"><span>${escHtml(fillVars(style.watermark.text, v))}</span></div>` : '';
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>${styleCss(style, v)}</style></head><body>${mark}${markdownToHtml(md)}</body></html>`;
+  let body = markdownToHtml(md);
+  const diagrams = diagramSources(body);
+  // Each diagram becomes one picture. A failure leaves that block as code.
+  if (browser && diagrams.length) body = applyDiagramImages(body, await photographDiagrams(diagrams, browser));
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>${styleCss(style, v)}</style></head><body>${mark}${body}</body></html>`;
 }
 
 function findBrowser() {
@@ -95,8 +101,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const htmlPath = pdfPath.replace(/\.pdf$/i, '') + '.html';
   mkdirSync(dirname(pdfPath), { recursive: true });
   const { style, vars } = styleFor(pdfPath, { styleFile, title });
-  writeFileSync(htmlPath, renderHtml(md, title, { style, vars }));
   const browser = findBrowser();
+  writeFileSync(htmlPath, await renderHtml(md, title, { style, vars, browser }));
   if (!browser) {
     console.error(`No Edge/Chrome/Chromium found. HTML written to ${htmlPath}; open it and print to PDF, or set QA_AGENTS_BROWSER.`);
     process.exit(2);

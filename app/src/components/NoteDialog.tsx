@@ -16,6 +16,9 @@ import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
 import { isFavorite, looseNotes, noteTitle, removeLooseNote, saveLooseNote, setFavorite, touchNote, type NoteRef } from '../side-menu';
 import { ActivityCatalog } from './ActivityCatalog';
+import { MarkdownBody } from './MarkdownBody';
+import { VisualMarkdownEditor } from './VisualMarkdownEditor';
+import { DiagramSourceEditor } from './DiagramSourceEditor';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
 import { FileIcon } from '../icons';
@@ -88,6 +91,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [exportMenu, setExportMenu] = useState<{ left: number; top: number } | null>(null);
   const [exported, setExported] = useState('');
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [visualOk, setVisualOk] = useState(true); // formatted view edits like a Markdown file, until the note cannot round-trip
   const [inlineTools, setInlineTools] = useState(false);
   const [html, setHtml] = useState('');
   const [pos, setPos] = useState({ x: 0, y: 0 }); // offset from the centered position
@@ -229,7 +233,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     api.setFileTags(project, curPath, ids).then(setTags).catch((e: Error) => setError(e.message));
   };
 
-  useEffect(() => { if (mode === 'preview') api.renderMarkdown(text).then(setHtml).catch((e: Error) => setError(e.message)); }, [mode, text]);
+  useEffect(() => { if (mode === 'preview' && !visualOk) api.renderMarkdown(text).then(setHtml).catch((e: Error) => setError(e.message)); }, [mode, text, visualOk]);
 
   useEffect(() => {
     if (!target) { setFiles([]); return; }
@@ -245,14 +249,30 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   // Closing saves first; if saving fails, the note stays open with the error.
   const close = () => { persist().then(() => onClose()).catch(() => { /* the error is shown */ }); };
 
-  // From inside the app to the notebook window, saved first.
+  // From inside the app to the notebook window, saved first. A note that was
+  // never saved is created then, so the button is there from the start.
   const toNotebook = () => {
-    persist().then((done) => {
-      const at = done ?? ref;
-      if (!at) return;
+    const open = (at: NoteRef) => {
       void api.openNoteWindow('loose' in at ? { loose: at.loose } : at);
       onClose();
-    }).catch(() => { /* the error is shown */ });
+    };
+    persist().then(async (done) => {
+      if (done) { open(done); return; }
+      const now = latest.current;
+      if (now.curLoose) { open({ loose: now.curLoose }); return; }
+      if (project && now.curPath) { open({ project, path: now.curPath }); return; }
+      const head = now.title.trim() || t('Untitled note');
+      if (project == null) {
+        const note = saveLooseNote({ id: null, title: head, text: now.text });
+        window.qa?.notesChanged();
+        open({ loose: note.id });
+        return;
+      }
+      const created = await api.createNote(project, head, now.text);
+      touchNote(project, created, noteTitle(created));
+      window.qa?.notesChanged();
+      open({ project, path: created });
+    }).catch((e: Error) => setError(e.message));
   };
 
   // A project note saved as PDF, Markdown or text where the user chooses (native dialog); saved first.
@@ -400,7 +420,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === 's') { e.preventDefault(); void persist().catch(() => { /* the error is shown */ }); }
-      if (k === 'e') { e.preventDefault(); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
+      if (k === 'e') { e.preventDefault(); setVisualOk(true); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
       if (mode === 'edit' && k === 'b') { e.preventDefault(); wrap('**'); }
       if (mode === 'edit' && k === 'i') { e.preventDefault(); wrap('*'); }
       if (mode === 'edit' && k === 'k') { e.preventDefault(); link(); }
@@ -441,7 +461,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
           <span className="statusbar-spacer" />
           {ref && !inline && <button type="button" className="icon-btn" draggable title={t('Drag this note into a PDF')} aria-label={t('Drag this note into a PDF')}
             onDragStart={(e) => { e.dataTransfer.setData('application/x-moki-note', JSON.stringify(ref)); e.dataTransfer.effectAllowed = 'copy'; }}><IconNotes size={17} /></button>}
-          {ref && !floating && (
+          {!floating && (
             <button type="button" className="icon-btn" onClick={toNotebook} title={t('Open in the notebook')} aria-label={t('Open in the notebook')}>
               <IconExternal size={17} />
             </button>
@@ -491,7 +511,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
             <IconPlay size={14} /> <span>{t('Use with the AI')}</span>
           </button>
           {mode === 'edit'
-            ? <button type="button" className="icon-btn" onClick={() => setMode('preview')} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
+            ? <button type="button" className="icon-btn" onClick={() => { setVisualOk(true); setMode('preview'); }} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
             : <button type="button" className="icon-btn" onClick={() => setMode('edit')} title={t('Edit (Ctrl+E)')}><IconEdit size={17} /></button>}
           <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
         </div>
@@ -522,10 +542,26 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
         <div className="modal-body">
           {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
           {(loose || !curPath) && (
-            <label className="field">
-              <span className="label">{t('Title')}</span>
-              <input value={title} maxLength={60} autoFocus onChange={(e) => setTitle(e.target.value)} placeholder={t('e.g. Test ideas')} />
-            </label>
+            <div className="note-meta">
+              {(loose || !curPath) && (
+                <label className="field">
+                  <span className="label">{t('Title')}</span>
+                  <input value={title} maxLength={60} autoFocus onChange={(e) => setTitle(e.target.value)} placeholder={t('e.g. Test ideas')} />
+                </label>
+              )}
+              {loose && projects.length > 0 && (
+                <label className="field note-destination">
+                  <span className="label">{t('Send to a project')}</span>
+                  <span className="row-actions">
+                    <select value={destination} onChange={(e) => setDestination(e.target.value)}>
+                      <option value="">{t('Keep as a loose note')}</option>
+                      {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    {destination && <button type="button" className="btn" onClick={send} disabled={sending}>{sending ? t('Sending…') : t('Send')}</button>}
+                  </span>
+                </label>
+              )}
+            </div>
           )}
           {project && curPath && (
             <div className="field inline">
@@ -533,24 +569,14 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               <TagPicker catalog={tagCatalog} value={tags} onChange={changeTags} onCatalog={setTagCatalog} compact />
             </div>
           )}
-          {loose && projects.length > 0 && (
-            <label className="field">
-              <span className="label">{t('Send to a project')}</span>
-              <span className="row-actions">
-                <select value={destination} onChange={(e) => setDestination(e.target.value)}>
-                  <option value="">{t('Keep as a loose note')}</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                {destination && <button type="button" className="btn" onClick={send} disabled={sending}>{sending ? t('Sending…') : t('Send')}</button>}
-              </span>
-            </label>
-          )}
           {mode === 'edit' ? (
             <div className="note-editor-wrap">
-              <textarea ref={editor} className="note-editor" spellCheck autoFocus={!inline && Boolean(path) && !loose} value={text}
-                onChange={(e) => { setText(e.target.value); findMention(e.target.value, e.target.selectionStart); findSlash(e.target.value, e.target.selectionStart); }}
+              <DiagramSourceEditor editorRef={editor} className="note-editor" value={text}
+                autoFocus={!inline && Boolean(path) && !loose}
+                onChange={setText}
+                onEdit={(segment, caret) => { findMention(segment, caret); findSlash(segment, caret); }}
                 onKeyDown={onEditorKey}
-                onClick={(e) => { findMention(text, e.currentTarget.selectionStart); findSlash(text, e.currentTarget.selectionStart); }}
+                onClick={(e) => { findMention(e.currentTarget.value, e.currentTarget.selectionStart); findSlash(e.currentTarget.value, e.currentTarget.selectionStart); }}
                 onBlur={() => setTimeout(() => { setMention(null); setSlash(null); }, 150)}
                 onPaste={onPaste} onDrop={onDrop}
                 placeholder={t('Write your note (Markdown). Type / for commands and @ to mention a project file; paste or drop images.')} />
@@ -569,8 +595,17 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               )}
             </div>
           )
-            // HTML comes from the main process renderer, which escapes all markup from the note.
-            : <div className="markdown note-preview" onClick={onPreviewClick} dangerouslySetInnerHTML={{ __html: html }} />}
+            : visualOk ? (
+              <div className="note-visual" onClick={onPreviewClick}>
+                <VisualMarkdownEditor text={text} project={project ?? undefined} path={path ?? 'notes/note.md'} onChange={setText} onUnsupported={() => setVisualOk(false)} />
+              </div>
+            ) : (
+              <>
+                <p className="notice-bar" role="status">{t('This file contains formatting that needs Markdown source to edit safely.')}</p>
+                {/* HTML comes from the main process renderer, which escapes all markup from the note. */}
+                <MarkdownBody className="markdown note-preview" html={html} text={text} onChange={setText} onClick={onPreviewClick} />
+              </>
+            )}
         </div>
         <footer className="modal-foot">
           <span className="note-status">

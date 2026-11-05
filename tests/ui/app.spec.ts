@@ -684,9 +684,16 @@ test.describe.serial('Moki project tree', () => {
     await expect(treePage.locator('.tree-row[title=".mcps"]')).toBeVisible();
     await config.click();
     await expect(treePage.locator('.tree-row[title="project.json"]')).toBeVisible();
-    // Operations is the last card of the project panel, below the AI assistant; with nothing under way it opens on the operations to start.
+    // Operations is the last card of the project panel, below the AI assistant. With nothing under way it stays on that list; an operation is chosen on the assistant card.
     const ops = treePage.locator('.panel').getByRole('region', { name: 'Execuções' });
-    await expect(ops.getByRole('tab', { name: 'Iniciar' })).toHaveAttribute('aria-selected', 'true');
+    await expect(ops.getByRole('tab', { name: 'Em andamento' })).toHaveAttribute('aria-selected', 'true');
+    // The tabs are the header of both cards: neither shows a title of its own.
+    await expect(ops.getByText('Execuções', { exact: true })).toHaveCount(0);
+    await expect(treePage.locator('.panel').getByText('Assistente de IA', { exact: true })).toHaveCount(0);
+    await expect(ops.getByRole('button', { name: 'Vincular operações a este projeto' })).toHaveCount(0);
+    await ops.getByRole('tab', { name: 'Atividades', exact: true }).click();
+    await expect(ops.getByRole('tab', { name: 'Em andamento' })).toHaveAttribute('aria-selected', 'true');
+    await ops.getByRole('tab', { name: 'Operações', exact: true }).click();
     const order = await treePage.locator('.sidebar-scroll > *').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.className));
     expect(order).toEqual(['tree']); // only the files scroll
     // The sidebar keeps only the files and, fixed below them, the settings.
@@ -928,13 +935,17 @@ test.describe.serial('Moki operations in a project', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  test('an operation is linked, started from its form, and moves on as each agent delivers its files', async () => {
+  test('an operation is started from its form, and moves on as each agent delivers its files', async () => {
     const side = opsPage.getByRole('region', { name: 'Execuções' });
-    await side.getByRole('button', { name: 'Vincular operações a este projeto' }).click();
-    await opsPage.getByRole('menuitemcheckbox', { name: /Fluxo QA/ }).click();
-    await opsPage.keyboard.press('Escape');
-    await expect(opsPage.locator('.menu-backdrop')).toHaveCount(0);
-    await side.getByRole('button', { name: /Fluxo QA/ }).click();
+    const assistant = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await assistant.getByRole('tab', { name: 'Operação' }).click();
+    await assistant.getByRole('button', { name: 'Escolher operação' }).click();
+    const dialog = opsPage.getByRole('dialog');
+    await dialog.getByRole('searchbox', { name: 'Buscar operações' }).fill('fluxo');
+    await expect(dialog.locator('.catalog-card')).toHaveCount(1);
+    await dialog.locator('.catalog-card').click();
+    await expect(dialog).toHaveCount(0);
+    await assistant.getByRole('button', { name: 'Iniciar operação' }).click();
 
     const launch = opsPage.getByRole('region', { name: 'Iniciar Fluxo QA' });
     await expect(launch.locator('.ops-run-agent')).toHaveText(['requirements-analyst', 'test-designer']);
@@ -1027,12 +1038,37 @@ test.describe.serial('Moki operations in a project', () => {
     await expect(side.locator('.ops-side-ended .ops-side-row')).toContainText('Fluxo QA');
   });
 
+  test('an operation starts from the assistant card: its steps keep their agent and each AI is changed with the same pick', async () => {
+    const card = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await card.getByRole('tab', { name: 'Operação' }).click();
+    await card.locator('button.pp-pick').click();
+    const dialog = opsPage.getByRole('dialog');
+    await dialog.getByRole('searchbox', { name: 'Buscar operações' }).fill('fluxo');
+    await expect(dialog.locator('.catalog-card')).toHaveCount(1);
+    await dialog.locator('.catalog-card').click();
+    await expect(dialog).toHaveCount(0);
+    await card.getByRole('button', { name: 'Iniciar operação' }).click();
+
+    // Each step arrives with its agent and AI; the operation's start is not flattened to one agent and one AI.
+    const launch = opsPage.getByRole('region', { name: 'Iniciar Fluxo QA' });
+    await expect(launch.locator('.ops-run-agent')).toHaveText(['requirements-analyst', 'test-designer']);
+    const analyst = launch.getByRole('button', { name: 'IA de requirements-analyst' });
+    const designer = launch.getByRole('button', { name: 'IA de test-designer' });
+    await expect(analyst).toBeVisible();
+    await analyst.click();
+    await opsPage.getByRole('dialog').locator('.catalog-card').filter({ hasText: 'Gemini CLI' }).click();
+    await expect(analyst).toContainText('Gemini CLI');
+    await expect(designer).not.toContainText('Gemini CLI');
+    await launch.getByRole('button', { name: 'Fechar' }).click();
+    await expect(launch).toHaveCount(0);
+  });
+
   test('a result picks the arrow: rejected goes to the fixer and back to the review; no valid result asks the user', async () => {
-    const side = opsPage.getByRole('region', { name: 'Execuções' });
-    await side.getByRole('button', { name: 'Vincular operações a este projeto' }).click();
-    await opsPage.getByRole('menuitemcheckbox', { name: /Revisa até aprovar/ }).click();
-    await opsPage.keyboard.press('Escape');
-    await side.getByRole('button', { name: /Revisa até aprovar/ }).click();
+    const assistant = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await assistant.getByRole('tab', { name: 'Operação' }).click();
+    await assistant.locator('button.pp-pick').click();
+    await opsPage.getByRole('dialog').locator('.catalog-card').filter({ hasText: 'Revisa até aprovar' }).click();
+    await assistant.getByRole('button', { name: 'Iniciar operação' }).click();
     await opsPage.getByRole('region', { name: 'Iniciar Revisa até aprovar' }).getByRole('button', { name: 'Iniciar operação' }).click();
 
     const runView = opsPage.locator('.ops-run');
@@ -1773,19 +1809,65 @@ test.describe.serial('Moki my AIs and the project panel', () => {
     expect(await aiPage.evaluate(() => localStorage.getItem('qa-tool'))).toBe('gemini');
   });
 
-  test('the project panel only acts: an activity, or a conversation with an agent', async () => {
+  test('the project panel starts three ways under tabs with no title: an agent, an activity, an operation', async () => {
     const panel = aiPage.locator('.pp');
-    await expect(panel.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
+    const card = panel.getByRole('region', { name: 'Assistente de IA' });
+    await expect(card.getByRole('heading')).toHaveCount(0);
+    await expect(panel.getByText('Assistente de IA', { exact: true })).toHaveCount(0);
+    await expect(card.getByRole('tab')).toHaveText(['Agente', 'Atividade', 'Operação']);
+    await expect(card.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
     for (const gone of ['Minha pasta', 'Agentes deste projeto', 'Entregáveis']) await expect(panel.getByText(gone)).toHaveCount(0);
-    await panel.getByRole('button', { name: 'Chamar agente' }).click();
+
+    // Call an agent stops at the agent and the AI: no activity, no files, no note.
+    await card.getByRole('tab', { name: 'Agente' }).click();
+    const call = card.getByRole('button', { name: 'Chamar agente' });
+    await expect(call).toBeDisabled();
+    await expect(card.getByRole('button', { name: 'Escolher atividade' })).toHaveCount(0);
+    await card.getByRole('button', { name: 'Escolher agente' }).click();
     const dialog = aiPage.getByRole('dialog', { name: 'Com quem você quer conversar?' });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('textbox', { name: 'Sobre o quê? (opcional)' }).fill('Uma regra de cupom');
+    await expect(dialog.getByRole('textbox', { name: 'Sobre o quê? (opcional)' })).toHaveCount(0);
+    await expect(dialog.locator('.catalog-card', { hasText: 'Deixar a skill decidir' })).toHaveCount(0); // here the agent is required
     await dialog.getByRole('searchbox', { name: 'Buscar agentes' }).fill('test-designer');
     await expect(dialog.locator('.catalog-card')).toHaveCount(1);
     await dialog.locator('.catalog-card').click();
     await expect(dialog).toHaveCount(0);
-    await expect(panel.locator('.pp-msg')).toHaveText('fake'); // QA_FAKE_TOOLS: started, nothing opened
+    await expect(call).toBeEnabled();
+    await call.click();
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0); // no wizard
+    await expect(card.locator('.pp-msg')).toHaveText('fake'); // QA_FAKE_TOOLS: started, nothing opened
+    await card.getByRole('tab', { name: 'Atividade' }).click();
+  });
+
+  test('an activity is found by search, its agent is optional and its AI is the same pick', async () => {
+    const card = aiPage.locator('.pp').getByRole('region', { name: 'Assistente de IA' });
+    await card.getByRole('tab', { name: 'Atividade' }).click();
+    await card.getByRole('button', { name: 'Escolher atividade' }).click();
+    const catalog = aiPage.getByRole('dialog');
+    const all = await catalog.locator('.catalog-card').count();
+    expect(all).toBeGreaterThan(1);
+    const search = catalog.getByRole('searchbox', { name: 'Buscar atividades' });
+    await search.fill('zzzz-nada');
+    await expect(catalog.locator('.catalog-card')).toHaveCount(0);
+    await expect(catalog.getByText('Nenhuma atividade corresponde.')).toBeVisible();
+    await search.fill('');
+    await expect(catalog.locator('.catalog-card')).toHaveCount(all);
+    await aiPage.keyboard.press('Escape');
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
+
+    // The agent is optional here (the skill decides) and the AI is the one picked in Call an agent.
+    const agent = card.getByRole('button', { name: 'Deixar a skill decidir' });
+    await expect(agent).toBeVisible();
+    await agent.click();
+    const agents = aiPage.getByRole('dialog');
+    await expect(agents.locator('.catalog-card', { hasText: 'Deixar a skill decidir' })).toHaveCount(1);
+    await agents.getByRole('searchbox', { name: 'Buscar agentes' }).fill('test-designer');
+    await agents.locator('.catalog-card', { hasText: 'test-designer' }).click();
+    await expect(card.getByRole('button', { name: 'test-designer' })).toBeVisible();
+    await card.getByRole('button', { name: 'test-designer' }).click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'Deixar a skill decidir' }).click();
+    await expect(card.getByRole('button', { name: 'Deixar a skill decidir' })).toBeVisible();
+    await expect(card.locator('.pp-field').filter({ has: aiPage.locator('.pp-field-label', { hasText: /^Onde$/ }) })).toHaveCount(1);
   });
 
   test('the project title and description are edited without opening setup', async () => {
@@ -1830,6 +1912,28 @@ test.describe.serial('Moki my AIs and the project panel', () => {
     writeFileSync(join(path, 'state.json'), JSON.stringify({ status: 'completed', skill: 'project-context' }));
     await side.getByRole('tab', { name: 'Concluídas' }).click();
     await expect(side.getByText('Concluída', { exact: true })).toBeVisible();
+  });
+
+  test('an activity that needs inbox files asks only for them, with the agent and the AI already chosen in the card', async () => {
+    writeFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'us-1.md'), '# US-1');
+    const card = aiPage.locator('.pp').getByRole('region', { name: 'Assistente de IA' });
+    await card.locator('.pp-field').filter({ has: aiPage.locator('.pp-field-label', { hasText: /^O que fazer$/ }) }).locator('.pp-pick').click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'requirements-review' }).first().click();
+    await card.getByRole('button', { name: 'Deixar a skill decidir' }).click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'requirements-analyst' }).click();
+    await card.getByRole('button', { name: 'Iniciar atividade' }).click();
+
+    // Files first; no step asks for the agent or the AI again.
+    const wizard = aiPage.getByRole('dialog');
+    await expect(wizard.locator('.wizard-progress')).toContainText('etapa 1 de 3');
+    await wizard.getByText('us-1.md').click();
+    await wizard.getByRole('button', { name: 'Continuar', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Nada mais — continuar' }).click();
+    const picks = wizard.locator('.wizard-picks');
+    await expect(picks.getByRole('button', { name: 'requirements-analyst' })).toBeVisible();
+    await expect(picks.locator('.pp-field')).toHaveCount(2);
+    await aiPage.keyboard.press('Escape');
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
   });
 });
 
@@ -1891,23 +1995,31 @@ test.describe('Moki run details panel', () => {
       await page.locator('.tree-row[title="runs"]').click();
       await page.locator(`.tree-row[title^="${activity}"]`).click();
       await page.locator(`.tree-row[title="runs/${activity}/state.json"]`).click();
-      const details = page.locator('.run-detail');
+      await expect(page.locator('.panel.run-detail')).toHaveCount(0);
+      await expect(page.locator('.panel.pp')).toBeVisible();
+      const card = page.getByRole('region', { name: 'Execuções' });
+      await card.getByRole('tab', { name: 'Atividades', exact: true }).click();
+      await card.locator(`[title="${activity}"]`).click();
+      const details = page.locator('main .ops-run');
       await expect(details).toHaveAttribute('aria-label', 'Atividade');
       await expect(details.getByText('Etapas concluídas')).toBeVisible();
       await expect(details.getByText('s2', { exact: true })).toBeVisible();
       await expect(details.getByRole('button', { name: 'Continuar na sua ferramenta de IA' })).toBeVisible();
-      await expect(details.locator('.ops-side')).toHaveCount(0);
+      await expect(page.locator('.panel.pp')).toBeVisible();
+      await expect(page.locator('.panel.run-detail')).toHaveCount(0);
       const files = details.locator('.run-detail-file');
       await expect(files).toHaveCount(2);
       await expect(files.nth(0)).toContainText('outputs/s1');
       await expect(files.nth(1)).toContainText('outputs/s2');
+      await details.getByRole('button', { name: 'Fechar' }).click();
       await page.locator(`.tree-row[title^="${operation}"]`).click();
       await page.locator(`.tree-row[title="runs/${operation}/state.json"]`).click();
-      await expect(details).toHaveAttribute('aria-label', 'Operação');
-      await expect(details.getByRole('heading', { name: 'Fluxo de teste' })).toBeVisible();
-      await expect(details.getByRole('button', { name: 'Abrir operação' })).toBeVisible();
-      await expect(details.getByRole('button', { name: 'Continuar na sua ferramenta de IA' })).toHaveCount(0);
-      await expect(details.locator('.ops-side')).toHaveCount(0);
+      const operationDetails = page.locator('.panel.run-detail');
+      await expect(operationDetails).toHaveAttribute('aria-label', 'Operação');
+      await expect(operationDetails.getByRole('heading', { name: 'Fluxo de teste' })).toBeVisible();
+      await expect(operationDetails.getByRole('button', { name: 'Abrir operação' })).toBeVisible();
+      await expect(operationDetails.getByRole('button', { name: 'Continuar na sua ferramenta de IA' })).toHaveCount(0);
+      await expect(operationDetails.locator('.ops-side')).toHaveCount(0);
     } finally {
       await window?.close();
       rmSync(root, { recursive: true, force: true });

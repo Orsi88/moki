@@ -11,6 +11,8 @@ import { addComment, colorComment, editComment, findInSource, readComments, remo
 import { stackCards } from '../pdf-quads';
 import { IconX } from './Icons';
 import { CommentColors } from './CommentColors';
+import { mountDiagrams } from './Diagrams';
+import { replaceDiagram } from '../diagram-source';
 
 interface Props {
   html: string; // the file rendered with its marks (markdownToHtml, comments: true)
@@ -39,6 +41,11 @@ export function MarkdownComments({ html, text, onCommit, onClick, hidden = false
   const rail = useRef<HTMLDivElement>(null);
 
   useEffect(() => { api.userName().then(setMe).catch(() => setMe('')); }, []);
+  useEffect(() => {
+    const el = doc.current;
+    if (!el) return;
+    void mountDiagrams(el, (index, lang, body) => onCommit(replaceDiagram(text, index, lang, body)));
+  }, [html, text, onCommit]);
 
   // Each card beside the first mark of its comment, pushed down under the card above when they would overlap.
   const measure = useCallback(() => {

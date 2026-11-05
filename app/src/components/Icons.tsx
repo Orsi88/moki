@@ -67,6 +67,12 @@ export const IconDot = ({ size }: IconProps) => (
 export const IconPlay = ({ size }: IconProps) => (
   <svg {...base(size)}><path d="M7 4.5v15l12-7.5z" /></svg>
 );
+export const IconPause = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M8 5v14M16 5v14" /></svg>
+);
+export const IconStop = ({ size }: IconProps) => (
+  <svg {...base(size)}><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+);
 export const IconGraph = ({ size }: IconProps) => (
   <svg {...base(size)}>
     <path d="M12 8.2 7.8 15M12 8.2 16.2 15M9.2 17.2h5.6" />

@@ -38,7 +38,7 @@
   "agents: the old per-project lists become tags, each project keeps exactly what it had": "agentes: as listas antigas por projeto viram tags, e cada projeto mantém exatamente o que tinha",
   "an agent gets only the servers its contract names and the project has on": "um agente recebe só os servidores que o contrato dele cita e que o projeto tem ligados",
   "an agent shows what it needs and delivers; your copy edits it, MCPs and AI included": "um agente mostra o que precisa e entrega; a sua cópia edita isso, incluindo MCPs e IA",
-  "an operation is linked, started from its form, and moves on as each agent delivers its files": "uma operação é vinculada, iniciada pelo formulário e avança conforme cada agente entrega os arquivos",
+  "an operation is started from its form, and moves on as each agent delivers its files": "uma operação é iniciada pelo formulário e avança conforme cada agente entrega os arquivos",
   "an operation links agents with arrows: approval, which output answers which input, saved in the list": "uma operação liga agentes com setas: aprovação, qual saída responde qual entrada, salva na lista",
   "an operation run keeps the servers it started with": "uma execução de operação mantém os servidores com que começou",
   "another branch gets the in-development note; a broken link stops the build": "outra branch recebe o aviso de versão em desenvolvimento; um link quebrado para a geração",

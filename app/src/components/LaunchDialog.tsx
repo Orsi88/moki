@@ -9,12 +9,14 @@ import { defaultTool, remember } from '../prefs';
 import { IconCheck, IconCode, IconCopy, IconFile, IconFolder, IconGlobe, IconPlay, IconRefresh, IconTerminal, IconX } from './Icons';
 import { FileIcon } from '../icons';
 import { TagChip } from './TagPicker';
+import { AgentPick } from './AgentCatalog';
+import { AiPick } from './ToolCatalog';
 import type { ActivityLaunchPhase } from '../activity-launches';
 
 interface Props {
   project: ProjectSummary;
   tools: ToolInfo[];
-  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string; startAtTool?: boolean }; // skipActivity: the activity was already chosen (side panel); tool: the AI chosen there
+  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string; agent?: string; startAtTool?: boolean }; // skipActivity: the activity, its agent and the AI were already chosen (side panel: tool, agent)
   onClose: () => void;
   onTerminal: (terminal: TerminalRef) => void; // the tool opened in a terminal tab of the app
   onActivityStart?: (activity: string, label: string) => string | undefined;
@@ -46,7 +48,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
   const [choice, setChoice] = useState<ContextChoice>({ own: [], shared: [] });
   const [exclude, setExclude] = useState<string[]>([]); // context files left out of this activity
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [agent, setAgent] = useState('');
+  const [agent, setAgent] = useState(preset?.agent ?? '');
   const [note, setNote] = useState('');
   const [language, setLanguage] = useState(conversationLanguage);
   const [tool, setTool] = useState(() => {
@@ -88,7 +90,12 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
   const resume = activity === 'resume';
   // The context step only shows when the project's tags bring something from other projects.
   const sharing = choice.shared.length > 0;
-  const steps: StepKey[] = preset?.startAtTool ? ['tool', 'review'] : ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
+  // Started from the side panel: the activity, the agent and the AI arrive chosen (changed in the last step, with the
+  // same pickers), so only what the activity needs is asked: files, shared context, notes.
+  const fromPanel = Boolean(preset?.skipActivity && !resume);
+  const steps: StepKey[] = preset?.startAtTool ? ['tool', 'review']
+    : fromPanel ? ['files', ...(sharing ? ['context' as const] : []), 'details', 'review']
+    : ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
   const toggle = (paths: string[]) => setExclude((ex) => (paths.every((p) => ex.includes(p)) ? ex.filter((p) => !paths.includes(p)) : [...new Set([...ex, ...paths])]));
   const sharedPaths = [...new Set(choice.shared.flatMap((g) => g.sources.flatMap((s) => s.paths)))];
   const keptShared = sharedPaths.filter((p) => !exclude.includes(p));
@@ -167,11 +174,11 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
       { step: 'files' as StepKey, label: t('Files'), value: files.length ? files.join(', ') : t('None') },
       ...(sharing ? [{ step: 'context' as StepKey, label: t('Shared context'), value: t('{n} of {total} files from other projects', { n: keptShared.length, total: sharedPaths.length })
         + (exclude.some((p) => choice.own.includes(p)) ? ` · ${t('{n} of this project left out', { n: exclude.filter((p) => choice.own.includes(p)).length })}` : '') }] : []),
-      ...(agents.length ? [{ step: 'agent' as StepKey, label: t('Who does it'), value: agentLabel }] : []),
+      ...(agents.length && !fromPanel ? [{ step: 'agent' as StepKey, label: t('Who does it'), value: agentLabel }] : []),
     ]),
     { step: 'details', label: t('Notes'), value: note.trim() || t('None') },
     { step: 'details', label: t('Conversation language'), value: t(language) },
-    { step: 'tool', label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' },
+    ...(fromPanel ? [] : [{ step: 'tool' as StepKey, label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' }]),
   ];
 
   return (
@@ -280,7 +287,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
 
           {step === 'details' && (
             <>
-              <textarea rows={4} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('e.g. focus on permissions')} autoFocus />
+              <textarea rows={4} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder={current?.note || t('e.g. focus on permissions')} autoFocus />
               <label className="field inline">
                 <span className="label">{t('The AI should talk to me in')}</span>
                 <select value={language} onChange={(e) => setLanguage(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{t(l)}</option>)}</select>
@@ -333,6 +340,12 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
                   </button>
                 ))}
               </dl>
+              {fromPanel && (
+                <div className="wizard-picks">
+                  {agents.length > 0 && <AgentPick label={t('Who does it')} agents={agents} value={agent} onChange={(name) => { setResult(null); setError(''); setAgent(name); }} optional />}
+                  <AiPick label={t('AI tool')} tools={tools} value={tool} onChange={(id) => { setResult(null); setError(''); setTool(id); }} onInstall={onMyAis} />
+                </div>
+              )}
             </>
           )}
         </div>

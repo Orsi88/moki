@@ -1,7 +1,7 @@
 // Start screen: pick a project (system under test) or create one — like
 // Obsidian's vault switcher.
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { api, type ProjectSummary, type Starter, type TerminalRef, type ToolInfo, type WorkspaceInfo } from '../api';
 import { t } from '../i18n';
 import { StartPrefs } from '../components/PrefsCorner';
@@ -12,7 +12,8 @@ import { IconCheck, IconChevron, IconExternal, IconEye, IconEyeOff, IconFolder, 
 import { NoteDialog } from '../components/NoteDialog';
 import { favoriteLooseIds, favoriteNotes, forgetNote, forgetProject, hiddenIds, hideProject, looseNotes, type NoteRef, noteTitle, pinnedIds, recentNotes, removeLooseNote, setFavorite, showProject, togglePin } from '../side-menu';
 import { Settings, type SettingsTab } from './Settings';
-import { featuredWorkspaces, recordWorkspaceUse } from '../prefs';
+import { featuredWorkspaces, homeSectionLayout, recordWorkspaceUse, saveHomeSectionLayout } from '../prefs';
+import { resizedWeights, type HomeSectionId, type HomeSectionLayout } from '../home-sections';
 
 interface Props {
   projects: ProjectSummary[];
@@ -67,6 +68,11 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
   // A note opened here, inside the app ({ loose: null }: a new loose note). The icon beside it opens the notebook window.
   const [openNote, setOpenNote] = useState<NoteRef | { loose: null } | null>(null);
   // The actions of a row (pin, hide, open in the notebook, delete…) show only on a right click.
+  const [sections, setSections] = useState<HomeSectionLayout>(homeSectionLayout);
+  const sectionsRef = useRef(sections);
+  sectionsRef.current = sections;
+  const sideRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<{ above: HomeSectionId; below: HomeSectionId; startY: number; aboveH: number; belowH: number; base: Record<string, number> } | null>(null);
   const [rowMenu, setRowMenu] = useState<{ left: number; top: number; items: MenuItem[] } | null>(null);
   const menuOn = (items: MenuItem[]) => (e: MouseEvent) => { e.preventDefault(); setRowMenu({ left: e.clientX, top: e.clientY, items }); };
   const notebookItem = (ref: NoteRef): MenuItem => ({ label: t('Open in the notebook'), icon: <IconExternal size={15} />, run: () => { void api.openNoteWindow(ref); } });
@@ -146,6 +152,91 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
     }).catch((err: Error) => setError(err.message));
   };
   const closeQuick = () => { setQuick(false); setName(''); setFolder(''); setError(''); };
+  const collapsed = (id: HomeSectionId) => sections.collapsed.includes(id);
+  const toggleSection = (id: HomeSectionId) => {
+    const current = sectionsRef.current;
+    const next = { ...current, collapsed: current.collapsed.includes(id) ? current.collapsed.filter((item) => item !== id) : [...current.collapsed, id] };
+    sectionsRef.current = next;
+    setSections(next);
+    saveHomeSectionLayout(next);
+  };
+  const openHeights = () => {
+    const heights: Record<string, number> = {};
+    sideRef.current?.querySelectorAll<HTMLElement>('[data-section]').forEach((el) => {
+      const id = el.dataset.section;
+      if (id && !el.classList.contains('is-collapsed')) heights[id] = el.getBoundingClientRect().height;
+    });
+    return heights;
+  };
+  const weightOf = (id: HomeSectionId, open: HomeSectionId[]) => {
+    const known = open.map((item) => sections.weights[item]).filter((value): value is number => typeof value === 'number' && value > 0);
+    const own = sections.weights[id];
+    if (typeof own === 'number' && own > 0) return own;
+    return known.length ? known.reduce((sum, value) => sum + value, 0) / known.length : 1;
+  };
+  const applyWeights = (weights: HomeSectionLayout['weights']) => {
+    const next = { ...sectionsRef.current, weights };
+    sectionsRef.current = next;
+    setSections(next);
+    return next;
+  };
+  const shownIds: HomeSectionId[] = [
+    ...(pinned.length > 0 ? ['pinned' as const] : []),
+    'projects',
+    ...(favorites.length > 0 ? ['favorites' as const] : []),
+    'notes',
+  ];
+  const onSplitPointerDown = (above: HomeSectionId, below: HomeSectionId) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || collapsed(above) || collapsed(below)) return;
+    const base = openHeights();
+    const aboveH = base[above];
+    const belowH = base[below];
+    if (!aboveH || !belowH) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { above, below, startY: e.clientY, aboveH, belowH, base };
+  };
+  const onSplitPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    applyWeights(resizedWeights(drag.base, drag.above, drag.below, drag.aboveH, drag.belowH, e.clientY - drag.startY));
+  };
+  const onSplitPointerUp = () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    saveHomeSectionLayout(sectionsRef.current);
+  };
+  const resetWeights = () => applyWeights({});
+  const nudgeSplit = (above: HomeSectionId, below: HomeSectionId, e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const base = openHeights();
+    const aboveH = base[above];
+    const belowH = base[below];
+    if (!aboveH || !belowH) return;
+    const next = applyWeights(resizedWeights(base, above, below, aboveH, belowH, e.key === 'ArrowDown' ? 24 : -24));
+    saveHomeSectionLayout(next);
+  };
+  const split = (above: HomeSectionId, below: HomeSectionId) => {
+    const live = !collapsed(above) && !collapsed(below);
+    return (
+      <div className={`home-block-split${live ? '' : ' is-idle'}`} role={live ? 'separator' : undefined} aria-orientation={live ? 'horizontal' : undefined}
+        aria-label={live ? t('Resize the sections') : undefined} tabIndex={live ? 0 : undefined}
+        onPointerDown={live ? onSplitPointerDown(above, below) : undefined} onPointerMove={onSplitPointerMove} onPointerUp={onSplitPointerUp}
+        onDoubleClick={live ? () => { dragRef.current = null; const next = resetWeights(); saveHomeSectionLayout(next); } : undefined}
+        onKeyDown={live ? (e) => nudgeSplit(above, below, e) : undefined} />
+    );
+  };
+  const block = (id: HomeSectionId, title: string, body: ReactNode, action?: ReactNode) => (
+    <section className={`home-block${collapsed(id) ? ' is-collapsed' : ''}`} data-section={id} style={collapsed(id) ? undefined : { flexGrow: weightOf(id, shownIds.filter((item) => !sections.collapsed.includes(item))) }}>
+      <div className="home-list-head with-action">
+        <button type="button" className="home-block-toggle" aria-expanded={!collapsed(id)} title={collapsed(id) ? t('Expand') : t('Collapse')} onClick={() => toggleSection(id)}>
+          <IconChevron size={12} /><span>{title}</span>
+        </button>
+        {action}
+      </div>
+      {!collapsed(id) && <div className="home-block-scroll">{body}</div>}
+    </section>
+  );
 
   return (
     <div className={`home${settings ? ' is-settings' : ''}`}>
@@ -155,17 +246,10 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
           <SearchPanel onOpenProject={(id) => onFound(id)} onOpenFile={onFound} onClose={onSearch} />
         </aside>
       )}
-      {!settings && !(search && onSearch && onFound) && <aside className="home-list home-side">
-        {pinned.length > 0 && (
-          <div className="home-pinned">
-            <div className="home-list-head">{t('Pinned')}</div>
-            <ul>{pinned.map((p) => projectRow(p, true))}</ul>
-          </div>
-        )}
-        <div className="home-list-scroll">
-          {pinned.length > 0 && <hr className="home-split" />}
-          <div className="home-list-head">{t('Projects')}</div>
-
+      {!settings && !(search && onSearch && onFound) && <aside className="home-list home-side" ref={sideRef}>
+        {pinned.length > 0 && block('pinned', t('Pinned'), <ul>{pinned.map((p) => projectRow(p, true))}</ul>)}
+        {pinned.length > 0 && split('pinned', 'projects')}
+        {block('projects', t('Projects'), <>
           {projects.length === 0 && <p className="muted small home-empty">{t('No projects yet.')}</p>}
           <ul>{rest.map((p) => projectRow(p, false))}</ul>
           {hiddenProjects.length > 0 && (
@@ -189,29 +273,24 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
               </ul>
             </details>
           )}
-          {favorites.length > 0 && <>
-            <hr className="home-split" />
-            <div className="home-list-head">{t('Favorites')}</div>
-            <ul className="home-favorites">
-              {favorites.map((f) => (
-                <li key={f.kind === 'loose' ? f.id : `${f.project}:${f.path}`} className="home-row" onContextMenu={menuOn([
-                  notebookItem(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path }),
-                  { label: t('Remove from favorites'), icon: <IconStar size={15} />, run: () => unstar(f) },
-                ])}>
-                  <button type="button" className="home-project" onClick={() => setOpenNote(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path })}>
-                    <span className="home-project-name">{f.title}</span>
-                    {f.kind === 'project' && <span className="home-project-meta">{projects.find((p) => p.id === f.project)?.name}</span>}
-                    <IconChevron size={16} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>}
-          <hr className="home-split" />
-          <div className="home-list-head with-action">
-            <span>{t('Loose notes')}</span>
-            <AddButton size="sm" title={t('New note')} onClick={() => setOpenNote({ loose: null })} />
-          </div>
+        </>)}
+        {favorites.length > 0 && split('projects', 'favorites')}
+        {favorites.length > 0 && block('favorites', t('Favorites'), <ul className="home-favorites">
+          {favorites.map((f) => (
+            <li key={f.kind === 'loose' ? f.id : `${f.project}:${f.path}`} className="home-row" onContextMenu={menuOn([
+              notebookItem(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path }),
+              { label: t('Remove from favorites'), icon: <IconStar size={15} />, run: () => unstar(f) },
+            ])}>
+              <button type="button" className="home-project" onClick={() => setOpenNote(f.kind === 'loose' ? { loose: f.id } : { project: f.project, path: f.path })}>
+                <span className="home-project-name">{f.title}</span>
+                {f.kind === 'project' && <span className="home-project-meta">{projects.find((p) => p.id === f.project)?.name}</span>}
+                <IconChevron size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>)}
+        {split(favorites.length > 0 ? 'favorites' : 'projects', 'notes')}
+        {block('notes', t('Loose notes'), <>
           {notesShown.length === 0 && <p className="muted small home-empty">{t('No loose notes yet.')}</p>}
           <ul>
             {notesShown.map((n) => (
@@ -227,7 +306,7 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
               </li>
             ))}
           </ul>
-        </div>
+        </>, <AddButton size="sm" title={t('New note')} onClick={() => setOpenNote({ loose: null })} />)}
         {rowMenu && (
           <div className="menu-backdrop" onMouseDown={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }}>
             <ul className="term-menu item-menu" role="menu" style={{ left: rowMenu.left, top: rowMenu.top }} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') setRowMenu(null); }}>

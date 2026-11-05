@@ -93,7 +93,7 @@ export function ActivitiesPage() {
           </select>
         </label>
       </div>
-      {d.kind === 'operation' && <p className="muted small">{t('Picking it opens the start form of the operation (it must be linked to the project).')}</p>}
+      {d.kind === 'operation' && <p className="muted small">{t('Picking it opens the start form of the operation.')}</p>}
       <label className="field">
         <span className="label">{t('Request sent to the AI')}</span>
         <textarea rows={6} value={d.template} maxLength={4000} onChange={(e) => set({ template: e.target.value })}

@@ -1,70 +1,84 @@
-// "Call an agent" in the project panel: the agents of the project as cards, same look as the
-// activity and tool catalogs, and an optional "what about?" line. Picking one opens the chosen
-// AI as that agent for a conversation (the "talk" action, scripts/lib/core.ts), not an activity.
+// Choosing an agent of the project, as cards with a search (name, description, category), same
+// look as the activity and tool catalogs. It is the one agent picker of the project panel
+// (call an agent, start an activity) and of the activity wizard. When the agent is optional
+// the first card is "no agent": the skill decides.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { AgentInfo } from '../api';
 import { t } from '../i18n';
 import { CatIcon } from './CatIcon';
-import { IconX } from './Icons';
+import { CatalogModal, matchesQuery } from './CatalogModal';
+import { IconChevron } from './Icons';
 
 interface Props {
   agents: AgentInfo[]; // usable and on in this project
-  tool: string; // the AI it opens in, for the intro
-  onPick: (agent: string, note: string) => void;
+  selected: string; // '' = no agent
+  optional?: boolean; // offer "no agent"
+  title?: string;
+  hint?: string;
+  onPick: (agent: string) => void;
   onClose: () => void;
 }
 
-export function AgentCatalog({ agents, tool, onPick, onClose }: Props) {
+export function AgentCatalog({ agents, selected, optional, title, hint, onPick, onClose }: Props) {
   const [query, setQuery] = useState('');
-  const [note, setNote] = useState('');
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const q = query.trim().toLowerCase();
-  const list = agents.filter((a) => !q || `${a.name} ${a.description} ${a.category}`.toLowerCase().includes(q));
+  const list = agents.filter((a) => matchesQuery(query, a.name, a.description, a.category));
 
   return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal catalog" role="dialog" aria-modal="true" aria-labelledby="agent-catalog-title">
-        <header className="modal-head">
-          <div>
-            <h2 id="agent-catalog-title">{t('Who do you want to talk to?')}</h2>
-            <p className="muted small">{t('A conversation with the agent in {tool}, about anything: no activity starts and nothing is written unless you ask.', { tool })}</p>
-          </div>
-          <button type="button" className="icon-btn" onClick={onClose} title={t('Close (Esc)')}><IconX size={18} /></button>
-        </header>
-        <div className="modal-body">
-          <div className="agent-catalog-tools">
-            <input type="text" value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder={t('What about? (optional)')} aria-label={t('What about? (optional)')} autoFocus />
-            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Search agents')} aria-label={t('Search agents')} />
-          </div>
-          {!list.length && <p className="muted small">{agents.length ? t('No agent matches.') : t('No agent is on in this project. Agents reach projects through their tags in Settings › Agents.')}</p>}
-          <ul className="catalog-grid">
-            {list.map((a) => (
-              <li key={a.name}>
-                <button type="button" className="catalog-card" title={a.description || undefined} onClick={() => { onPick(a.name, note.trim()); onClose(); }}>
-                  <span className="catalog-top">
-                    <span className="catalog-num">{a.source === 'custom' ? t('Yours') : t('Agent')}</span>
-                    {a.category && <span className="catalog-skill">{a.category}</span>}
-                  </span>
-                  <span className="catalog-main">
-                    <span className="catalog-emblem" aria-hidden="true"><CatIcon id="robot" size={64} /></span>
-                    <span className="catalog-text">
-                      <span className="catalog-title">{a.name}</span>
-                      {a.description && <span className="catalog-hint agent-catalog-hint">{a.description}</span>}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+    <CatalogModal titleId="agent-catalog-title" title={title ?? t('Who should do it?')} hint={hint ?? (optional ? t('An agent is a specialist with its own instructions. If you are not sure, let the skill decide.') : undefined)}
+      onClose={onClose} search={{ value: query, onChange: setQuery, placeholder: t('Search agents') }}>
+      {!list.length && <p className="muted small">{agents.length ? t('No agent matches.') : t('No agent is on in this project. Agents reach projects through their tags in Settings › Agents.')}</p>}
+      <ul className="catalog-grid">
+        {optional && (
+          <li>
+            <button type="button" className={`catalog-card${selected ? '' : ' on'}`} aria-pressed={!selected} onClick={() => { onPick(''); onClose(); }}>
+              <span className="catalog-top"><span className="catalog-num">{t('Agent')}</span></span>
+              <span className="catalog-main">
+                <span className="catalog-emblem" aria-hidden="true"><CatIcon id="puzzle" size={64} /></span>
+                <span className="catalog-text">
+                  <span className="catalog-title">{t('Let the skill decide')}</span>
+                  <span className="catalog-hint">{t('Recommended if you are not sure.')}</span>
+                </span>
+              </span>
+            </button>
+          </li>
+        )}
+        {list.map((a) => (
+          <li key={a.name}>
+            <button type="button" className={`catalog-card${a.name === selected ? ' on' : ''}`} aria-pressed={a.name === selected} title={a.description || undefined} onClick={() => { onPick(a.name); onClose(); }}>
+              <span className="catalog-top">
+                <span className="catalog-num">{a.source === 'custom' ? t('Yours') : t('Agent')}</span>
+                {a.category && <span className="catalog-skill">{a.category}</span>}
+              </span>
+              <span className="catalog-main">
+                <span className="catalog-emblem" aria-hidden="true"><CatIcon id="robot" size={64} /></span>
+                <span className="catalog-text">
+                  <span className="catalog-title">{a.name}</span>
+                  {a.description && <span className="catalog-hint agent-catalog-hint">{a.description}</span>}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </CatalogModal>
+  );
+}
+
+// The field that opens the catalog: the same control wherever an agent is chosen.
+export function AgentPick({ agents, value, onChange, optional, label, title, hint }: {
+  agents: AgentInfo[]; value: string; onChange: (agent: string) => void; optional?: boolean; label: string; title?: string; hint?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pp-field">
+      <span className="pp-field-label">{label}</span>
+      <button type="button" className={`pp-pick${value || optional ? '' : ' empty'}`} onClick={() => setOpen(true)} aria-haspopup="dialog">
+        {value && <CatIcon id="robot" size={26} />}
+        <span className="pp-pick-label">{value || (optional ? t('Let the skill decide') : t('Choose an agent'))}</span>
+        <IconChevron size={14} />
+      </button>
+      {open && <AgentCatalog agents={agents} selected={value} optional={optional} title={title} hint={hint} onPick={onChange} onClose={() => setOpen(false)} />}
     </div>
   );
 }

@@ -763,7 +763,8 @@ test('operations in a project: linked, started with the initial form, run step b
     steps: [{ id: 's1', agent: 'library:requirements-analyst', x: 20, y: 60 }, { id: 's2', agent: 'library:test-designer', x: 320, y: 60 }],
     links: [{ from: 's1', to: 's2', gate: 'approval', map: { 'Business rules': 'review-matrix.json' } }],
   });
-  assert.throws(() => svc.operationPlan('acme', op.id), /not linked to the project/);
+  assert.throws(() => svc.operationPlan('acme', 'made-up'), /Unknown operation/);
+  assert.equal(svc.operationPlan('acme', op.id).operation.id, op.id);
   assert.deepEqual(svc.setProjectOperations('acme', [op.id, 'made-up']), [op.id]);
   assert.deepEqual(svc.projectOperations('acme').map((o) => o.id), [op.id]);
   const plan = svc.operationPlan('acme', op.id);
@@ -1665,7 +1666,9 @@ test('upload of skills and agents: preview writes nothing, blocks per item, inst
   put('proj/.claude/commands/x.md', 'x');
   put('proj/CLAUDE.md', 'x');
   put('proj/.mcp.json', '{}');
-  symlinkSync(join(src, 'proj', 'CLAUDE.md'), join(src, 'proj', '.claude', 'skills', 'good', 'link.md'));
+  let symlink = true;
+  try { symlinkSync(join(src, 'proj', 'CLAUDE.md'), join(src, 'proj', '.claude', 'skills', 'good', 'link.md')); }
+  catch (e) { symlink = false; if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e; }
   const svc = createService(root, { ...noLaunch, home, pickFolder: async () => join(src, 'proj') });
 
   const view = await svc.claudeUploadPick('folder', '', 'global');
@@ -1687,7 +1690,7 @@ test('upload of skills and agents: preview writes nothing, blocks per item, inst
   assert.equal(ignored.commands, 'config');
   assert.equal(ignored['CLAUDE.md'], 'config');
   assert.equal(ignored['.mcp.json'], 'config');
-  assert.equal(ignored['.claude/skills/good/link.md'], 'symlink');
+  if (symlink) assert.equal(ignored['.claude/skills/good/link.md'], 'symlink');
   assert.equal(existsSync(join(home, '.claude')), false, 'the preview writes nothing');
 
   await assert.rejects(async () => svc.claudeUploadApply('', 'global', []), /at least one/);
@@ -2116,7 +2119,7 @@ test('workspaces: each one has its own projects; requests name a workspace outsi
     const client = svc.createWorkspace('Cliente X');
     assert.equal(client.path, join(root, 'workspaces', 'cliente-x'));
     assert.equal(svc.workspaces().active, client.id);
-    assert.deepEqual((await svc.projects()), [], 'a new workspace starts empty');
+    assert.deepEqual(await svc.projects(), [], 'a new workspace starts empty');
     assert.throws(() => svc.createWorkspace('Cliente X'), /already/);
     const made = svc.createProject('Portal');
     assert.ok(existsSync(join(client.path, 'projects', 'portal', 'project.json')));
@@ -2153,7 +2156,7 @@ test('search: projects by name, files by name and text, filters by tag', async (
   const inbox = join(root, 'workspace', 'projects', 'acme', 'inbox');
   writeFileSync(join(inbox, 'renewal.md'), '# Story\n\nThe user renews the Loan before the due date.');
   try {
-    assert.deepEqual((await service.search('', [])), { projects: [], files: [], truncated: false }, 'nothing asked, nothing listed');
+    assert.deepEqual(await service.search('', []), { projects: [], files: [], truncated: false }, 'nothing asked, nothing listed');
     assert.deepEqual((await service.search('acm', [])).projects.map((p) => p.id), ['acme']);
     const hit = (await service.search('LOAN', [])).files.find((f) => f.path === 'inbox/renewal.md');
     assert.ok(hit, 'content matches ignore case');

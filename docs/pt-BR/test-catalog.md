@@ -426,7 +426,7 @@ Rodam com `npm run test:ui`. Cada área é um bloco de `tests/ui/app.spec.ts`; o
 
 | # | Cenário | Tipo | Onde |
 |---|---|---|---|
-| 1 | uma operação é vinculada, iniciada pelo formulário e avança conforme cada agente entrega os arquivos | Interface | [ui/app.spec.ts:836](../../tests/ui/app.spec.ts#L836) |
+| 1 | uma operação é iniciada pelo formulário e avança conforme cada agente entrega os arquivos | Interface | [ui/app.spec.ts:836](../../tests/ui/app.spec.ts#L836) |
 | 2 | o resultado escolhe a seta: rejected vai para o fixer e volta para a revisão; sem resultado válido, pergunta ao usuário | Interface | [ui/app.spec.ts:935](../../tests/ui/app.spec.ts#L935) |
 
 ### Terminais que continuam fora do projeto (UI)

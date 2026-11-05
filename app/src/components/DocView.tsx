@@ -5,10 +5,12 @@ import { IconChat, IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconM
 import { FileIcon } from '../icons';
 import { PdfDoc } from './PdfDoc';
 import { useMarkdownEditing } from './useMarkdownEditing';
+import { MarkdownBody } from './MarkdownBody';
 import { MarkdownComments } from './MarkdownComments';
 import { readComments } from '../md-comments';
 import { recall, remember } from '../prefs';
 import { VisualMarkdownEditor } from './VisualMarkdownEditor';
+import { DiagramSourceEditor } from './DiagramSourceEditor';
 
 interface Props {
   content: FileContent;
@@ -141,10 +143,10 @@ function MarkdownEditor({ value, onChange }: { value: string; onChange: (text: s
   const md = useMarkdownEditing(editor);
   return (
     <div className="note-editor-wrap md-editor-wrap">
-      <textarea ref={editor} className="editor" spellCheck value={value} placeholder={t('Type / for commands.')}
-        onChange={(e) => { onChange(e.target.value); md.findSlash(e.target.value, e.target.selectionStart); }}
+      <DiagramSourceEditor editorRef={editor} className="editor" value={value} onChange={onChange} placeholder={t('Type / for commands.')}
+        onEdit={(segment, caret) => md.findSlash(segment, caret)}
         onKeyDown={(e) => { if (!md.slashKey(e)) md.listKey(e); }}
-        onClick={(e) => md.findSlash(value, e.currentTarget.selectionStart)}
+        onClick={(e) => md.findSlash(e.currentTarget.value, e.currentTarget.selectionStart)}
         onBlur={() => setTimeout(() => md.setSlash(null), 150)} />
       {md.slashList}
     </div>
@@ -233,7 +235,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
           // HTML comes from the main process renderer, which escapes all markup from the file.
           onCommit && content.editable
             ? <MarkdownComments html={html} text={draft} onCommit={onCommit} onClick={onClick} hidden={commentsOff} onShow={() => setCommentsOff(false)} saving={saving} />
-            : <div className="markdown" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
+            : <MarkdownBody className="markdown" html={html} text={draft} onChange={content.editable && onCommit ? onCommit : undefined} onClick={onClick} />
         )}
         {content.kind === 'markdown' && mode === 'edit' && (content.editable
           ? sourceMode ? <>{visualUnsupported && <p className="notice-bar" role="status">{t('This file contains formatting that needs Markdown source to edit safely.')}</p>}<MarkdownEditor value={draft} onChange={onDraft} /></>
