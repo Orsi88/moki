@@ -1,19 +1,20 @@
 // Right panel: details of the activity the open file belongs to, or what to DO in the
 // project: start an activity in an AI, call an agent to talk an idea through (no activity),
 // the runs that need you and, filling the rest, the project's operations (OperationsPanel). Everything else is in the tree (context/, files), the ribbon
-// (linked folder), Set up project (the pencil) or Settings (agents per project, by their
+// (linked folder), Set up project or Settings (agents per project, by their
 // tags). It can be collapsed to a thin rail.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, describeRun, statusLabel, type ActivityInfo, type AgentInfo, type OpenRun, type ProjectSummary, type RunState, type TerminalRef, type ToolInfo, type ToolKind } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
-import { IconChevron, IconCode, IconEdit, IconGraph, IconPanel, IconPlay, IconTerminal, IconUsers } from './Icons';
+import { IconCheck, IconChevron, IconCode, IconEdit, IconGraph, IconPanel, IconPlay, IconTerminal, IconUsers, IconX } from './Icons';
 import { ActivityCatalog } from './ActivityCatalog';
 import { ToolCatalog } from './ToolCatalog';
 import { AgentCatalog } from './AgentCatalog';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
+import type { ActivityLaunchPhase } from '../activity-launches';
 
 interface Props {
   project: ProjectSummary;
@@ -23,8 +24,12 @@ interface Props {
   onOpenPath: (path: string) => void;
   onLaunch: (preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string }) => void;
   onTerminal: (terminal: TerminalRef) => void; // a terminal tool opened in a tab of the app
+  onActivityStart: (activity: string, label: string) => string | undefined;
+  onActivityUpdate: (id: string | undefined, phase: ActivityLaunchPhase) => void;
   onOperation?: (operation: string) => void; // an activity of an operation opens its start form
+  onOperationRun: (run: string) => void;
   onSetup: () => void; // description and the global skills the project uses
+  onProjectChanged: () => void;
   collapsed: boolean; // shown as a thin rail
   onToggle: () => void; // collapse / expand
   graphOn: boolean;
@@ -42,12 +47,18 @@ const statusDot = (s: string): string => (s === 'completed' ? 'dot-ok' : s === '
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const NEEDS_YOU = ['awaiting-approval', 'awaiting-input', 'blocked'];
 
-export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onTerminal, onSetup, collapsed, onToggle, graphOn, onGraph, onMyAis, operations }: Props) {
+export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onOperationRun, onTerminal, onActivityStart, onActivityUpdate, onSetup, onProjectChanged, collapsed, onToggle, graphOn, onGraph, onMyAis, operations }: Props) {
   const [run, setRun] = useState<RunState | null>(null);
   const [runs, setRuns] = useState<OpenRun[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]); // usable and on in this project, for "Call an agent"
   const [agentCatalog, setAgentCatalog] = useState(false);
   const [planPending, setPlanPending] = useState(false); // the AI left a plan.json to review
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.name);
+  const [descriptionMode, setDescriptionMode] = useState<'closed' | 'view' | 'edit'>('closed');
+  const [descriptionDraft, setDescriptionDraft] = useState(project.description);
+  const [savingProject, setSavingProject] = useState(false);
+  const [projectError, setProjectError] = useState('');
   const quick = tools.filter((x) => x.available && QUICK.includes(x.kind));
   // Starts on the default AI (Settings › My AIs); another choice here is for this panel only.
   const [toolId, setToolId] = useState('');
@@ -79,6 +90,16 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
 
   const pickTool = (id: string) => { setToolId(id); setLaunchMsg(''); };
   const pickActivity = (id: string) => { setActivityId(id); setLaunchMsg(''); };
+  const saveProject = async (field: 'name' | 'description') => {
+    setSavingProject(true); setProjectError('');
+    try {
+      if (field === 'name') await api.setProjectName(project.id, nameDraft);
+      else await api.setProjectDescription(project.id, descriptionDraft);
+      onProjectChanged();
+      if (field === 'name') setEditingName(false); else setDescriptionMode('closed');
+    } catch (e) { setProjectError(e instanceof Error ? e.message : String(e)); }
+    finally { setSavingProject(false); }
+  };
 
   // Activities that need inbox files go through the dialog (already past "what to do");
   // the others start right away in the chosen tool.
@@ -93,13 +114,16 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
   // One click: the chosen activity, no files, in the chosen tool. With an agent and "talk": a conversation with it.
   const quickOpen = async (id = 'open', agent?: string, note = '') => {
     if (!tool) return;
+    const chosen = activities.find((a) => a.id === id);
+    const trackingId = onActivityStart(id, chosen ? t(chosen.label) : id);
     setLaunching(true); setLaunchMsg('');
     try {
-      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note, language: conversationLanguage(), ...(agent ? { agent } : {}) });
+      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note, language: conversationLanguage(), ...(agent ? { agent } : {}), ...(trackingId ? { trackingId } : {}) });
+      onActivityUpdate(trackingId, r.copied ? 'prepared' : r.terminal || r.opened ? 'sent' : r.prompt && !r.message ? 'prepared' : 'failed');
       if (r.terminal) { onTerminal(r.terminal); return; }
       if (!r.opened) setLaunchMsg(r.message || t('Could not open the tool.'));
       else setLaunchMsg(r.copied ? t('Request copied. Paste it in the AI chat of {tool}.', { tool: toolName(tool) }) : (r.message || ''));
-    } catch (e) { setLaunchMsg(e instanceof Error ? e.message : String(e)); } finally { setLaunching(false); }
+    } catch (e) { onActivityUpdate(trackingId, 'failed'); setLaunchMsg(e instanceof Error ? e.message : String(e)); } finally { setLaunching(false); }
   };
 
   const prefix = `workspace/projects/${project.id}/`;
@@ -128,14 +152,16 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
     const info = describeRun(run.id);
     const open = !['completed', 'cancelled'].includes(run.status);
     return (
-      <aside className="panel">
-        <div className="pp-label-row"><div className="panel-label">{t('Activity')}</div>{collapseBtn}</div>
-        <h2 className="panel-title">{info.title}</h2>
-        <p className="muted small">{info.date}{run.skill || run.workflow ? ` · ${run.skill ?? run.workflow}` : ''}</p>
-        <span className={`pill pill-${run.status}`}>{statusLabel(run.status)}</span>
-        {run.currentStep && <p className="small"><span className="muted">{t('Current step:')}</span> {run.currentStep}</p>}
+      <aside className="panel run-detail" aria-label={run.operation ? t('Operation') : t('Activity')}>
+        <header className="run-detail-head">
+          <div className="pp-label-row"><div className="panel-label">{run.operation ? t('Operation') : t('Activity')}</div>{collapseBtn}</div>
+          <h2 className="panel-title">{run.operation?.name || info.title}</h2>
+          <p className="muted small">{info.date}{!run.operation && (run.skill || run.workflow) ? ` · ${run.skill ?? run.workflow}` : ''}</p>
+          <span className={`pill pill-${run.status}`}>{statusLabel(run.status)}</span>
+        </header>
+        {run.currentStep && <section className="run-detail-current"><span className="muted small">{t('Current step:')}</span><strong>{run.currentStep}</strong></section>}
 
-        {open && (
+        {run.operation ? <button type="button" className="btn btn-block" onClick={() => onOperationRun(run.id)}><IconPlay size={15} /> {t('Open operation')}</button> : open && (
           <button type="button" className="btn btn-block" onClick={() => onLaunch({ activity: 'resume', run: run.id })}>
             <IconPlay size={15} /> {t('Continue in your AI tool')}
           </button>
@@ -143,7 +169,7 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
 
         {Boolean(run.completedSteps?.length) && (
           <section className="panel-section">
-            <h3>{t('Done')}</h3>
+            <h3>{t('Completed steps')}</h3>
             <div className="chips">{run.completedSteps?.map((s) => <span key={s} className="chip">{s}</span>)}</div>
           </section>
         )}
@@ -165,12 +191,12 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
             <ul className="panel-list links">
               {run.artifacts?.map((a) => {
                 const rel = local(a);
-                return <li key={a}>{rel ? <button type="button" className="link" onClick={() => onOpenPath(rel)}>{rel.split('/').pop()}</button> : <span className="muted">{a}</span>}</li>;
+                const parts = rel?.split('/') ?? [];
+                return <li key={a}>{rel ? <button type="button" className="run-detail-file" title={rel} onClick={() => onOpenPath(rel)}><span>{parts.pop()}</span><small>{parts.join('/')}</small></button> : <span className="muted">{a}</span>}</li>;
               })}
             </ul>
           </section>
         )}
-        {operations}
       </aside>
     );
   }
@@ -180,12 +206,27 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
       <header className="pp-head">
         <div className="pp-label-row"><div className="panel-label">{t('Project')}</div>{collapseBtn}</div>
         <div className="pp-title-row">
-          <h2 className="panel-title">{project.name}</h2>
-          <button type="button" className="icon-btn pp-edit" onClick={onSetup} title={t('Set up project')}><IconEdit size={15} /></button>
+          {editingName ? <form className="pp-name-form" onSubmit={(e) => { e.preventDefault(); void saveProject('name'); }}>
+            <input aria-label={t('Project name')} autoFocus value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { setEditingName(false); setProjectError(''); } }} />
+            <button type="submit" className="icon-btn" title={t('Save')} aria-label={t('Save')} disabled={savingProject || !nameDraft.trim()}><IconCheck size={15} /></button>
+            <button type="button" className="icon-btn" title={t('Cancel')} aria-label={t('Cancel')} disabled={savingProject} onClick={() => { setEditingName(false); setProjectError(''); }}><IconX size={15} /></button>
+          </form> : <>
+            <h2 className="panel-title">{project.name}</h2>
+            <button type="button" className="icon-btn pp-edit" onClick={() => { setNameDraft(project.name); setProjectError(''); setEditingName(true); }} title={t('Edit project name')} aria-label={t('Edit project name')}><IconEdit size={15} /></button>
+          </>}
         </div>
         {project.description
-          ? <p className="pp-desc small" title={project.description}>{project.description}</p>
-          : <button type="button" className="link small" onClick={onSetup}>{t('Add a description')}</button>}
+          ? <><p className="pp-desc small">{project.description}</p><button type="button" className="link small pp-description-link" onClick={() => { setProjectError(''); setDescriptionMode('view'); }}>{t('See full description…')}</button></>
+          : <button type="button" className="link small pp-description-link" onClick={() => { setDescriptionDraft(project.description); setProjectError(''); setDescriptionMode('edit'); }}>{t('Add a description')}</button>}
+        {descriptionMode !== 'closed' && <div className="pp-description-card" role="region" aria-label={t('Description')}>
+          <div className="pp-description-head"><strong>{t('Description')}</strong><button type="button" className="icon-btn" title={t('Close')} aria-label={t('Close')} disabled={savingProject} onClick={() => { setDescriptionMode('closed'); setProjectError(''); }}><IconX size={15} /></button></div>
+          {descriptionMode === 'view' ? <><p className="pp-description-full">{project.description}</p><button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDescriptionDraft(project.description); setDescriptionMode('edit'); }}>{t('Edit description')}</button></>
+            : <form onSubmit={(e) => { e.preventDefault(); void saveProject('description'); }}>
+              <textarea aria-label={t('Description')} autoFocus rows={4} maxLength={2000} value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} />
+              <div className="form-actions"><button type="button" className="btn btn-ghost btn-sm" disabled={savingProject} onClick={() => { setDescriptionMode('closed'); setProjectError(''); }}>{t('Cancel')}</button><button type="submit" className="btn btn-sm" disabled={savingProject}>{savingProject ? t('Saving…') : t('Save')}</button></div>
+            </form>}
+        </div>}
+        {projectError && <p className="error small" role="alert">{projectError}</p>}
       </header>
 
       {planPending && <button type="button" className="pp-banner" onClick={onSetup}>{t('The AI proposed a plan — review it')}<IconChevron size={14} /></button>}

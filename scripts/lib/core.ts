@@ -503,11 +503,11 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
       const dir = `${workspace}/projects/${project}`;
       const names = (l: string[] = []) => (l.length ? l.join(', ') : 'none');
       parts.push(`Use the project-context skill to plan this blank project ("Plan a blank project" procedure). Read ${dir}/plan.json first.`
-        + ` If it has "approved": true, create only the contextFiles it lists (confirmed answers only), list them in context/index.md and project.json contextFiles, and stop.`
+        + ` If it has "approved": true, create only the folders and contextFiles it lists inside the project, without overwriting existing files (confirmed answers only); list context files in context/index.md and project.json contextFiles, and stop.`
         + ` Otherwise: the goal is ${description.trim() ? JSON.stringify(description.trim()) : 'the description in project.json (ask me for it if it is empty)'}.${repository ? ' Look at the linked folder first.' : ''}`
-        + ' Interview me one question at a time about what the project needs: goal, technologies, team, and what to link (repository, skills, agents, knowledge sources, inbox documents).'
+        + ' Interview me one question at a time about what the project needs: goal, description, technologies, team, folders, and what to link (repository, skills, agents, knowledge sources, inbox documents).'
         + ` Then write the plan to ${dir}/proposed-updates.md and the recommendation to ${dir}/plan.json, recommending only these names - skills: ${names(available?.skills)}; agents: ${names(available?.agents)}; skills I still need go in searchSkills as search terms.`
-        + ' Stop and tell me to review the plan in the app. Do not create context files, install or link anything before I approve it there.');
+        + ' Stop and tell me to review the plan in the app. Do not create proposed folders or context files, install or link anything before I approve it there.');
       if (list) parts.push(`Documents to use: ${list}.`);
       break;
     }

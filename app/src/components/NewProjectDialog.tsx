@@ -1,6 +1,6 @@
 // "Create and customize…" (start screen): the name typed there, optional tags and how the context
-// starts (empty, growing with the activities, or planned with the AI), in one window; creating it opens
-// the project with "Set up" (description, skills, agents). Enter on the name skips all of this.
+// starts (empty, growing with the activities, or planned with the AI), in one window.
+// An empty project opens directly; an AI-planned project opens its setup.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Starter, Tag } from '../api';
@@ -48,7 +48,7 @@ export function NewProjectDialog({ name: typed, catalog, onCatalog, onCreate, on
         <header className="modal-head">
           <div>
             <h2 id="new-project-title">{t('Customize the project')}</h2>
-            <p className="muted small">{t('After creating it, you set up its description, skills and agents.')}</p>
+            {starter === 'blank' && <p className="muted small">{t('Choose your AI after creating the project to plan it together.')}</p>}
           </div>
           <button type="button" className="icon-btn" onClick={onClose} title={t('Close (Esc)')}><IconX size={18} /></button>
         </header>
@@ -76,7 +76,7 @@ export function NewProjectDialog({ name: typed, catalog, onCatalog, onCreate, on
         </div>
         <footer className="modal-foot">
           <button type="button" className="btn btn-ghost" onClick={onClose}>{t('Cancel')}</button>
-          <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : t('Create and set up')}</button>
+          <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : starter === 'minimal' ? t('Create project') : t('Create and plan with AI')}</button>
         </footer>
       </form>
     </div>

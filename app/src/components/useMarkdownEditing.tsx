@@ -4,7 +4,8 @@
 // A caller adds its own commands (an image, an @ mention) with `extra`. The / list opens at the
 // caret: under its line, or above it when there is no room below (the editor's wrapper is the frame).
 
-import { useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { t } from '../i18n';
 import { IconCode, IconLink } from './Icons';
 
@@ -22,7 +23,7 @@ const MIRRORED = ['box-sizing', 'width', 'padding-top', 'padding-right', 'paddin
   'border-bottom-width', 'border-left-width', 'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing', 'line-height', 'word-spacing', 'tab-size', 'text-indent'];
 
 // Where the / list goes, in its wrapper (the textarea's offsetParent): under the caret's line, or above it.
-function menuAt(el: HTMLTextAreaElement, pos: number): CSSProperties {
+function menuAt(el: HTMLTextAreaElement, pos: number, floating = false): CSSProperties {
   const style = getComputedStyle(el);
   const twin = document.createElement('div');
   for (const k of MIRRORED) twin.style.setProperty(k, style.getPropertyValue(k));
@@ -35,7 +36,17 @@ function menuAt(el: HTMLTextAreaElement, pos: number): CSSProperties {
   const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
   const top = el.offsetTop + mark.offsetTop - el.scrollTop;
   const left = el.offsetLeft + mark.offsetLeft - el.scrollLeft;
+  const caretTop = el.getBoundingClientRect().top + mark.offsetTop - el.scrollTop;
+  const caretLeft = el.getBoundingClientRect().left + mark.offsetLeft - el.scrollLeft;
   twin.remove();
+  if (floating) {
+    const width = Math.min(MENU_WIDTH, Math.max(0, window.innerWidth - 16));
+    const height = Math.min(MENU_HEIGHT, Math.max(0, window.innerHeight - 16));
+    const below = caretTop + line + 4;
+    const above = caretTop - height - 4;
+    const y = below + height <= window.innerHeight - 8 ? below : above >= 8 ? above : Math.max(8, window.innerHeight - height - 8);
+    return { position: 'fixed', top: y, bottom: 'auto', left: Math.max(8, Math.min(caretLeft, window.innerWidth - width - 8)), right: 'auto', width, maxHeight: height, transform: 'none' };
+  }
   const frame = el.offsetParent as HTMLElement | null;
   const height = frame?.clientHeight ?? Infinity;
   const width = Math.min(MENU_WIDTH, (frame?.clientWidth ?? MENU_WIDTH) - 16);
@@ -46,7 +57,7 @@ function menuAt(el: HTMLTextAreaElement, pos: number): CSSProperties {
     : { top: 'auto', bottom: height - top + 4, left: x, right: 'auto', width, transform: 'none' };
 }
 
-export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>, extra: (helpers: { insert: (value: string, select?: [number, number]) => void; lineStart: () => boolean }) => SlashCommand[] = () => []) {
+export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>, extra: (helpers: { insert: (value: string, select?: [number, number]) => void; lineStart: () => boolean }) => SlashCommand[] = () => [], floatingMenu = false) {
   const replace = (from: number, to: number, value: string, selFrom: number, selTo: number) => {
     const el = editor.current;
     if (!el) return;
@@ -138,13 +149,25 @@ export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>
   ];
 
   const [slash, setSlash] = useState<{ start: number; query: string; index: number; at?: CSSProperties } | null>(null);
+  const slashMenu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!floatingMenu || !slash) return;
+    const reposition = () => {
+      const el = editor.current;
+      if (el) setSlash((current) => current ? { ...current, at: menuAt(el, current.start, true) } : current);
+    };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
+  }, [editor, floatingMenu, slash?.start]);
+  useEffect(() => { slashMenu.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }); }, [slash?.index]);
   const slashMatches = slash ? commands.filter((c) => fold(`${c.label} ${c.id} ${c.words}`).includes(fold(slash.query))) : [];
   // A / at the start of a line or after a space opens the list; what follows it filters the list.
   const findSlash = (value: string, caret: number) => {
     const m = value.slice(0, caret).match(/(^|\s)\/([\p{L}\p{N}]*)$/u);
     const el = editor.current;
     const start = caret - (m?.[2].length ?? 0) - 1;
-    setSlash(m ? { start, query: m[2], index: 0, at: el ? menuAt(el, start) : undefined } : null); // lined up with the /, so it stays put while typing
+    setSlash(m ? { start, query: m[2], index: 0, at: el ? menuAt(el, start, floatingMenu) : undefined } : null); // lined up with the /, so it stays put while typing
   };
   const pickSlash = (command: { run: () => void; line?: boolean }) => {
     const el = editor.current;
@@ -194,8 +217,8 @@ export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>
   };
 
   // The / list, at the caret while a command is typed.
-  const slashList = slash && (
-    <div className="note-mention" role="listbox" aria-label={t('Commands')} style={slash.at}>
+  const menu = slash && (
+    <div ref={slashMenu} className={`note-mention${floatingMenu ? ' note-mention-floating' : ''}`} role="listbox" aria-label={t('Commands')} style={slash.at}>
       {!slashMatches.length ? <p className="muted small">{t('No command matches "{q}".', { q: slash.query })}</p>
         : slashMatches.map((c, i) => (
           <button key={c.id} type="button" role="option" aria-selected={i === slash.index} className={i === slash.index ? 'on' : ''}
@@ -205,6 +228,7 @@ export function useMarkdownEditing(editor: RefObject<HTMLTextAreaElement | null>
         ))}
     </div>
   );
+  const slashList = menu && floatingMenu ? createPortal(menu, document.body) : menu;
 
   return {
     replace, insert, wrap, heading, bullets, numbers, checks, quote, code, link, table, divider, codeBlock, lineStart,

@@ -9,13 +9,16 @@ import { defaultTool, remember } from '../prefs';
 import { IconCheck, IconCode, IconCopy, IconFile, IconFolder, IconGlobe, IconPlay, IconRefresh, IconTerminal, IconX } from './Icons';
 import { FileIcon } from '../icons';
 import { TagChip } from './TagPicker';
+import type { ActivityLaunchPhase } from '../activity-launches';
 
 interface Props {
   project: ProjectSummary;
   tools: ToolInfo[];
-  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string }; // skipActivity: the activity was already chosen (side panel); tool: the AI chosen there
+  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string; startAtTool?: boolean }; // skipActivity: the activity was already chosen (side panel); tool: the AI chosen there
   onClose: () => void;
   onTerminal: (terminal: TerminalRef) => void; // the tool opened in a terminal tab of the app
+  onActivityStart?: (activity: string, label: string) => string | undefined;
+  onActivityUpdate?: (id: string | undefined, phase: ActivityLaunchPhase) => void;
   onOperation?: (operation: string) => void; // an activity of an operation opens its start form instead
   onMyAis?: () => void; // Settings › My AIs, to install the AIs not found here
 }
@@ -32,7 +35,7 @@ const kindHint = (kind: ToolKind): string => ({
 
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOperation, onMyAis }: Props) {
+export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onActivityStart, onActivityUpdate, onOperation, onMyAis }: Props) {
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [languages, setLanguages] = useState<string[]>(['English']);
   const [activity, setActivity] = useState(preset?.activity ?? '');
@@ -50,7 +53,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
     const saved = preset?.tool ?? defaultTool();
     return tools.some((t) => t.id === saved && t.available) ? saved as string : '';
   });
-  const [step, setStep] = useState<StepKey>(preset?.activity === 'resume' && preset.run ? 'details' : preset?.skipActivity && preset.activity ? 'files' : 'activity');
+  const [step, setStep] = useState<StepKey>(preset?.startAtTool ? 'tool' : preset?.activity === 'resume' && preset.run ? 'details' : preset?.skipActivity && preset.activity ? 'files' : 'activity');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<LaunchResult | null>(null);
   const [error, setError] = useState('');
@@ -85,7 +88,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const resume = activity === 'resume';
   // The context step only shows when the project's tags bring something from other projects.
   const sharing = choice.shared.length > 0;
-  const steps: StepKey[] = ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
+  const steps: StepKey[] = preset?.startAtTool ? ['tool', 'review'] : ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
   const toggle = (paths: string[]) => setExclude((ex) => (paths.every((p) => ex.includes(p)) ? ex.filter((p) => !paths.includes(p)) : [...new Set([...ex, ...paths])]));
   const sharedPaths = [...new Set(choice.shared.flatMap((g) => g.sources.flatMap((s) => s.paths)))];
   const keptShared = sharedPaths.filter((p) => !exclude.includes(p));
@@ -102,22 +105,26 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
 
   const submit = async () => {
     setBusy(true); setResult(null); setError(''); setCopied(false);
+    const trackingId = onActivityStart?.(activity, current ? t(current.label) : activity);
     remember('qa-language', language);
     // The window shares the main process. If opening the tool never returns, say so instead of leaving "Opening…" up.
     let late = false;
     const timer = window.setTimeout(() => {
       late = true;
       setBusy(false);
+      onActivityUpdate?.(trackingId, 'unconfirmed');
       setError(t('The request is taking too long. Close this and try again.'));
     }, 20000);
     try {
-      const r = await api.launch({ project: project.id, activity, tool, files, note, language, run: resume ? run : undefined, agent: agent || undefined, exclude: resume ? [] : exclude });
+      const r = await api.launch({ project: project.id, activity, tool, files, note, language, run: resume ? run : undefined, agent: agent || undefined, exclude: resume ? [] : exclude, ...(trackingId ? { trackingId } : {}) });
       if (late) return;
+      onActivityUpdate?.(trackingId, r.copied ? 'prepared' : r.terminal || r.opened ? 'sent' : r.prompt && !r.message ? 'prepared' : 'failed');
       if (r.terminal) { onTerminal(r.terminal); return; }
       setResult(r);
       if (!r.opened && r.message) setError(r.message);
       else if (!r.opened && !r.prompt) setError(t('The request could not be prepared.'));
     } catch (e) {
+      if (!late) onActivityUpdate?.(trackingId, 'failed');
       if (!late) setError(e instanceof Error ? e.message : String(e));
     } finally {
       window.clearTimeout(timer);
@@ -152,7 +159,9 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const q = questions[step];
 
   const agentLabel = agent || t('Let the skill decide');
-  const summary: { step: StepKey; label: string; value: string }[] = [
+  const summary: { step: StepKey; label: string; value: string }[] = preset?.startAtTool ? [
+    { step: 'tool', label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' },
+  ] : [
     { step: 'activity', label: t('Activity'), value: current ? t(current.label) : '—' },
     ...(resume ? [{ step: 'run' as StepKey, label: t('Continue'), value: run ? describeRun(run).title : '—' }] : [
       { step: 'files' as StepKey, label: t('Files'), value: files.length ? files.join(', ') : t('None') },

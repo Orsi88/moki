@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, symli
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import { spawnSync } from 'node:child_process';
 import { callService, createService, ServiceError, type FileContent, type TreeNode } from '../desktop/service.ts';
 import { PathError, resolveInside, isEditable, isOpenable } from '../desktop/fs-guard.ts';
@@ -15,9 +16,11 @@ import { selectionMarks, selectionNote, stackCards } from '../app/src/pdf-quads.
 import { docxToMarkdown, readableInputs } from '../scripts/lib/docx.ts';
 import { frameworkTarget, syncFramework } from '../desktop/framework.ts';
 import { noteKey, noteQuery, parseNoteRequest } from '../desktop/notes.ts';
+import { remapPdfNotes, type PdfNote } from '../desktop/pdf-notes.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
 import { formatNumber } from '../scripts/lib/numfmt.mjs';
 import { zip } from '../scripts/lib/zip.mjs';
+import { buildXlsx } from '../scripts/xlsx.mjs';
 import { ROOT } from '../scripts/lib/repo.mjs';
 import { CRAFT_APPS, craftAssetEndings, createProject, installPlan, linuxPackageFamily, pickCraftAssets, slugify, TOOLS, windowsSafePrompt, type ToolKey } from '../scripts/lib/core.ts';
 
@@ -161,6 +164,32 @@ test('notes: the section is always listed and new notes get unique names', () =>
   assert.equal(service.createNote('acme', 'Ideias de teste', 'b'), 'notes/ideias-de-teste-2.md');
   assert.equal((service.readFile('acme', 'notes/ideias-de-teste-2.md') as Extract<FileContent, { kind: 'markdown' }>).text, 'b');
   assert.throws(() => service.createNote('acme', '../..', 'x'), /title/);
+});
+
+test('PDF note associations stay in the project, follow pages and reject invalid paths', () => {
+  const note = service.createNote('acme', 'Nota intercalada', 'original');
+  const entry: PdfNote = { id: 'a1111111-1111-4111-8111-111111111111', after: 2, note: { path: note } };
+  assert.deepEqual(service.pdfNotes('acme', 'inbox/report.pdf'), []);
+  service.setPdfNotes('acme', 'inbox/report.pdf', [entry]);
+  assert.deepEqual(service.pdfNotes('acme', 'inbox/report.pdf'), [entry]);
+  const colored = { ...entry, color: 'green' };
+  service.setPdfNotes('acme', 'inbox/report.pdf', [colored]);
+  assert.deepEqual(service.pdfNotes('acme', 'inbox/report.pdf'), [colored]);
+  assert.equal(remapPdfNotes([colored], { op: 'move-page', page: 2, to: 1 })[0].color, 'green');
+  assert.throws(() => service.setPdfNotes('acme', 'inbox/report.pdf', [{ ...entry, color: 'invalid' }]), /Invalid/);
+  assert.equal(remapPdfNotes([entry], { op: 'insert-blank', at: 1 })[0].after, 3);
+  assert.equal(remapPdfNotes([entry], { op: 'move-page', page: 2, to: 1 })[0].after, 1);
+  assert.equal(remapPdfNotes([entry], { op: 'delete-pages', pages: [1, 2] })[0].after, 0);
+  assert.throws(() => service.setPdfNotes('acme', 'inbox/report.pdf', [{ ...entry, note: { path: 'notes/../../secret.md' } }]), /Invalid/);
+  assert.throws(() => service.pdfNotes('acme', '../../secret.txt'), ServiceError);
+  assert.equal(service.writeNoteIfUnchanged('acme', note, 'first editor', 'original'), true);
+  assert.equal(service.writeNoteIfUnchanged('acme', note, 'stale editor', 'original'), false);
+  assert.equal((service.readFile('acme', note) as Extract<FileContent, { kind: 'markdown' }>).text, 'first editor');
+  assert.equal(service.setNoteTitle('acme', note, 'Nota revisada'), true);
+  assert.deepEqual(service.noteTitles('acme').find((item) => item.path === note), { path: note, title: 'Nota revisada' });
+  assert.equal((service.readFile('acme', note) as Extract<FileContent, { kind: 'markdown' }>).text, 'first editor');
+  assert.throws(() => service.setNoteTitle('acme', '../secret.txt', 'bad'), ServiceError);
+  assert.throws(() => service.writeNoteIfUnchanged('acme', '../secret.txt', 'x', 'y'), ServiceError);
 });
 
 test('notes: one is deleted from the start screen; nothing outside notes/ is', async () => {
@@ -424,10 +453,14 @@ test('PDF comments go through PdfCraft, inside the project, never changing the i
   assert.deepEqual((await svc.pdfComments('acme', 'inbox/doc.pdf')).map((c) => c.id), ['c1']);
   assert.equal(calls[0].root, realpathSync(project));
   assert.equal(calls[0].steps[0].args.path, 'inbox/doc.pdf');
+  const linked = { id: 'b1111111-1111-4111-8111-111111111111', after: 1, note: { path: svc.createNote('acme', 'PDF linked note', 'content') } };
+  svc.setPdfNotes('acme', 'inbox/doc.pdf', [linked]);
+  svc.setPdfNotes('acme', 'runs/out/r.pdf', [linked]);
   const change = { op: 'highlight', page: 1, find: 'a', color: 'yellow' };
   assert.equal((await svc.pdfChange('acme', 'inbox/doc.pdf', change)).path, 'inbox/doc-edited.pdf');
   assert.deepEqual(calls.at(-1)?.steps.find((s) => s.tool === 'doc_save')?.args, { doc: 1, path: 'inbox/doc-edited.pdf' });
   writeFileSync(join(project, 'inbox', 'doc-edited.pdf'), '%PDF-1.7\n');
+  assert.deepEqual(svc.pdfNotes('acme', 'inbox/doc-edited.pdf'), [linked]);
   assert.equal((await svc.pdfChange('acme', 'inbox/doc.pdf', change)).path, 'inbox/doc-edited-2.pdf');
   assert.equal((await svc.pdfChange('acme', 'inbox/doc-edited.pdf', change)).path, 'inbox/doc-edited.pdf', 'the copy saves in place');
   assert.equal((await svc.pdfChange('acme', 'runs/out/r.pdf', change)).path, 'runs/out/r.pdf');
@@ -437,6 +470,7 @@ test('PDF comments go through PdfCraft, inside the project, never changing the i
   assert.equal((await svc.pdfChange('acme', 'runs/out/r.pdf', del)).path, 'runs/out/r-edited.pdf');
   assert.deepEqual(calls.at(-1)?.steps.find((s) => s.tool === 'page_delete')?.args, { doc: 1, pages: [1] });
   writeFileSync(join(project, 'runs', 'out', 'r-edited.pdf'), '%PDF-1.7\n');
+  assert.equal(svc.pdfNotes('acme', 'runs/out/r-edited.pdf')[0].after, 0);
   assert.equal((await svc.pdfChange('acme', 'runs/out/r-edited.pdf', del)).path, 'runs/out/r-edited.pdf');
   await assert.rejects(svc.pdfChange('acme', 'inbox/doc.pdf', { op: 'render' }), ServiceError);
   await assert.rejects(svc.pdfComments('acme', 'inbox/us-1.md'), /PDF not found/);
@@ -466,6 +500,39 @@ test('launch validates every choice against fixed lists', () => {
   assert.throws(() => service.launch({ ...base, activity: 'automation' }), /not available yet/);
   assert.throws(() => service.launch({ ...base, activity: 'resume', run: 'x' }), /open activity/);
   assert.equal(launched.length, 0);
+});
+
+test('project name and description updates preserve all other project settings', () => {
+  const before = service.projects().find((p) => p.id === 'acme')!;
+  const file = join(root, 'workspace', 'projects', 'acme', 'project.json');
+  const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  assert.throws(() => service.setProjectName('acme', '   '), /name/);
+  assert.throws(() => service.setProjectName('../acme', 'Wrong'), /Unknown project/);
+  assert.throws(() => service.setProjectDescription('acme', 'x'.repeat(2001)), /2000/);
+  const renamed = service.setProjectName('acme', '  New title  ');
+  assert.equal(renamed.id, 'acme');
+  assert.equal(renamed.name, 'New title');
+  assert.equal(renamed.description, before.description);
+  const described = service.setProjectDescription('acme', 'First line\nSecond line');
+  assert.equal(described.name, 'New title');
+  assert.equal(described.description, 'First line\nSecond line');
+  const after = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  assert.deepEqual({ ...after, name: data.name, description: data.description }, data);
+  service.setProjectName('acme', before.name);
+  service.setProjectDescription('acme', before.description);
+});
+
+test('activity tracking is optional, validated and never creates a run', () => {
+  const base = { project: 'acme', activity: 'review', tool: 'print', files: ['us-1.md'], language: 'English', note: '' };
+  const token = 'a'.repeat(32);
+  const runs = service.activityRuns('acme');
+  const result = service.launch({ ...base, trackingId: token });
+  assert.match(result.prompt, new RegExp(`use the slug moki-${token}`));
+  assert.match(result.prompt, /Do not create a run solely for tracking/);
+  assert.deepEqual(service.activityRuns('acme'), runs);
+  assert.throws(() => service.launch({ ...base, trackingId: '../bad' }), /Invalid activity tracking identifier/);
+  assert.throws(() => service.launch({ ...base, activity: 'resume', trackingId: token }), /Invalid activity tracking identifier/);
+  assert.doesNotMatch(service.launch(base).prompt, /solely for tracking/);
 });
 
 test('launch builds the request; Word files are extracted', () => {
@@ -1495,23 +1562,26 @@ test('blank project: no QA context files; the AI plan is filtered and approved f
   const prompt = svc.launch(plan).prompt;
   assert.match(prompt, /one question at a time/);
   assert.match(prompt, /skills: react-dev; agents: [^;]*failure-analyst/);
-  assert.match(prompt, /Do not create context files, install or link anything before I approve/);
+  assert.match(prompt, /Do not create proposed folders or context files, install or link anything before I approve/);
   assert.deepEqual(svc.launch({ ...plan, tool: 'chat' }).upload?.filter((f) => f.includes('context')), [], 'no missing context/index.md upload');
 
   writeFileSync(join(dir, 'plan.json'), JSON.stringify({
     skills: ['react-dev', 'ghost'], agents: ['failure-analyst', 'nobody'], searchSkills: ['playwright', 7],
     contextFiles: [{ path: 'context/stack.md', contains: 'Tech stack' }, { path: 'context/team.md' }, { path: '../escape.md' }],
+    folders: [{ path: 'design/docs', contains: 'Documentation' }, { path: 'drafts', contains: 'Drafts' }, { path: '../outside' }, { path: '/absolute' }],
   }));
   assert.deepEqual(svc.readPlan('blank-one'), {
     approved: false, skills: ['react-dev'], agents: ['failure-analyst'], searchSkills: ['playwright'],
     contextFiles: [{ path: 'context/stack.md', contains: 'Tech stack' }, { path: 'context/team.md', contains: '' }],
+    folders: [{ path: 'design/docs', contains: 'Documentation' }, { path: 'drafts', contains: 'Drafts' }],
   });
   assert.throws(() => svc.setupProject('blank-one', { description: 'x', linkedSkills: [], agents: ['nobody'] }), /Unknown or unavailable agents: nobody/);
-  const summary = svc.setupProject('blank-one', { description: 'React app', linkedSkills: ['react-dev'], agents: ['failure-analyst'], contextFiles: ['context/stack.md'] });
+  const summary = svc.setupProject('blank-one', { description: 'React app', linkedSkills: ['react-dev'], agents: ['failure-analyst'], contextFiles: ['context/stack.md'], folders: ['design/docs', '../outside'] });
   assert.deepEqual(summary.linkedSkills, ['react-dev']);
   assert.deepEqual(svc.projectAgents('blank-one'), ['failure-analyst']);
   assert.deepEqual(svc.readPlan('blank-one'), {
     approved: true, skills: ['react-dev'], agents: ['failure-analyst'], searchSkills: ['playwright'], contextFiles: [{ path: 'context/stack.md', contains: 'Tech stack' }],
+    folders: [{ path: 'design/docs', contains: 'Documentation' }],
   });
   assert.deepEqual(svc.projectAgents('acme').length > 1, true, 'Set up without agents keeps every agent');
   rmSync(home, { recursive: true, force: true });
@@ -2108,6 +2178,39 @@ test('search: projects by name, files by name and text, filters by tag', () => {
 });
 
 // ---- ArtCraft apps download (scripts/lib/core.ts CRAFT_APPS, desktop/craft-download.ts) ----
+
+test('expanded search: prefixes distinguish projects, file names and contents', async () => {
+  const inbox = join(root, 'workspace', 'projects', 'acme', 'inbox');
+  const textFile = join(inbox, 'search-proof.txt');
+  const otherFile = join(inbox, 'search-proof.png');
+  const wordFile = join(inbox, 'search-proof.docx');
+  const pdfFile = join(inbox, 'search-proof.pdf');
+  const xlsxFile = join(inbox, 'search-proof.xlsx');
+  writeFileSync(textFile, 'A distinctive phrase: quasarneedle');
+  writeFileSync(otherFile, 'not an image');
+  writeFileSync(wordFile, makeDocx());
+  const pdf = await PDFDocument.create();
+  pdf.addPage().drawText('pdfuniqueneedle');
+  writeFileSync(pdfFile, await pdf.save());
+  const layout = JSON.parse(readFileSync(join(ROOT, 'skills', 'test-design', 'assets', 'test-cases.layout.json'), 'utf8'));
+  writeFileSync(xlsxFile, buildXlsx(layout, { testCases: [{ source: 'spreadsheetuniqueneedle' }] }));
+  try {
+    assert.ok((await service.searchExpanded('projeto: acm', [])).projects.some((p) => p.id === 'acme'));
+    assert.equal((await service.searchExpanded('projeto: acm', [])).files.length, 0);
+    assert.ok((await service.searchExpanded('arquivo: search-proof', [])).files.some((f) => f.path.endsWith('.png')));
+    assert.ok((await service.searchExpanded('conteudo: quasarneedle', [])).files.some((f) => f.path.endsWith('.txt')));
+    assert.ok((await service.searchExpanded('conteudo: na caixa', [])).files.some((f) => f.path.endsWith('.docx')));
+    assert.ok((await service.searchExpanded('conteudo: pdfuniqueneedle', [])).files.some((f) => f.path.endsWith('.pdf')));
+    assert.ok((await service.searchExpanded('conteudo: spreadsheetuniqueneedle', [])).files.some((f) => f.path.endsWith('.xlsx')));
+    assert.equal((await service.searchExpanded('conteudo: search-proof', [])).files.length, 0);
+  } finally {
+    rmSync(textFile, { force: true });
+    rmSync(otherFile, { force: true });
+    rmSync(wordFile, { force: true });
+    rmSync(pdfFile, { force: true });
+    rmSync(xlsxFile, { force: true });
+  }
+});
 
 test('craft apps: fixed list with unique ids and a storytold repo', () => {
   assert.equal(CRAFT_APPS.length, 16);

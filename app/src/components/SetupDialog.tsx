@@ -31,6 +31,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
   const [plugins, setPlugins] = useState<string[]>(project.plugins);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [files, setFiles] = useState<string[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [prepare, setPrepare] = useState(true);
   const [finding, setFinding] = useState<string | null>(null); // Find skills query while open
   const [uploading, setUploading] = useState(false); // the upload of skills or a .claude folder is open on top
@@ -49,6 +50,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
         setLinked((s) => [...new Set([...s, ...p.skills])]);
         setEnabled(p.agents);
         setFiles(p.contextFiles.map((f) => f.path));
+        setFolders(p.folders.map((f) => f.path));
       } else setEnabled(current);
     });
   }, [project.id]);
@@ -79,7 +81,7 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
       await api.setupProject(project.id, {
         description, linkedSkills: linked.filter((n) => global.includes(n) || artcraft.includes(n)),
         ...(pending || agentsChanged ? { agents: enabled } : {}),
-        ...(pending ? { contextFiles: files } : {}),
+        ...(pending ? { contextFiles: files, folders } : {}),
       });
       await api.setProjectPlugins(project.id, plugins);
       onSaved(prepare && next.ready ? next.activity : null);
@@ -180,6 +182,16 @@ export function SetupDialog({ project, onClose, onSaved }: Props) {
             </ul>
           </div>
 
+          {pending && Boolean(plan?.folders.length) && (
+            <div className="field">
+              <span className="label">{t('Folders the AI will create')}</span>
+              <ul className="file-pick">{plan?.folders.map((f) => <li key={f.path}>
+                <label><input type="checkbox" checked={folders.includes(f.path)} onChange={() => setFolders((s) => flip(s, f.path))} />
+                  <span className="file-name">{f.path}</span>{f.contains && <span className="muted small">{f.contains}</span>}
+                </label>
+              </li>)}</ul>
+            </div>
+          )}
           {pending && Boolean(plan?.contextFiles.length) && (
             <div className="field">
               <span className="label">{t('Context files the AI will create')}</span>

@@ -2,7 +2,7 @@
 // (view and edit) and terminals (AI tools or a shell), and a side panel with
 // the activity or project details.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
 import { api, type FileContent, type ProjectSummary, type Tag, type TerminalRef, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { defaultTool, recall, remember } from '../prefs';
@@ -22,14 +22,15 @@ import { TagPicker } from '../components/TagPicker';
 import { SearchPanel } from '../components/SearchPanel';
 import { IconCode, IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, IconMore, IconStar, IconTerminal, IconX } from '../components/Icons';
 import { NewEntryDialog } from '../components/NewEntryDialog';
-import { favoriteNotes, hideProject, isFavorite, setFavorite } from '../side-menu';
+import { favoriteNotes, hideProject, isFavorite, setFavorite, touchRecentFile } from '../side-menu';
 import { AddButton } from '../components/AddButton';
 import { CraftDownloads } from '../components/CraftDownloads';
 import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
+import { parseActivityLaunches, type ActivityLaunch, type ActivityLaunchPhase } from '../activity-launches';
 
-interface Props { project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
+interface Props { workspaceId: string; project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
 
 interface Tab { path: string; content: FileContent; draft: string; mode: 'preview' | 'edit'; saving: boolean }
 interface TermTab extends TerminalRef { running: boolean }
@@ -39,6 +40,7 @@ const THINKING_CAT = `./${encodeURIComponent('Thoughtful Pixel Cat at Work.png')
 
 const textOf = (c: FileContent): string => (c.kind === 'markdown' || c.kind === 'text' ? c.text : '');
 const isDirty = (t: Tab): boolean => (t.content.kind === 'markdown' || t.content.kind === 'text') && t.content.editable && t.draft !== t.content.text;
+const sidebarWidthWithinBounds = (width: number) => Math.max(180, Math.min(720, Math.round(width)));
 
 // Resolves a link found in a document relative to that document's folder.
 function resolveLink(from: string, href: string): string | null {
@@ -55,11 +57,26 @@ export const linkedNotice = (r: ProjectSummary & { backup?: string }): string =>
   ? t('Linked {folder}. Its AI settings were backed up to {backup}', { folder: r.repository, backup: r.backup })
   : t('Linked {folder}. It has no AI settings (.claude, AGENTS.md…) to back up.', { folder: r.repository }));
 
-export function Workspace({ project, tools, onHome, settings, onSettings, onProjectChanged, launchOnOpen = false, startSetup = false, startNotice = '', pendingTerminal = null, onPendingTerminal, pendingPath = null, onPendingPath, search = false, onSearch, onFound, onToolsChanged }: Props) {
+export function Workspace({ workspaceId, project, tools, onHome, settings, onSettings, onProjectChanged, launchOnOpen = false, startSetup = false, startNotice = '', pendingTerminal = null, onPendingTerminal, pendingPath = null, onPendingPath, search = false, onSearch, onFound, onToolsChanged }: Props) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => recall('qa-sidebar') === 'closed');
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(() => {
+    const saved = recall('qa-sidebar-width');
+    const width = saved === null ? NaN : Number(saved);
+    return Number.isFinite(width) ? sidebarWidthWithinBounds(width) : null;
+  });
+  const sidebar = useRef<HTMLElement>(null);
+  const resizeSidebar = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
+  const setSidebarOpen = (open: boolean) => { setSidebarCollapsed(!open); remember('qa-sidebar', open ? 'open' : 'closed'); };
+  useEffect(() => { if (search) setSidebarOpen(true); }, [search]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') setSidebarOpen(true); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // The right panel is open or collapsed to a thin rail; the choice is remembered.
   const [panelRail, setPanelRail] = useState(() => recall('qa-panel') === 'rail');
   const togglePanel = () => setPanelRail((v) => { remember('qa-panel', v ? 'open' : 'rail'); return !v; });
@@ -74,7 +91,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
     if (docSide) { window.dispatchEvent(new Event('moki:doc-side-close')); setPanelRail(false); return; }
     togglePanel();
   };
-  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean; tool?: string } | null>(launchOnOpen ? { activity: 'open' } : null);
+  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean; tool?: string; startAtTool?: boolean } | null>(startSetup && project.starter === 'blank' ? { activity: 'plan', startAtTool: true } : launchOnOpen ? { activity: 'open' } : null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(startNotice);
@@ -87,13 +104,27 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const closeGraph = () => { setGraphOpen(false); setGraphFocus(false); };
   const toggleGraph = () => { if (graphFocus) closeGraph(); else openGraph(); };
   const openedTerm = useRef<string | null>(null);
-  const [showSetup, setShowSetup] = useState(startSetup); // after creating the project or linking a folder
+  const [showSetup, setShowSetup] = useState(startSetup && project.starter !== 'blank'); // after creating the project or linking a folder
   const [note, setNote] = useState<{ path: string | null } | null>(null); // open note (main area); path null = new note
   // A multi-agent operation in the main area: its start screen, or one of its runs.
   const [opView, setOpView] = useState<{ kind: 'launch' | 'run'; id: string } | null>(null);
   // An activity of an operation: its start form, in place of the request.
   const startOperationForm = (id: string) => { setLaunch(null); setNote(null); setOpView({ kind: 'launch', id }); };
   const [opsTick, setOpsTick] = useState(0);
+  const launchKey = `qa-activity-launches:${workspaceId}:${project.id}`;
+  const [activityLaunches, setActivityLaunches] = useState<ActivityLaunch[]>(() => parseActivityLaunches(recall(launchKey)));
+  const [activityLaunchTick, setActivityLaunchTick] = useState(0);
+  useEffect(() => { remember(launchKey, JSON.stringify(activityLaunches)); }, [launchKey, activityLaunches]);
+  const beginActivity = (activity: string, label: string): string | undefined => {
+    if (activity === 'resume' || activity === 'talk') return undefined;
+    const id = crypto.randomUUID().replace(/-/g, '');
+    setActivityLaunches((items) => [{ id, activity, label, at: new Date().toISOString(), phase: 'sending' }, ...items]);
+    setActivityLaunchTick((n) => n + 1);
+    return id;
+  };
+  const updateActivity = (id: string | undefined, phase: ActivityLaunchPhase) => {
+    if (id) setActivityLaunches((items) => items.map((item) => item.id === id ? { ...item, phase } : item));
+  };
   const advanceRef = useRef<() => void>(() => {});
   const [termMenu, setTermMenu] = useState<{ left: number; top: number } | null>(null);
   const [craftOpen, setCraftOpen] = useState(false); // download of the ArtCraft apps
@@ -108,6 +139,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   // Tags: the catalog, and the tags of this project's files (the tree marks them, the open file can change them).
   const [catalog, setCatalog] = useState<Tag[]>([]);
   const [fileTags, setFileTags] = useState<Record<string, string[]>>({});
+  const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
   const loadTree = useCallback(() => {
     api.tree(project.id).then(setTree).catch((e: Error) => setError(e.message));
     api.fileTags(project.id).then(setFileTags).catch(() => setFileTags({}));
@@ -151,8 +183,9 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
     setNote(null);
     setGraphFocus(false);
     setActiveTerm(null);
-    if (tabsRef.current.some((t) => t.path === path)) { setActive(path); return; }
+    if (tabsRef.current.some((t) => t.path === path)) { touchRecentFile(project.id, path); setActive(path); return; }
     api.readFile(project.id, path).then((content) => {
+      touchRecentFile(project.id, path);
       setTabs((all) => [...all, { path, content, draft: textOf(content), mode: content.kind === 'markdown' ? mode : 'preview', saving: false }]);
       setActive(path);
       // Reveal the file in the tree.
@@ -287,13 +320,17 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   };
   // Favorite notes of this project (the star in a note, or the note's menu here). Note windows tell when it changes.
   const [favTick, setFavTick] = useState(0);
-  useEffect(() => api.onNotesChanged(() => setFavTick((n) => n + 1)), []);
+  useEffect(() => {
+    const refresh = () => { setFavTick((n) => n + 1); void api.noteTitles(project.id).then((items) => setNoteTitles(Object.fromEntries(items.map((item) => [item.path, item.title])))).catch((e: Error) => setError(e.message)); };
+    refresh();
+    return api.onNotesChanged(refresh);
+  }, [project.id]);
   const favorites = useMemo(() => new Set(favoriteNotes().filter((n) => n.project === project.id).map((n) => n.path)), [favTick, project.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // The sidebar shows the tree in blocks (files on top, the Operations card, Project settings and MCPs at the bottom); each block is a FileTree with the same behavior.
   const groups = useMemo(() => groupTree(tree), [tree]);
   const treeProps = {
     tagColors: colorsOf, activePath: activeTerm || graphFocus ? null : active, onOpen: openPath, expanded,
-    onNewNote: () => setNote({ path: null }), onMenu: openItemMenu, favorites, onIde: openIde,
+    onNewNote: () => setNote({ path: null }), onMenu: openItemMenu, favorites, onIde: openIde, noteTitles,
     onToggle: (p: string) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }),
   };
   // Where New › File may save: the project's own folders (not the activities), then its root.
@@ -351,7 +388,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !active || activeTerm || graphFocus || note) return; // in a terminal the keys belong to it
+      if (!(e.ctrlKey || e.metaKey) || !active || activeTerm || graphFocus || note || (document.activeElement as HTMLElement | null)?.closest('.note-inline')) return; // note editors own their shortcuts
       const key = e.key.toLowerCase();
       if (key === 's') { e.preventDefault(); save(active); }
       if (key === 'w') { e.preventDefault(); close(active); }
@@ -430,7 +467,8 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
 
   return (
     <div
-      className={`workspace${(panelRail || docSide) && !settings ? ' panel-rail' : ''}${settings ? ' is-settings' : ''}${dropping ? ' dropping' : ''}`}
+      className={`workspace${(panelRail || docSide) && !settings ? ' panel-rail' : ''}${sidebarCollapsed && !settings ? ' sidebar-collapsed' : ''}${settings ? ' is-settings' : ''}${dropping ? ' dropping' : ''}`}
+      style={sidebarWidth === null ? undefined : { '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}
       onDragEnter={onDragEnter} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
     >
       <Ribbon
@@ -443,9 +481,10 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
         onFolder={() => { void api.openFolder(project.id); }}
         onLink={linkFolder}
         onRefresh={() => { loadTree(); setRefreshKey((k) => k + 1); }}
-        onPanel={togglePanel}
+        onPanel={() => setSidebarOpen(sidebarCollapsed)}
+        sidebarCollapsed={sidebarCollapsed}
         searchOn={search}
-        onSearch={onSearch}
+        onSearch={onSearch ? () => { setSidebarOpen(true); onSearch(); } : undefined}
       />
 
       {settings ? (
@@ -453,7 +492,13 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           <Settings tab={settings} onTab={onSettings} onClose={() => onSettings(null)} project={project} projects={[project]} tools={tools} onTerminal={(term) => { onSettings(null); addTerminal(term); }} onToolsChanged={onToolsChanged} />
         </main>
       ) : <>
-      <aside className="sidebar">
+      <aside className="sidebar" ref={sidebar}>
+        <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label={t('Resize file sidebar')} aria-valuemin={180} aria-valuemax={720} aria-valuenow={sidebarWidth ?? 260} tabIndex={0}
+          onPointerDown={(e) => { if (e.button !== 0) return; e.preventDefault(); const width = sidebar.current?.getBoundingClientRect().width ?? 260; resizeSidebar.current = { startX: e.clientX, startWidth: width, width }; e.currentTarget.setPointerCapture(e.pointerId); }}
+          onPointerMove={(e) => { const drag = resizeSidebar.current; if (!drag) return; drag.width = sidebarWidthWithinBounds(drag.startWidth + e.clientX - drag.startX); setSidebarWidth(drag.width); }}
+          onPointerUp={() => { const drag = resizeSidebar.current; if (drag) remember('qa-sidebar-width', String(drag.width)); resizeSidebar.current = null; }}
+          onPointerCancel={() => { resizeSidebar.current = null; }}
+          onKeyDown={(e) => { if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return; e.preventDefault(); const width = sidebarWidthWithinBounds((sidebar.current?.getBoundingClientRect().width ?? 260) + (e.key === 'ArrowRight' ? 20 : -20)); setSidebarWidth(width); remember('qa-sidebar-width', String(width)); }} />
         {search && onSearch && onFound ? <SearchPanel onOpenProject={(id) => onFound(id)} onOpenFile={onFound} onClose={onSearch} /> : <>
         <div className="sidebar-head">
           <button type="button" className="project-switch" onClick={goHome} title={t('Switch project')}>{project.name}</button>
@@ -501,7 +546,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           {tabs.map((doc) => {
             const on = !activeTerm && !graphFocus && doc.path === active;
             return (
-              <div key={doc.path} role="tab" aria-selected={on} className={`tab${on ? ' active' : ''}`} onClick={() => { setGraphFocus(false); setActive(doc.path); setActiveTerm(null); }} title={doc.path}
+              <div key={doc.path} role="tab" aria-selected={on} className={`tab${on ? ' active' : ''}`} onClick={() => { touchRecentFile(project.id, doc.path); setGraphFocus(false); setActive(doc.path); setActiveTerm(null); }} title={doc.path}
                 onAuxClick={(e) => { if (e.button === 1) close(doc.path); }}>
                 <FileIcon name={doc.path} size={14} />
                 <span className="tab-name">{doc.path.split('/').pop()}</span>
@@ -531,14 +576,10 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
             <p className="muted">{t('Under construction.')}</p>
           </div>
         ) : activeTerm ? null : tab ? (<>
-          {tab.path !== 'project.json' && tab.path !== 'tags.json' && !tab.path.startsWith('@folder') && (
-            <div className="file-tags-bar">
-              <span className="label">{t('Tags')}</span>
-              <TagPicker catalog={catalog} value={fileTags[tab.path] ?? []} onChange={(ids) => tagFile(tab.path, ids)} onCatalog={setCatalog} compact />
-            </div>
-          )}
           <DocView
+            key={tab.path}
             content={tab.content}
+            tags={tab.path !== 'project.json' && tab.path !== 'tags.json' && !tab.path.startsWith('@folder') ? <TagPicker catalog={catalog} value={fileTags[tab.path] ?? []} onChange={(ids) => tagFile(tab.path, ids)} onCatalog={setCatalog} compact /> : undefined}
             project={project.id}
             mode={tab.mode}
             draft={tab.draft}
@@ -568,19 +609,16 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           <div className="welcome">
             <img className="hero" src={THINKING_CAT} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
             <h1>{project.name}</h1>
-            <p className="muted">{t('Open a file on the left, drop files here to keep them in the project, or start working with your AI tool.')}</p>
-            <div className="welcome-tips muted small">
-              <p><strong>{t('Inbox')}</strong> — {t('put the stories, logs and documents for the AI here.')}</p>
-              <p><strong>{t('Activities')}</strong> — {t('every review, test design or analysis, with its results.')}</p>
-              <p><strong>{t('Context')}</strong> — {t('what the AI knows about this system. You can edit it here.')}</p>
-            </div>
+            <p className="muted">{t('Open or drop a file to get started.')}</p>
           </div>
         )}
       </main>
 
-      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onTerminal={addTerminal} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} onMyAis={() => onSettings('ai')}
+      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onOperationRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} onTerminal={addTerminal} onActivityStart={beginActivity} onActivityUpdate={updateActivity} onSetup={() => setShowSetup(true)} onProjectChanged={onProjectChanged} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} onMyAis={() => onSettings('ai')}
         operations={(
-          <OperationsPanel project={project.id} tick={opsTick} active={opView?.id ?? null}
+          <OperationsPanel project={project.id} tick={opsTick} active={opView?.id ?? null} launches={activityLaunches} activityLaunchTick={activityLaunchTick}
+            onDismissLaunch={(id) => setActivityLaunches((items) => items.filter((item) => item.id !== id))} onActivityRun={(id) => openPath(`runs/${id}/state.json`)}
+            onResumeActivity={(id) => setLaunch({ activity: 'resume', run: id })}
             onStart={(id) => { setNote(null); setOpView({ kind: 'launch', id }); }}
             onRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} />
         )} />
@@ -637,7 +675,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
       {creating && <NewEntryDialog project={project.id} parent={creating.parent} kind={creating.kind} ext={creating.ext} folders={creating.ext ? folders : undefined} onClose={() => setCreating(null)} onCreated={(path) => created(path, creating.kind)} />}
       {showSetup && <SetupDialog project={project} onClose={() => setShowSetup(false)}
         onSaved={(activity) => { setShowSetup(false); onProjectChanged(); if (activity) setLaunch({ activity }); }} />}
-      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} onOperation={startOperationForm} onMyAis={() => { setLaunch(null); onSettings('ai'); }} />}
+      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} onActivityStart={beginActivity} onActivityUpdate={updateActivity} onOperation={startOperationForm} onMyAis={() => { setLaunch(null); onSettings('ai'); }} />}
     </div>
   );
 }

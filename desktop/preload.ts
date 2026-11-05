@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('qa', {
   openLink: (url: string) => ipcRenderer.invoke('qa:open-link', url),
   usage: (refresh: boolean) => ipcRenderer.invoke('qa:usage', refresh),
   openNoteWindow: (target: { project?: string | null; path?: string | null; loose?: string | null; theme?: string }) => ipcRenderer.invoke('qa:note-window', target),
+  openSearchWindow: () => ipcRenderer.invoke('qa:search-window'),
+  closeSearchWindow: () => ipcRenderer.send('qa:search-close'),
+  searchOpen: (project: string, path: string) => ipcRenderer.send('qa:search-open', project, path),
   notesChanged: () => ipcRenderer.send('qa:notes-changed'),
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();

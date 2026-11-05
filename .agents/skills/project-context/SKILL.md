@@ -74,7 +74,7 @@ Optional:
 
 A project with `"starter": "minimal"` ("Create a new project" with Enter, or "Open a project" with a folder, in the desktop app) has the standard folders and an empty `context/`: run the progressive onboarding as for any project and create only the context files the current activity needs, listing each in `context/index.md` and `project.json` `contextFiles`.
 
-A project with `"starter": "blank"` in `project.json` (created with `npm run new-project -- <id> "<name>" --blank` or "A blank project" in the desktop app) has no `context/` yet. Follow [planning a blank project](references/project-plan-interview.md): interview one question at a time about what the project needs, write the plan to `proposed-updates.md` and `plan.json`, and stop until the user approves it. After approval, create only the approved context files.
+A project with `"starter": "blank"` in `project.json` (created with `npm run new-project -- <id> "<name>" --blank` or "A blank project" in the desktop app) has no `context/` yet. Follow [planning a blank project](references/project-plan-interview.md): interview one question at a time about what the project needs, write the plan to `proposed-updates.md` and `plan.json`, and stop until the user approves it. After approval, create only the approved folders and context files inside the project.
 
 ### 3. Hand over context
 

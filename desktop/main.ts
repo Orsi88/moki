@@ -69,13 +69,14 @@ const service = createService(ROOT, {
     const r = await dialog.showOpenDialog(win, { title: 'Choose a .zip file', properties: ['openFile'], filters: [{ name: 'ZIP', extensions: ['zip'] }] });
     return r.canceled ? null : r.filePaths[0] ?? null;
   },
-  onWorkspace: (dir) => setWorkspaceEnv(ROOT, dir),
+  onWorkspace: (dir) => { searchWindow?.close(); setWorkspaceEnv(ROOT, dir); },
   killTerminal: (id) => terminals.kill(id),
   terminalAlive: (id) => terminals.alive(id),
   writeTerminal: (id, data) => terminals.write(id, data),
 });
 
 let win: BrowserWindow | null = null;
+let searchWindow: BrowserWindow | null = null;
 let watcher: FSWatcher | null = null;
 let linkedWatcher: FSWatcher | null = null; // the open project's linked folder
 const noteWindows = new Map<string, BrowserWindow>();
@@ -88,6 +89,22 @@ function isNoteWindow(contents: WebContents): boolean {
 // Only our own UI (loaded from app/dist) may call the service.
 function trusted(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
   return Boolean(event.senderFrame?.url.startsWith('file://')) && (event.sender === win?.webContents || isNoteWindow(event.sender));
+}
+
+function fromSearch(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
+  return Boolean(event.senderFrame?.url.startsWith('file://')) && event.sender === searchWindow?.webContents;
+}
+
+function openSearchWindow(): void {
+  if (searchWindow && !searchWindow.isDestroyed()) { if (searchWindow.isMinimized()) searchWindow.restore(); searchWindow.focus(); return; }
+  const search = new BrowserWindow({ width: 800, height: 650, minWidth: 440, minHeight: 360, title: 'Moki', icon: existsSync(ICON) ? ICON : undefined, autoHideMenuBar: true, show: false,
+    webPreferences: { preload: join(DIST, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true } });
+  searchWindow = search;
+  search.once('ready-to-show', () => search.show());
+  search.on('closed', () => { if (searchWindow === search) searchWindow = null; });
+  search.webContents.on('will-navigate', (e) => e.preventDefault());
+  search.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  void search.loadFile(join(UI, 'index.html'), { query: { view: 'search', workspace: service.workspaces().active } });
 }
 
 // The notebook: its own window, so it can be dragged past the main window onto the desktop. One per group:
@@ -185,6 +202,7 @@ function createWindow(): void {
   });
   win.on('closed', () => {
     win = null;
+    searchWindow?.close();
     for (const note of noteWindows.values()) if (!note.isDestroyed()) note.close();
     noteWindows.clear();
     watcher?.close();
@@ -213,8 +231,18 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, done) => done(false));
 
     ipcMain.handle('qa:call', async (event, method: unknown, args: unknown) => {
-      if (!trusted(event)) return { ok: false, error: 'Untrusted caller.' };
+      if (!trusted(event) && !(fromSearch(event) && (method === 'searchExpanded' || method === 'tags' || method === 'projects'))) return { ok: false, error: 'Untrusted caller.' };
       return callService(service, method, args);
+    });
+
+    ipcMain.handle('qa:search-window', (event) => { if (trusted(event) && event.sender === win?.webContents) { openSearchWindow(); return true; } return false; });
+    ipcMain.on('qa:search-close', (event) => { if (trusted(event) && event.sender === win?.webContents) searchWindow?.close(); });
+    ipcMain.on('qa:search-open', (event, project: unknown, path: unknown) => {
+      if (!fromSearch(event) || typeof project !== 'string' || !listProjects(ROOT).includes(project)) return;
+      if (typeof path !== 'string' || path.length > 400 || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return;
+      win?.webContents.send('qa:open-in-main', project, path);
+      if (win?.isMinimized()) win.restore();
+      win?.focus();
     });
 
     // Watch one project at a time; changes are debounced and sent to the UI.

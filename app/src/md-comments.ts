@@ -6,8 +6,14 @@
 // "--" never appears in the block (an HTML comment would end there): JSON writes it --.
 // The renderer (scripts/lib/markdown.mjs, comments: true) draws the marks; the rest is here. Pure.
 
+// Shared by the PDF palette so the same names and colors stay in sync.
+export const COLORS = ['yellow', 'green', 'blue', 'pink', 'orange', 'red', 'purple'] as const;
+export type CommentColor = typeof COLORS[number];
+export const SWATCH: Record<CommentColor, string> = { yellow: '#f5d90a', green: '#46c46a', blue: '#4a8ff0', pink: '#f06ab0', orange: '#f59b2a', red: '#e5484d', purple: '#9b6cf0' };
+export const isCommentColor = (value: unknown): value is CommentColor => typeof value === 'string' && COLORS.some((color) => color === value);
+
 export interface MdReply { author: string; at: string; text: string }
-export interface MdComment extends MdReply { id: string; replies: MdReply[] }
+export interface MdComment extends MdReply { id: string; replies: MdReply[]; color?: CommentColor }
 
 const BLOCK = /\n*<!-- moki-comments\n([\s\S]*?)\n-->\s*$/;
 const open = (id: string) => `<!--c:${id}-->`;
@@ -23,7 +29,7 @@ export function readComments(text: string): { body: string; comments: MdComment[
   let list: unknown = [];
   try { list = JSON.parse(m[1]); } catch { /* a broken block: no comments */ }
   const comments = (Array.isArray(list) ? list : []).filter((c): c is MdComment => isReply(c) && typeof (c as MdComment).id === 'string' && /^[a-z0-9]+$/.test((c as MdComment).id))
-    .map((c) => ({ id: c.id, author: c.author, at: c.at, text: c.text, replies: Array.isArray(c.replies) ? c.replies.filter(isReply) : [] }));
+    .map((c) => ({ id: c.id, author: c.author, at: c.at, text: c.text, replies: Array.isArray(c.replies) ? c.replies.filter(isReply) : [], ...(isCommentColor(c.color) ? { color: c.color } : {}) }));
   return { body: text.slice(0, m.index), comments };
 }
 
@@ -58,6 +64,12 @@ export function replyComment(text: string, id: string, reply: MdReply): string {
 export function editComment(text: string, id: string, value: string): string {
   const { body, comments } = readComments(text);
   return write(body, comments.map((c) => (c.id === id ? { ...c, text: value } : c)));
+}
+
+export function colorComment(text: string, id: string, color: CommentColor): string {
+  if (!isCommentColor(color)) throw new Error('Invalid comment color.');
+  const { body, comments } = readComments(text);
+  return write(body, comments.map((c) => (c.id === id ? { ...c, color } : c)));
 }
 
 // The marks go away with the comment; the text stays.
