@@ -9,13 +9,18 @@ import { defaultTool, remember } from '../prefs';
 import { IconCheck, IconCode, IconCopy, IconFile, IconFolder, IconGlobe, IconPlay, IconRefresh, IconTerminal, IconX } from './Icons';
 import { FileIcon } from '../icons';
 import { TagChip } from './TagPicker';
+import { AgentPick } from './AgentCatalog';
+import { AiPick } from './ToolCatalog';
+import type { ActivityLaunchPhase } from '../activity-launches';
 
 interface Props {
   project: ProjectSummary;
   tools: ToolInfo[];
-  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string }; // skipActivity: the activity was already chosen (side panel); tool: the AI chosen there
+  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string; agent?: string; startAtTool?: boolean }; // skipActivity: the activity, its agent and the AI were already chosen (side panel: tool, agent)
   onClose: () => void;
   onTerminal: (terminal: TerminalRef) => void; // the tool opened in a terminal tab of the app
+  onActivityStart?: (activity: string, label: string) => string | undefined;
+  onActivityUpdate?: (id: string | undefined, phase: ActivityLaunchPhase) => void;
   onOperation?: (operation: string) => void; // an activity of an operation opens its start form instead
   onMyAis?: () => void; // Settings › My AIs, to install the AIs not found here
 }
@@ -32,7 +37,7 @@ const kindHint = (kind: ToolKind): string => ({
 
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOperation, onMyAis }: Props) {
+export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onActivityStart, onActivityUpdate, onOperation, onMyAis }: Props) {
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [languages, setLanguages] = useState<string[]>(['English']);
   const [activity, setActivity] = useState(preset?.activity ?? '');
@@ -43,14 +48,14 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const [choice, setChoice] = useState<ContextChoice>({ own: [], shared: [] });
   const [exclude, setExclude] = useState<string[]>([]); // context files left out of this activity
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [agent, setAgent] = useState('');
+  const [agent, setAgent] = useState(preset?.agent ?? '');
   const [note, setNote] = useState('');
   const [language, setLanguage] = useState(conversationLanguage);
   const [tool, setTool] = useState(() => {
     const saved = preset?.tool ?? defaultTool();
     return tools.some((t) => t.id === saved && t.available) ? saved as string : '';
   });
-  const [step, setStep] = useState<StepKey>(preset?.activity === 'resume' && preset.run ? 'details' : preset?.skipActivity && preset.activity ? 'files' : 'activity');
+  const [step, setStep] = useState<StepKey>(preset?.startAtTool ? 'tool' : preset?.activity === 'resume' && preset.run ? 'details' : preset?.skipActivity && preset.activity ? 'files' : 'activity');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<LaunchResult | null>(null);
   const [error, setError] = useState('');
@@ -85,7 +90,12 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const resume = activity === 'resume';
   // The context step only shows when the project's tags bring something from other projects.
   const sharing = choice.shared.length > 0;
-  const steps: StepKey[] = ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
+  // Started from the side panel: the activity, the agent and the AI arrive chosen (changed in the last step, with the
+  // same pickers), so only what the activity needs is asked: files, shared context, notes.
+  const fromPanel = Boolean(preset?.skipActivity && !resume);
+  const steps: StepKey[] = preset?.startAtTool ? ['tool', 'review']
+    : fromPanel ? ['files', ...(sharing ? ['context' as const] : []), 'details', 'review']
+    : ['activity', ...(resume ? ['run' as const] : ['files' as const, ...(sharing ? ['context' as const] : []), ...(agents.length ? ['agent' as const] : [])]), 'details', 'tool', 'review'];
   const toggle = (paths: string[]) => setExclude((ex) => (paths.every((p) => ex.includes(p)) ? ex.filter((p) => !paths.includes(p)) : [...new Set([...ex, ...paths])]));
   const sharedPaths = [...new Set(choice.shared.flatMap((g) => g.sources.flatMap((s) => s.paths)))];
   const keptShared = sharedPaths.filter((p) => !exclude.includes(p));
@@ -102,22 +112,26 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
 
   const submit = async () => {
     setBusy(true); setResult(null); setError(''); setCopied(false);
+    const trackingId = onActivityStart?.(activity, current ? t(current.label) : activity);
     remember('qa-language', language);
     // The window shares the main process. If opening the tool never returns, say so instead of leaving "Opening…" up.
     let late = false;
     const timer = window.setTimeout(() => {
       late = true;
       setBusy(false);
+      onActivityUpdate?.(trackingId, 'unconfirmed');
       setError(t('The request is taking too long. Close this and try again.'));
     }, 20000);
     try {
-      const r = await api.launch({ project: project.id, activity, tool, files, note, language, run: resume ? run : undefined, agent: agent || undefined, exclude: resume ? [] : exclude });
+      const r = await api.launch({ project: project.id, activity, tool, files, note, language, run: resume ? run : undefined, agent: agent || undefined, exclude: resume ? [] : exclude, ...(trackingId ? { trackingId } : {}) });
       if (late) return;
+      onActivityUpdate?.(trackingId, r.copied ? 'prepared' : r.terminal || r.opened ? 'sent' : r.prompt && !r.message ? 'prepared' : 'failed');
       if (r.terminal) { onTerminal(r.terminal); return; }
       setResult(r);
       if (!r.opened && r.message) setError(r.message);
       else if (!r.opened && !r.prompt) setError(t('The request could not be prepared.'));
     } catch (e) {
+      if (!late) onActivityUpdate?.(trackingId, 'failed');
       if (!late) setError(e instanceof Error ? e.message : String(e));
     } finally {
       window.clearTimeout(timer);
@@ -152,17 +166,19 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const q = questions[step];
 
   const agentLabel = agent || t('Let the skill decide');
-  const summary: { step: StepKey; label: string; value: string }[] = [
+  const summary: { step: StepKey; label: string; value: string }[] = preset?.startAtTool ? [
+    { step: 'tool', label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' },
+  ] : [
     { step: 'activity', label: t('Activity'), value: current ? t(current.label) : '—' },
     ...(resume ? [{ step: 'run' as StepKey, label: t('Continue'), value: run ? describeRun(run).title : '—' }] : [
       { step: 'files' as StepKey, label: t('Files'), value: files.length ? files.join(', ') : t('None') },
       ...(sharing ? [{ step: 'context' as StepKey, label: t('Shared context'), value: t('{n} of {total} files from other projects', { n: keptShared.length, total: sharedPaths.length })
         + (exclude.some((p) => choice.own.includes(p)) ? ` · ${t('{n} of this project left out', { n: exclude.filter((p) => choice.own.includes(p)).length })}` : '') }] : []),
-      ...(agents.length ? [{ step: 'agent' as StepKey, label: t('Who does it'), value: agentLabel }] : []),
+      ...(agents.length && !fromPanel ? [{ step: 'agent' as StepKey, label: t('Who does it'), value: agentLabel }] : []),
     ]),
     { step: 'details', label: t('Notes'), value: note.trim() || t('None') },
     { step: 'details', label: t('Conversation language'), value: t(language) },
-    { step: 'tool', label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' },
+    ...(fromPanel ? [] : [{ step: 'tool' as StepKey, label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' }]),
   ];
 
   return (
@@ -271,7 +287,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
 
           {step === 'details' && (
             <>
-              <textarea rows={4} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('e.g. focus on permissions')} autoFocus />
+              <textarea rows={4} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder={current?.note || t('e.g. focus on permissions')} autoFocus />
               <label className="field inline">
                 <span className="label">{t('The AI should talk to me in')}</span>
                 <select value={language} onChange={(e) => setLanguage(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{t(l)}</option>)}</select>
@@ -324,6 +340,12 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
                   </button>
                 ))}
               </dl>
+              {fromPanel && (
+                <div className="wizard-picks">
+                  {agents.length > 0 && <AgentPick label={t('Who does it')} agents={agents} value={agent} onChange={(name) => { setResult(null); setError(''); setAgent(name); }} optional />}
+                  <AiPick label={t('AI tool')} tools={tools} value={tool} onChange={(id) => { setResult(null); setError(''); setTool(id); }} onInstall={onMyAis} />
+                </div>
+              )}
             </>
           )}
         </div>

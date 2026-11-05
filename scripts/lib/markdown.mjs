@@ -71,11 +71,20 @@ function render(md) {
   while (i < lines.length) {
     const line = lines[i];
     if (/^```/.test(line)) {
+      // Only these two languages become diagrams. Anything else stays a code block, and the
+      // language is a fixed token so it cannot become an attribute.
+      const lang = line.slice(3).trim().split(/\s+/)[0].toLowerCase();
       const buf = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
       i++;
-      out.push(`<pre><code>${escHtml(buf.join('\n'))}</code></pre>`);
+      const code = escHtml(buf.join('\n'));
+      const diagram = lang === 'mermaid' || lang === 'excalidraw' ? lang : '';
+      // A language is kept only as a fixed token, so it cannot become markup.
+      const token = /^[a-z0-9_+-]+$/.test(lang) ? lang : '';
+      out.push(diagram
+        ? `<pre class="diagram" data-diagram="${diagram}"><code>${code}</code></pre>`
+        : `<pre${token ? ` data-lang="${token}"` : ''}><code>${code}</code></pre>`);
     } else if (/^#{1,6}\s/.test(line)) {
       const level = line.match(/^#+/)[0].length;
       out.push(`<h${level}>${inline(line.slice(level).trim())}</h${level}>`);

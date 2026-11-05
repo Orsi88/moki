@@ -1,10 +1,17 @@
 // Search in the active workspace (the magnifier on the icon rail): projects by
 // name and description, and the text files of every project by name and
-// content, optionally limited to some tags. Async: it must not block the main process.
+// content, optionally limited to some tags. The rail search is async so it does
+// not block the main process. The expanded search (its own window) also reads
+// Word, PDF and spreadsheets, and every file name.
 
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { IO_LIMIT, fileTags, listProjectsAsync, mapLimit, projectSummaryAsync, projectsDir, type ProjectSummary } from '../scripts/lib/core.ts';
+import { IO_LIMIT, fileTags, listProjects, listProjectsAsync, mapLimit, projectSummary, projectSummaryAsync, projectsDir, type ProjectSummary } from '../scripts/lib/core.ts';
+import { workspaceDir } from '../scripts/lib/repo.mjs';
+import { docxToMarkdown } from '../scripts/lib/docx.ts';
+import { xlsxSheets } from '../scripts/xlsx.mjs';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 export interface FileHit { project: string; projectName: string; path: string; snippet: string; line: number; tags: string[] }
 export interface SearchResult { projects: ProjectSummary[]; files: FileHit[]; truncated: boolean }
@@ -16,9 +23,24 @@ const HIT_LIMIT = 200;
 const PROJECTS_AT_ONCE = 8;
 const READ_BATCH = 16; // files read at once inside a project
 
+// Every file, for the expanded search. The rail search uses walkText, which stays text files only.
+function walkAll(base: string, rel = '', all = false): string[] {
+  const dir = join(base, rel);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).sort().flatMap((name) => {
+    const path = rel ? `${rel}/${name}` : name;
+    const full = join(base, path);
+    let st;
+    try { st = lstatSync(full); } catch { return []; }
+    if (st.isSymbolicLink()) return [];
+    if (st.isDirectory()) return SKIP.has(name) || (name.startsWith('.') && name !== '.extracted') ? [] : walkAll(base, path, all);
+    return st.isFile() && (all || (TEXT.has(extname(name).toLowerCase()) && st.size <= FILE_LIMIT)) ? [path] : [];
+  });
+}
+
 // Text files of a folder tree, relative paths in name order (folders and files interleaved).
 // A size is read (stat) only for files with a text extension.
-async function walk(base: string, rel = ''): Promise<string[]> {
+async function walkText(base: string, rel = ''): Promise<string[]> {
   const entries = await readdir(join(base, rel), { withFileTypes: true }).catch(() => []);
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const nested = await mapLimit(entries, IO_LIMIT, async (e): Promise<string[]> => {
@@ -28,10 +50,66 @@ async function walk(base: string, rel = ''): Promise<string[]> {
     if (e.isSymbolicLink() || (!dir && TEXT.has(extname(e.name).toLowerCase()))) {
       try { const st = await stat(join(base, path)); dir = st.isDirectory(); size = st.size; } catch { return []; }
     } else if (!dir) return [];
-    if (dir) return SKIP.has(e.name) || (e.name.startsWith('.') && e.name !== '.extracted') ? [] : walk(base, path);
+    if (dir) return SKIP.has(e.name) || (e.name.startsWith('.') && e.name !== '.extracted') ? [] : walkText(base, path);
     return TEXT.has(extname(e.name).toLowerCase()) && size <= FILE_LIMIT ? [path] : [];
   });
   return nested.flat();
+}
+
+async function fileText(full: string, extension: string): Promise<string> {
+  if (lstatSync(full).size > FILE_LIMIT) return '';
+  if (TEXT.has(extension)) return readFileSync(full, 'utf8');
+  if (extension === '.docx') return docxToMarkdown(readFileSync(full));
+  if (extension === '.xlsx') return xlsxSheets(readFileSync(full)).map((sheet: { name: string; rows: unknown[][] }) => `${sheet.name}\n${sheet.rows.map((row) => row.join(' ')).join('\n')}`).join('\n');
+  if (extension === '.pdf') {
+    const task = getDocument({ data: new Uint8Array(readFileSync(full)), useSystemFonts: false, verbosity: 0 });
+    const doc = await task.promise;
+    try {
+      const pages: string[] = [];
+      for (let n = 1; n <= doc.numPages; n++) {
+        const content = await (await doc.getPage(n)).getTextContent();
+        pages.push(content.items.map((item) => 'str' in item ? item.str : '').join(' '));
+      }
+      return pages.join('\n');
+    } finally { await task.destroy(); }
+  }
+  return '';
+}
+
+export async function searchWorkspaceExpanded(root: string, query: string, tags: string[] = [], project?: string): Promise<SearchResult> {
+  const initialWorkspace = workspaceDir(root);
+  const prefix = query.trim().match(/^(projeto|project|arquivo|file|conteudo|conteúdo|content):\s*/i);
+  const kind = prefix?.[1].toLowerCase() ?? '';
+  const q = query.trim().slice(prefix?.[0].length ?? 0).trim().toLowerCase().slice(0, 200);
+  const onlyProjects = kind === 'projeto' || kind === 'project';
+  const onlyFiles = kind === 'arquivo' || kind === 'file';
+  const onlyContent = kind === 'conteudo' || kind === 'conteúdo' || kind === 'content';
+  const result: SearchResult = { projects: [], files: [], truncated: false };
+  if (!q && !tags.length) return result;
+  const hasTags = (ids: string[]) => tags.every((t) => ids.includes(t));
+  for (const id of listProjects(root)) {
+    if (workspaceDir(root) !== initialWorkspace) return { projects: [], files: [], truncated: false };
+    if (project && id !== project) continue;
+    const p = projectSummary(id, root);
+    if (!onlyFiles && !onlyContent && (!tags.length || hasTags(p.tags)) && (!q || `${p.name}\n${p.description}\n${p.id}`.toLowerCase().includes(q))) result.projects.push(p);
+    if (onlyProjects) continue;
+    const marks = fileTags(id, root);
+    const dir = join(projectsDir(root), id);
+    for (const path of walkAll(dir, '', true)) {
+      if (workspaceDir(root) !== initialWorkspace) return { projects: [], files: [], truncated: false };
+      if (path.split('/').includes('.extracted')) continue;
+      if (result.files.length >= HIT_LIMIT) { result.truncated = true; return result; }
+      const own = marks[path] ?? [];
+      if (tags.length && !hasTags(own) && !hasTags(p.tags)) continue;
+      if (!q && !hasTags(own)) continue;
+      const inName = !!q && path.toLowerCase().includes(q);
+      let text = '';
+      if (!onlyFiles && q) { try { text = await fileText(join(dir, ...path.split('/')), extname(path).toLowerCase()); } catch { /* unreadable files can still match by name */ } }
+      if (q && !(inName && !onlyContent) && !text.toLowerCase().includes(q)) continue;
+      result.files.push({ project: id, projectName: p.name, path, tags: own, ...snippet(text, q) });
+    }
+  }
+  return result;
 }
 
 // The line with the first match, cut around it.
@@ -70,7 +148,7 @@ export async function searchWorkspace(root: string, query: string, tags: string[
     const projectMatch = (!tags.length || projectTagged) && (!q || `${p.name}\n${p.description}\n${p.id}`.toLowerCase().includes(q));
     const marks = fileTags(id, root);
     const dir = join(projectsDir(root), id);
-    const paths = await walk(dir);
+    const paths = await walkText(dir);
     const hits: Hit[] = [];
     for (let from = 0; from < paths.length && hits.length < HIT_LIMIT && !full(index); from += READ_BATCH) {
       const batch = await Promise.all(paths.slice(from, from + READ_BATCH).map(async (path, i): Promise<Hit | null> => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addComment, editComment, findInSource, readComments, removeComment, replyComment } from '../app/src/md-comments.ts';
+import { addComment, colorComment, editComment, findInSource, readComments, removeComment, replyComment } from '../app/src/md-comments.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
 
 const at = '2026-11-01T10:00:00.000Z';
@@ -36,4 +36,15 @@ test('replies, edits and deletes keep the file\'s own text', () => {
   assert.equal(readComments(text).body.trim(), 'One two one <!--c:b-->two<!--/c:b-->.');
   assert.equal(removeComment(text, 'b'), src);
   assert.equal(findInSource(src, 'two **one**', 0), null);
+});
+
+test('comment colors persist across edits and replies, with old comments unchanged', () => {
+  let { text } = addComment('Hello world.\n', 0, 5, { author: 'ana', at, text: 'first' }, 'a');
+  assert.equal(readComments(text).comments[0].color, undefined);
+  text = colorComment(text, 'a', 'green');
+  text = replyComment(text, 'a', { author: 'bia', at, text: 'reply' });
+  text = editComment(text, 'a', 'updated');
+  assert.deepEqual(readComments(text).comments[0], { id: 'a', author: 'ana', at, text: 'updated', replies: [{ author: 'bia', at, text: 'reply' }], color: 'green' });
+  assert.equal(markdownToHtml(text), '<p>Hello world.</p>');
+  assert.equal(removeComment(text, 'a'), 'Hello world.\n');
 });

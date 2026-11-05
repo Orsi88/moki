@@ -17,11 +17,12 @@ interface Props {
   onLink?: () => void;
   onRefresh?: () => void;
   onPanel?: () => void;
+  sidebarCollapsed?: boolean;
   searchOn?: boolean;
   onSearch?: () => void; // the magnifier: search the workspace
 }
 
-export function Ribbon({ settingsOn, onHome, onSettings, project, onPlay, onTerminal, onFolder, onLink, onRefresh, onPanel, searchOn = false, onSearch }: Props) {
+export function Ribbon({ settingsOn, onHome, onSettings, project, onPlay, onTerminal, onFolder, onLink, onRefresh, onPanel, sidebarCollapsed = false, searchOn = false, onSearch }: Props) {
   const ready = Boolean(project);
   return (
     <nav className="ribbon" aria-label={t('Actions')}>
@@ -35,7 +36,8 @@ export function Ribbon({ settingsOn, onHome, onSettings, project, onPlay, onTerm
       <button type="button" className={`icon-btn${settingsOn ? ' on' : ''}`} onClick={onSettings} title={t('Settings')}><IconSettings size={19} /></button>
       <button type="button" className="icon-btn" disabled={!ready} onClick={onRefresh} title={t('Refresh')}><IconRefresh size={19} /></button>
       <span className="ribbon-spacer" />
-      <button type="button" className="icon-btn" disabled={!ready} onClick={onPanel} title={t('Show or hide the side panel')}><IconPanel size={19} /></button>
+      <button type="button" className="icon-btn" disabled={!ready || settingsOn} onClick={onPanel} aria-expanded={!sidebarCollapsed}
+        title={sidebarCollapsed ? t('Show the file sidebar') : t('Hide the file sidebar')} aria-label={sidebarCollapsed ? t('Show the file sidebar') : t('Hide the file sidebar')}><IconPanel size={19} /></button>
     </nav>
   );
 }

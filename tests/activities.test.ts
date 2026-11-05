@@ -110,8 +110,6 @@ test('launching: your activity\'s text, an agent\'s activity acts as it, an oper
 
   const op = svc.saveOperation({ name: 'Fluxo', description: '', lanes: [], steps: [{ id: 's1', agent: 'library:test-designer', x: 0, y: 0 }], links: [] });
   svc.saveActivity({ label: 'Run Fluxo', kind: 'operation', target: op.id, files: 'none' });
-  assert.equal(svc.activities('acme').activities.find((a) => a.id === 'run-fluxo')?.available, false, 'not linked to the project yet');
-  svc.setProjectOperations('acme', [op.id]);
   assert.equal(svc.activities('acme').activities.find((a) => a.id === 'run-fluxo')?.available, true);
   assert.throws(() => svc.launch({ project: 'acme', activity: 'run-fluxo', tool: 'claude', files: [], note: '', language: 'English' } as never), /starts the operation/);
   assert.throws(() => svc.launch({ project: 'acme', activity: 'made-up', tool: 'claude', files: [], note: '', language: 'English' } as never), /Unknown activity/);

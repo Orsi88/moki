@@ -17,7 +17,7 @@ A blank project (`"starter": "blank"` in `project.json`) starts without `context
 | 2 | Technologies, repository and environments | Linked folder, tools, skills to search |
 | 3 | Team and ways of working | Conventions, deliverable language, approvals |
 | 4 | What to link: skills, agents, knowledge sources, inbox documents | The recommendation itself |
-| 5 | Which knowledge must be recorded | The context files to propose |
+| 5 | Which knowledge must be recorded, and which folders would help | The context files and project folders to propose |
 
 ## Output
 
@@ -30,12 +30,13 @@ A blank project (`"starter": "blank"` in `project.json`) starts without `context
   "skills": ["<installed global skill>"],
   "agents": ["<available agent>"],
   "searchSkills": ["<search term for a skill to install>"],
+  "folders": [{ "path": "<folder-name or parent/folder-name>", "contains": "<one line>" }],
   "contextFiles": [{ "path": "context/<kebab-name>.md", "contains": "<one line>" }]
 }
 ```
 
-`contextFiles` paths are `context/<lowercase-kebab-name>.md`. Then stop and tell the user to review the plan in the app ("The AI proposed a plan — review it"). Without the app, show the plan and ask for approval item by item; record it by setting `"approved": true` and keeping only the approved items.
+`contextFiles` paths are `context/<lowercase-kebab-name>.md`. Folder paths are relative to this project, use lowercase letters, numbers, hyphens and `/` only, with no empty segments; never propose hidden folders or paths outside the project. Then stop and tell the user to review the plan in the app ("The AI proposed a plan — review it"). Without the app, show the plan and ask for approval item by item; record it by setting `"approved": true` and keeping only the approved items.
 
 ## After approval
 
-When `plan.json` has `"approved": true`: create only the listed `contextFiles` with the answers the user confirmed (source and confirmation date on each entry), create `context/index.md` listing them, add them to `project.json` `contextFiles`, mark the matching proposals `promoted` and set `onboardingStatus` to `partial`. Skills and agents were already linked by the app.
+When `plan.json` has `"approved": true`: create only the listed `folders` and `contextFiles`, inside the project folder. Validate each path and resolve symlinks before creating anything; reject paths that leave the project, and never overwrite existing files. For context files use only confirmed answers (source and confirmation date on each entry), create `context/index.md` listing them, add them to `project.json` `contextFiles`, mark the matching proposals `promoted` and set `onboardingStatus` to `partial`. Skills and agents were already linked by the app. Older approved plans may omit `folders`; treat that as an empty list.

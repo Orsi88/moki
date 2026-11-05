@@ -59,6 +59,7 @@ const RULES = {
   'tags.test.ts': [[/./, 'Tags', U]],
   'tool-path.test.ts': [[/./, 'Finding the AI tools', U]],
   'md-comments.test.ts': [[/./, 'Rendering', U]],
+  'code-highlight.test.ts': [[/./, 'Rendering', U]],
   'pdf-local.test.ts': [[/./, 'PDF (PdfCraft)', U]],
   'usage.test.ts': [[/./, 'Status bar usage', U]],
   'i18n.test.ts': [[/./, 'Translations', U]],

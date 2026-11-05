@@ -40,6 +40,7 @@
     "dist:linux": "node scripts/build-desktop.mjs && electron-builder --linux AppImage deb rpm"
   },
   "devDependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@playwright/test": "1.64.1",
     "@types/node": "22.18.12",
     "@types/react": "19.1.17",
@@ -52,6 +53,7 @@
     "electron": "43.7.8",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
+    "mermaid": "^12.3.0",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
     "react": "19.1.1",

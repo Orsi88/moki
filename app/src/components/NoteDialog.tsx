@@ -10,16 +10,19 @@
 // @ to mention a file of the project, and "Use with the AI" to start an activity with
 // the note as input.
 
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { api, type ActivityInfo, type Tag, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
 import { isFavorite, looseNotes, noteTitle, removeLooseNote, saveLooseNote, setFavorite, touchNote, type NoteRef } from '../side-menu';
 import { ActivityCatalog } from './ActivityCatalog';
+import { MarkdownBody } from './MarkdownBody';
+import { VisualMarkdownEditor } from './VisualMarkdownEditor';
+import { DiagramSourceEditor } from './DiagramSourceEditor';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
 import { FileIcon } from '../icons';
-import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
+import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconNotes, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
 import { ToolCatalog } from './ToolCatalog';
 import { TagPicker } from './TagPicker';
 import { TABLE_ICON, useMarkdownEditing } from './useMarkdownEditing';
@@ -31,6 +34,9 @@ interface Props {
   projects?: { id: string; name: string }[];
   floating?: boolean; // its own window: the header drags the window, past the main app
   embedded?: boolean; // fills the main area of the app window (no backdrop, nothing to drag)
+  inline?: boolean; // an interactive note embedded between PDF pages
+  inlineActions?: ReactNode; // controls belonging to the surrounding PDF card
+  closeLabel?: string;
   onClose: () => void;
   onSaved?: (saved: NoteRef) => void; // after each save: where the note is now (a project note, for a loose one sent there)
   active?: boolean; // in a notebook: only the shown tab takes the keys
@@ -67,8 +73,13 @@ function imageToDataUrl(file: File): Promise<string> {
   });
 }
 
-export function NoteDialog({ project, path, looseId = null, projects = [], floating = false, embedded = false, onClose, onSaved, active = true, onMyAis }: Props) {
+export function NoteDialog({ project, path, looseId = null, projects = [], floating = false, embedded = false, inline = false, inlineActions, closeLabel, onClose, onSaved, active = true, onMyAis }: Props) {
+  const titleId = useId();
+  const container = useRef<HTMLDivElement>(null);
   const [title, setTitle] = useState('');
+  const [displayTitle, setDisplayTitle] = useState(() => path ? noteTitle(path) : '');
+  const lastDisplayTitle = useRef(path ? noteTitle(path) : '');
+  const editingTitle = useRef(false);
   const [savedTitle, setSavedTitle] = useState('');
   const [destination, setDestination] = useState(''); // '' keeps the note loose
   const [text, setText] = useState('');
@@ -80,12 +91,15 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [exportMenu, setExportMenu] = useState<{ left: number; top: number } | null>(null);
   const [exported, setExported] = useState('');
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
+  const [visualOk, setVisualOk] = useState(true); // formatted view edits like a Markdown file, until the note cannot round-trip
+  const [inlineTools, setInlineTools] = useState(false);
   const [html, setHtml] = useState('');
   const [pos, setPos] = useState({ x: 0, y: 0 }); // offset from the centered position
   const [loaded, setLoaded] = useState(!path && !looseId);
   // Where the note is saved: a new note gets its file (or loose id) on its first save.
   const [curPath, setCurPath] = useState(path);
   const [curLoose, setCurLoose] = useState(looseId);
+  const looseSavedTitle = useRef('');
   const [files, setFiles] = useState<string[]>([]); // project files, for @
   const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null);
   const [ai, setAi] = useState(false);
@@ -122,16 +136,43 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   }, [project, path]);
 
   useEffect(() => {
+    if (!project || !path) return;
+    const refresh = () => { void api.noteTitles(project).then((titles) => {
+      const value = titles.find((item) => item.path === path)?.title ?? noteTitle(path);
+      lastDisplayTitle.current = value;
+      if (!editingTitle.current) setDisplayTitle(value);
+    }).catch((e: Error) => setError(e.message)); };
+    refresh();
+    const off = api.onNotesChanged(refresh);
+    window.addEventListener('focus', refresh);
+    return () => { off(); window.removeEventListener('focus', refresh); };
+  }, [project, path]);
+
+  const saveInlineTitle = () => {
+    editingTitle.current = false;
+    if (!project || !curPath) return;
+    const value = displayTitle.trim() || noteTitle(curPath);
+    setDisplayTitle(value);
+    if (value === lastDisplayTitle.current) return;
+    void api.setNoteTitle(project, curPath, value).then(() => {
+      lastDisplayTitle.current = value;
+      touchNote(project, curPath, value);
+      window.qa?.notesChanged();
+    }).catch((e: Error) => setError(e.message));
+  };
+
+  useEffect(() => {
     if (!loose || !looseId) return;
     const note = looseNotes().find((n) => n.id === looseId);
     if (!note) { setError(t('This note is no longer here.')); return; }
+    looseSavedTitle.current = note.title;
     setTitle(note.title); setSavedTitle(note.title); setText(note.text); setSaved(note.text); setLoaded(true);
   }, [loose, looseId]);
 
   // ---------- saving: on its own, like Notepad ----------
   // Saves run one after another, from the latest values (refs), so a new note is created only once.
-  const latest = useRef({ text, title, dirty, loaded, curPath, curLoose });
-  latest.current = { ...latest.current, text, title, dirty, loaded };
+  const latest = useRef({ text, title, saved, savedTitle, dirty, loaded, curPath, curLoose });
+  latest.current = { ...latest.current, text, title, saved, savedTitle, dirty, loaded };
   const queue = useRef<Promise<NoteRef | null>>(Promise.resolve(null));
   // A note without a title is named after its first line.
   const nameOf = (body: string, head: string) => head.trim()
@@ -143,12 +184,15 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       let done: NoteRef;
       if (project == null) {
         if (!now.text.trim() && !now.title.trim()) return null;
+        const current = now.curLoose ? looseNotes().find((n) => n.id === now.curLoose) : null;
+        if (now.curLoose && (!current || current.text !== now.saved || current.title !== looseSavedTitle.current)) throw new Error(t('This note changed elsewhere. Reopen it before saving to avoid losing changes.'));
         const note = saveLooseNote({ id: now.curLoose, title: nameOf(now.text, now.title), text: now.text });
+        looseSavedTitle.current = note.title;
         latest.current.curLoose = note.id;
         setCurLoose(note.id);
         done = { loose: note.id };
       } else if (now.curPath) {
-        await api.writeFile(project, now.curPath, now.text);
+        if (!await api.writeNoteIfUnchanged(project, now.curPath, now.text, now.saved)) throw new Error(t('This note changed elsewhere. Reopen it before saving to avoid losing changes.'));
         done = { project, path: now.curPath };
       } else {
         if (!now.text.trim()) return null; // a new note is created once something is written in it
@@ -159,6 +203,8 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
         done = { project, path: created };
       }
       latest.current.dirty = false;
+      latest.current.saved = now.text;
+      latest.current.savedTitle = now.title;
       setSaved(now.text); setSavedTitle(now.title); setSavedAt(Date.now()); setError('');
       window.qa?.notesChanged();
       onSaved?.(done);
@@ -187,7 +233,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     api.setFileTags(project, curPath, ids).then(setTags).catch((e: Error) => setError(e.message));
   };
 
-  useEffect(() => { if (mode === 'preview') api.renderMarkdown(text).then(setHtml).catch((e: Error) => setError(e.message)); }, [mode, text]);
+  useEffect(() => { if (mode === 'preview' && !visualOk) api.renderMarkdown(text).then(setHtml).catch((e: Error) => setError(e.message)); }, [mode, text, visualOk]);
 
   useEffect(() => {
     if (!target) { setFiles([]); return; }
@@ -203,14 +249,30 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   // Closing saves first; if saving fails, the note stays open with the error.
   const close = () => { persist().then(() => onClose()).catch(() => { /* the error is shown */ }); };
 
-  // From inside the app to the notebook window, saved first.
+  // From inside the app to the notebook window, saved first. A note that was
+  // never saved is created then, so the button is there from the start.
   const toNotebook = () => {
-    persist().then((done) => {
-      const at = done ?? ref;
-      if (!at) return;
+    const open = (at: NoteRef) => {
       void api.openNoteWindow('loose' in at ? { loose: at.loose } : at);
       onClose();
-    }).catch(() => { /* the error is shown */ });
+    };
+    persist().then(async (done) => {
+      if (done) { open(done); return; }
+      const now = latest.current;
+      if (now.curLoose) { open({ loose: now.curLoose }); return; }
+      if (project && now.curPath) { open({ project, path: now.curPath }); return; }
+      const head = now.title.trim() || t('Untitled note');
+      if (project == null) {
+        const note = saveLooseNote({ id: null, title: head, text: now.text });
+        window.qa?.notesChanged();
+        open({ loose: note.id });
+        return;
+      }
+      const created = await api.createNote(project, head, now.text);
+      touchNote(project, created, noteTitle(created));
+      window.qa?.notesChanged();
+      open({ project, path: created });
+    }).catch((e: Error) => setError(e.message));
   };
 
   // A project note saved as PDF, Markdown or text where the user chooses (native dialog); saved first.
@@ -242,7 +304,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const md = useMarkdownEditing(editor, ({ insert: put }) => [
     { id: 'image', label: t('Image'), glyph: IMAGE_ICON, words: 'picture foto imagem', run: () => picker.current?.click() },
     { id: 'mention', label: t('Mention a project file'), glyph: '@', words: 'file arquivo mencionar', run: () => put('@') },
-  ]);
+  ], inline);
   const { replace, insert, wrap, heading, bullets, numbers, checks, quote, code, link, table, divider, lineStart } = md;
   const { setSlash, findSlash, openSlash } = md;
 
@@ -353,12 +415,12 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!active) return; // a hidden notebook tab
-      if (e.key === 'Escape') { if (catalog) return; close(); return; }
+      if (!active || (inline && !container.current?.contains(document.activeElement))) return; // a hidden tab or an unfocused inline note
+      if (e.key === 'Escape') { if (catalog || inline) return; close(); return; }
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === 's') { e.preventDefault(); void persist().catch(() => { /* the error is shown */ }); }
-      if (k === 'e') { e.preventDefault(); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
+      if (k === 'e') { e.preventDefault(); setVisualOk(true); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
       if (mode === 'edit' && k === 'b') { e.preventDefault(); wrap('**'); }
       if (mode === 'edit' && k === 'i') { e.preventDefault(); wrap('*'); }
       if (mode === 'edit' && k === 'k') { e.preventDefault(); link(); }
@@ -387,12 +449,19 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   );
 
   const dialog = (
-      <div className={`modal note-dialog${embedded ? ' note-embedded' : ''}`} role="dialog" aria-modal={!embedded} aria-labelledby="note-title"
+      <div ref={container} className={`modal note-dialog${embedded ? ' note-embedded' : ''}${inline ? ` note-inline${inlineTools ? '' : ' note-inline-minimized'}` : ''}`} role={inline ? 'region' : 'dialog'} aria-modal={inline ? undefined : !embedded} aria-labelledby={inline ? undefined : titleId} aria-label={inline ? t('Note') : undefined}
         style={floating || embedded ? undefined : { transform: `translate(${pos.x}px, ${pos.y}px)` }}>
         <header className="modal-head" onMouseDown={startDrag} onDoubleClick={() => { if (floating) window.qa?.noteMax(); }} title={embedded ? undefined : t('Drag to move')}>
-          <h2 id="note-title">{curPath ? curPath.split('/').pop()?.replace(/\.md$/, '') : (title.trim() || t('New note'))}</h2>
+          {inline ? <div className="note-inline-title">
+            <input id={titleId} aria-label={t('Note title')} maxLength={120} value={project ? displayTitle : title}
+              onFocus={() => { editingTitle.current = true; }} onChange={(e) => { if (project) setDisplayTitle(e.target.value); else setTitle(e.target.value); }}
+              onBlur={() => { if (project) saveInlineTitle(); else editingTitle.current = false; }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }} />
+          </div> : <h2 id={titleId}>{curPath ? displayTitle : (title.trim() || t('New note'))}</h2>}
           <span className="statusbar-spacer" />
-          {ref && !floating && (
+          {ref && !inline && <button type="button" className="icon-btn" draggable title={t('Drag this note into a PDF')} aria-label={t('Drag this note into a PDF')}
+            onDragStart={(e) => { e.dataTransfer.setData('application/x-moki-note', JSON.stringify(ref)); e.dataTransfer.effectAllowed = 'copy'; }}><IconNotes size={17} /></button>}
+          {!floating && (
             <button type="button" className="icon-btn" onClick={toNotebook} title={t('Open in the notebook')} aria-label={t('Open in the notebook')}>
               <IconExternal size={17} />
             </button>
@@ -409,7 +478,11 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               <IconStar size={18} />
             </button>
           )}
-          <button type="button" className="icon-btn" onClick={close} title={t('Close (Esc)')}><IconX size={18} /></button>
+          {inline && inlineActions && <div className="note-inline-actions">{inlineActions}</div>}
+          {inline && <button type="button" className={`icon-btn note-inline-toggle${inlineTools ? ' open' : ''}`} aria-expanded={inlineTools}
+            title={inlineTools ? t('Hide note tools') : t('Show note tools')} aria-label={inlineTools ? t('Hide note tools') : t('Show note tools')}
+            onClick={() => setInlineTools((v) => !v)}><IconChevron size={15} /></button>}
+          <button type="button" className={`icon-btn${inline ? ' note-inline-remove' : ''}`} onClick={close} title={closeLabel ?? t('Close (Esc)')} aria-label={closeLabel ?? t('Close (Esc)')}><IconX size={18} /></button>
         </header>
         <div className="note-tools" role="toolbar" aria-label={t('Formatting')}>
           {tool_('/', t('Commands (type /)'), openSlash, { fontWeight: 700 })}
@@ -438,7 +511,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
             <IconPlay size={14} /> <span>{t('Use with the AI')}</span>
           </button>
           {mode === 'edit'
-            ? <button type="button" className="icon-btn" onClick={() => setMode('preview')} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
+            ? <button type="button" className="icon-btn" onClick={() => { setVisualOk(true); setMode('preview'); }} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
             : <button type="button" className="icon-btn" onClick={() => setMode('edit')} title={t('Edit (Ctrl+E)')}><IconEdit size={17} /></button>}
           <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
         </div>
@@ -469,10 +542,26 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
         <div className="modal-body">
           {error && <div className="result warn" role="status"><p className="result-title">{error}</p></div>}
           {(loose || !curPath) && (
-            <label className="field">
-              <span className="label">{t('Title')}</span>
-              <input value={title} maxLength={60} autoFocus onChange={(e) => setTitle(e.target.value)} placeholder={t('e.g. Test ideas')} />
-            </label>
+            <div className="note-meta">
+              {(loose || !curPath) && (
+                <label className="field">
+                  <span className="label">{t('Title')}</span>
+                  <input value={title} maxLength={60} autoFocus onChange={(e) => setTitle(e.target.value)} placeholder={t('e.g. Test ideas')} />
+                </label>
+              )}
+              {loose && projects.length > 0 && (
+                <label className="field note-destination">
+                  <span className="label">{t('Send to a project')}</span>
+                  <span className="row-actions">
+                    <select value={destination} onChange={(e) => setDestination(e.target.value)}>
+                      <option value="">{t('Keep as a loose note')}</option>
+                      {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    {destination && <button type="button" className="btn" onClick={send} disabled={sending}>{sending ? t('Sending…') : t('Send')}</button>}
+                  </span>
+                </label>
+              )}
+            </div>
           )}
           {project && curPath && (
             <div className="field inline">
@@ -480,24 +569,14 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               <TagPicker catalog={tagCatalog} value={tags} onChange={changeTags} onCatalog={setTagCatalog} compact />
             </div>
           )}
-          {loose && projects.length > 0 && (
-            <label className="field">
-              <span className="label">{t('Send to a project')}</span>
-              <span className="row-actions">
-                <select value={destination} onChange={(e) => setDestination(e.target.value)}>
-                  <option value="">{t('Keep as a loose note')}</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-                {destination && <button type="button" className="btn" onClick={send} disabled={sending}>{sending ? t('Sending…') : t('Send')}</button>}
-              </span>
-            </label>
-          )}
           {mode === 'edit' ? (
             <div className="note-editor-wrap">
-              <textarea ref={editor} className="note-editor" spellCheck autoFocus={Boolean(path) && !loose} value={text}
-                onChange={(e) => { setText(e.target.value); findMention(e.target.value, e.target.selectionStart); findSlash(e.target.value, e.target.selectionStart); }}
+              <DiagramSourceEditor editorRef={editor} className="note-editor" value={text}
+                autoFocus={!inline && Boolean(path) && !loose}
+                onChange={setText}
+                onEdit={(segment, caret) => { findMention(segment, caret); findSlash(segment, caret); }}
                 onKeyDown={onEditorKey}
-                onClick={(e) => { findMention(text, e.currentTarget.selectionStart); findSlash(text, e.currentTarget.selectionStart); }}
+                onClick={(e) => { findMention(e.currentTarget.value, e.currentTarget.selectionStart); findSlash(e.currentTarget.value, e.currentTarget.selectionStart); }}
                 onBlur={() => setTimeout(() => { setMention(null); setSlash(null); }, 150)}
                 onPaste={onPaste} onDrop={onDrop}
                 placeholder={t('Write your note (Markdown). Type / for commands and @ to mention a project file; paste or drop images.')} />
@@ -516,8 +595,17 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               )}
             </div>
           )
-            // HTML comes from the main process renderer, which escapes all markup from the note.
-            : <div className="markdown note-preview" onClick={onPreviewClick} dangerouslySetInnerHTML={{ __html: html }} />}
+            : visualOk ? (
+              <div className="note-visual" onClick={onPreviewClick}>
+                <VisualMarkdownEditor text={text} project={project ?? undefined} path={path ?? 'notes/note.md'} onChange={setText} onUnsupported={() => setVisualOk(false)} />
+              </div>
+            ) : (
+              <>
+                <p className="notice-bar" role="status">{t('This file contains formatting that needs Markdown source to edit safely.')}</p>
+                {/* HTML comes from the main process renderer, which escapes all markup from the note. */}
+                <MarkdownBody className="markdown note-preview" html={html} text={text} onChange={setText} onClick={onPreviewClick} />
+              </>
+            )}
         </div>
         <footer className="modal-foot">
           <span className="note-status">

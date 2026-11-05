@@ -18,7 +18,7 @@ import { extensionVersion, installExtension, mokiVsix, runCommand, toolVersion, 
 import { LIMITS, readFolder, readZip, scan, type Scan } from './claude-import.ts';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
 import { setWorkspaceDir, workspaceDir, workspaceLabel } from '../scripts/lib/repo.mjs';
-import { searchWorkspace } from './search.ts';
+import { searchWorkspace, searchWorkspaceExpanded } from './search.ts';
 import { activeWorkspace, addWorkspaceFolder, createWorkspace, forgetWorkspace, listWorkspaces, renameWorkspace, setActiveWorkspace, type WorkspaceInfo } from './workspaces.ts';
 import { readableInputs, docxToMarkdown } from '../scripts/lib/docx.ts';
 import { checkOperation, cleanOperation, formatMessage, listOperations, removeOperation, seedExample, suggestOutput, writeOperation, type OperationAgent } from '../scripts/lib/operations.ts';
@@ -35,6 +35,8 @@ import { cleanPrompt, type LaunchResult } from './launcher.ts';
 import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
 import { isPageEdit, parsePdfChange, pdfScript, toComments, type PdfRunner } from './pdfcraft.ts';
+import { pdfNotes, remapPdfNotes, setPdfNotes, validPdfNote } from './pdf-notes.ts';
+import { noteTitles, setNoteTitle } from './note-titles.ts';
 import { MOKI_SERVER, McpError, appliesTo, enabledServers, generatedEntries, importConfig, listServers, mokiServer, removeServer, saveServer, serversForAgent, syncCursorFolder, toolConfig, writeMerged, type GeneratedEntry, type McpServer } from '../scripts/lib/mcp.ts';
 import { probeServer, type ProbeResult } from './mcp-probe.ts';
 import { AGENT_AIS, cleanContract, duplicateAgent, isUsableAgent, libraryDir, listAgents, listCategories, parseAgent, validateAgent, validateContract, withContract, withProfile, withSkills, type Agent, type AgentContract } from '../scripts/lib/agents.ts';
@@ -104,6 +106,7 @@ export type FileContent =
 export interface LaunchRequest {
   project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string;
   exclude?: string[]; // context files (this project's or shared through tags) to leave out
+  trackingId?: string; // optional UI request identity, never a run status
 }
 
 export interface AgentInfo extends Omit<Agent, 'body'> { usable: boolean }
@@ -115,8 +118,10 @@ export interface ScopeAgentRequest { name: string; description: string; skills: 
 export interface Plan {
   approved: boolean; skills: string[]; agents: string[]; searchSkills: string[];
   contextFiles: { path: string; contains: string }[];
+  folders: { path: string; contains: string }[];
 }
 const CONTEXT_FILE = /^context\/[a-z0-9]+(-[a-z0-9]+)*\.md$/;
+const PLAN_FOLDER = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const AGENT_TEXT_LIMIT = 8000;
@@ -305,6 +310,7 @@ export function createService(root: string, deps: Deps) {
     const global = linkableSkills();
     const usable = new Set(listAgents(root).filter(isUsableAgent).map((a) => a.name));
     const files = (Array.isArray(d.contextFiles) ? d.contextFiles : []) as { path?: unknown; contains?: unknown }[];
+    const folders = (Array.isArray(d.folders) ? d.folders : []) as { path?: unknown; contains?: unknown }[];
     return {
       approved: d.approved === true,
       skills: strings(d.skills).filter((n) => global.has(n)),
@@ -312,6 +318,8 @@ export function createService(root: string, deps: Deps) {
       searchSkills: strings(d.searchSkills).map((s) => s.slice(0, 80)).slice(0, 10),
       contextFiles: files.filter((f) => typeof f?.path === 'string' && CONTEXT_FILE.test(f.path))
         .map((f) => ({ path: String(f.path), contains: String(f.contains ?? '').slice(0, 300) })),
+      folders: folders.filter((f) => typeof f?.path === 'string' && f.path.length <= 180 && PLAN_FOLDER.test(f.path))
+        .slice(0, 50).map((f) => ({ path: String(f.path), contains: String(f.contains ?? '').slice(0, 300) })),
     };
   };
   const trash = deps.trash ?? (async (p: string) => rmSync(p, { recursive: true, force: true }));
@@ -467,7 +475,7 @@ export function createService(root: string, deps: Deps) {
     const agent = a.target.kind === 'agent' ? listAgents(root).find((x) => x.name === a.target.name) : undefined;
     const available = a.id === 'resume' ? true
       : a.target.kind === 'agent' ? Boolean(agent && isUsableAgent(agent))
-      : a.target.kind === 'operation' ? (!project || linkedOperations(project).includes(a.target.name))
+      : a.target.kind === 'operation' ? listOperations(root).some((o) => o.id === a.target.name)
       : !frameworkSkill(skill) || isUsable(skill, root); // a skill installed by the person (not in the framework) is theirs to use
     return {
       id: a.id, label: a.label, hint: a.description, category: a.category, source: a.source, target: a.target, files: a.files,
@@ -493,9 +501,9 @@ export function createService(root: string, deps: Deps) {
     if (/^---/m.test(template)) throw new ServiceError('The text of the request cannot have a line with ---.');
     return { label, text: activityMarkdown({ label, description: cleanPrompt(String(r.description ?? '')).slice(0, 300), category: cleanPrompt(String(r.category ?? '')).slice(0, 40) || 'Other', target: { kind, name }, files, note: cleanPrompt(String(r.note ?? '')).slice(0, 200), tags, template }) };
   };
-  const linkedOperation = (project: string, id: unknown) => {
+  const knownOperation = (id: unknown) => {
     const op = listOperations(root).find((o) => o.id === id);
-    if (!op || !linkedOperations(project).includes(op.id)) throw new ServiceError('This operation is not linked to the project.');
+    if (!op) throw new ServiceError('Unknown operation.');
     return op;
   };
   const runDir = (project: string, runId: unknown): string => {
@@ -741,6 +749,22 @@ export function createService(root: string, deps: Deps) {
       return linkFolder(id, linked);
     },
 
+    // These updates change only presentation fields, never the project id or its other settings.
+    setProjectName: (project: string, value: unknown) => {
+      const file = join(projectDir(project), 'project.json');
+      if (typeof value !== 'string' || !value.trim()) throw new ServiceError('Give the project a name.');
+      const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, `${JSON.stringify({ ...data, name: value.trim() }, null, 2)}\n`);
+      return projectSummary(project, root);
+    },
+    setProjectDescription: (project: string, value: unknown) => {
+      const file = join(projectDir(project), 'project.json');
+      if (typeof value !== 'string' || value.length > 2000) throw new ServiceError('Description must be text of at most 2000 characters.');
+      const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      writeFileSync(file, `${JSON.stringify({ ...data, description: value.trim() }, null, 2)}\n`);
+      return projectSummary(project, root);
+    },
+
     // Deletes the project folder for good (no trash), only after the word "delete" is typed. A linked folder is never touched.
     deleteProject: (project: string, confirm: unknown) => {
       if (confirm !== 'delete') throw new ServiceError('Type delete to confirm.');
@@ -813,6 +837,7 @@ export function createService(root: string, deps: Deps) {
     contextChoice: (project: string) => { projectDir(project); return contextChoice(project, root); },
     // The magnifier: projects and text files of the active workspace, by text and/or tags.
     search: (query: unknown, tags: unknown) => searchWorkspace(root, String(query ?? ''), Array.isArray(tags) ? tags.map(String).slice(0, 20) : []),
+    searchExpanded: (query: unknown, tags: unknown, project?: unknown) => searchWorkspaceExpanded(root, String(query ?? ''), Array.isArray(tags) ? tags.map(String).slice(0, 20) : [], typeof project === 'string' && listProjects(root).includes(project) ? project : undefined),
 
     skills: () => listSkills(root),
 
@@ -968,6 +993,28 @@ export function createService(root: string, deps: Deps) {
       return rel;
     },
 
+    noteTitles: (project: string) => failing(() => noteTitles(projectDir(project))),
+    setNoteTitle: (project: string, path: unknown, title: unknown) => {
+      if (typeof path !== 'string' || !/^notes\/[^/\\]+\.md$/.test(path)) throw new ServiceError('Note not found.');
+      if (typeof title !== 'string' || title.trim().length > 120 || /[\x00-\x1f]/.test(title)) throw new ServiceError('Invalid note title.');
+      const dir = projectDir(project);
+      const file = inside(dir, path);
+      if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('Note not found.');
+      failing(() => setNoteTitle(dir, path, title.trim()));
+      return true;
+    },
+
+    // Do not overwrite a newer version saved by another open note editor.
+    writeNoteIfUnchanged: (project: string, path: unknown, text: unknown, expected: unknown) => {
+      if (typeof path !== 'string' || !/^notes\/[^/\\]+\.md$/.test(path)) throw new ServiceError('Note not found.');
+      if (typeof text !== 'string' || text.length > TEXT_LIMIT || typeof expected !== 'string' || expected.length > TEXT_LIMIT) throw new ServiceError('Invalid content.');
+      const file = inside(projectDir(project), path);
+      if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('Note not found.');
+      if (readFileSync(file, 'utf8') !== expected) return false;
+      writeFileSync(file, text, 'utf8');
+      return true;
+    },
+
     // A note saved as a file of the user's choice, outside the workspace: only here, through the save dialog
     // (the UI never sends the destination). pdf: scripts/pdf.mjs in a child process (Edge/Chrome/Chromium
     // prints it) in a temporary folder, so no .html lands next to the file. Returns the path, or null when cancelled.
@@ -1073,7 +1120,7 @@ export function createService(root: string, deps: Deps) {
     },
     // What the start screen needs: the steps in order with their agent, default AI and MCP servers, and the MCP servers each AI tool has.
     operationPlan: (project: string, id: unknown) => {
-      const op = linkedOperation(project, id);
+      const op = knownOperation(id);
       const agents = operationAgents();
       const check = checkOperation(op, agents);
       const steps = check.order.map((sid) => {
@@ -1085,7 +1132,7 @@ export function createService(root: string, deps: Deps) {
       return { operation: { ...op, check }, steps, mcpsByTool: mcpsByTool(project), inbox: inboxFiles(projectDir(project)).map((f) => f.name) };
     },
     startOperation: (project: string, id: unknown, raw: unknown) => {
-      const op = linkedOperation(project, id);
+      const op = knownOperation(id);
       const agents = operationAgents();
       const check = checkOperation(op, agents);
       if (check.errors.length) throw new ServiceError(`This operation cannot start: ${check.errors.map(formatMessage).join(' ')}`);
@@ -1430,6 +1477,11 @@ export function createService(root: string, deps: Deps) {
       return openRuns(project, root).map((r) => ({ id: r.id, status: r.status, currentStep: r.currentStep ?? '' }));
     },
 
+    activityRuns: (project: string) => {
+      projectDir(project);
+      return listRuns(project, root).filter((r) => !r.operation).map((r) => ({ id: r.id, status: r.status, currentStep: r.currentStep ?? '', skill: r.skill ?? '', workflow: r.workflow ?? '' }));
+    },
+
     openFolder: (project: string, rel = '') => {
       const dir = inside(projectDir(project), rel);
       if (!existsSync(dir) || !statSync(dir).isDirectory()) throw new ServiceError('Folder not found.');
@@ -1524,11 +1576,31 @@ export function createService(root: string, deps: Deps) {
       const t = pdfTarget(project, rel);
       return toComments((await failingAsync(() => t.pdf.run(pdfScript(t.path, null, userInfo().username), t.dir))).at(-1));
     },
+    pdfNotes: (project: string, rel: unknown) => {
+      const dir = projectDir(project);
+      const file = inside(dir, rel);
+      if (extname(file).toLowerCase() !== '.pdf' || !existsSync(file) || !statSync(file).isFile()) throw new ServiceError('PDF not found.');
+      return failing(() => pdfNotes(dir, posix(relative(dir, file))));
+    },
+    setPdfNotes: (project: string, rel: unknown, value: unknown) => {
+      const dir = projectDir(project);
+      const file = inside(dir, rel);
+      if (extname(file).toLowerCase() !== '.pdf' || !existsSync(file) || !statSync(file).isFile()) throw new ServiceError('PDF not found.');
+      if (!Array.isArray(value) || value.length > 1000 || !value.every(validPdfNote) || new Set(value.map((n) => n.id)).size !== value.length) throw new ServiceError('Invalid PDF note associations.');
+      for (const entry of value) if ('path' in entry.note) {
+        const note = inside(dir, entry.note.path);
+        if (!existsSync(note) || !statSync(note).isFile()) throw new ServiceError('Note not found.');
+      }
+      failing(() => setPdfNotes(dir, posix(relative(dir, file)), value));
+      return value;
+    },
     pdfChange: async (project: string, rel: unknown, change: unknown) => {
       const t = pdfTarget(project, rel);
       const c = failing(() => parsePdfChange(change));
       const saveAs = editedCopy(t.dir, t.path, isPageEdit(c));
+      const linkedNotes = failing(() => pdfNotes(t.dir, t.path));
       const results = await failingAsync(() => t.pdf.run(pdfScript(t.path, c, userInfo().username, saveAs), t.dir));
+      if (linkedNotes.length) failing(() => setPdfNotes(t.dir, saveAs ?? t.path, remapPdfNotes(linkedNotes, c)));
       return { path: saveAs ?? t.path, comments: toComments(results.at(-1)) };
     },
 
@@ -1783,7 +1855,7 @@ export function createService(root: string, deps: Deps) {
     // "Set up the project": its goal, the global and ArtCraft skills it uses (by reference, nothing is copied) and,
     // when given, its agents. Only skills installed globally or Moki's ArtCraft skills can be linked. When the AI left a plan.json,
     // contextFiles approves it with the files the user kept.
-    setupProject: (project: string, req: { description?: unknown; linkedSkills?: unknown; agents?: unknown; contextFiles?: unknown }) => {
+    setupProject: (project: string, req: { description?: unknown; linkedSkills?: unknown; agents?: unknown; contextFiles?: unknown; folders?: unknown }) => {
       const file = join(projectDir(project), 'project.json');
       const description = cleanPrompt(String(req?.description ?? '')).slice(0, 2000);
       const wanted = Array.isArray(req?.linkedSkills) ? [...new Set(req.linkedSkills.map(String))] : [];
@@ -1797,7 +1869,8 @@ export function createService(root: string, deps: Deps) {
       const plan = readPlan(project);
       if (plan && Array.isArray(req?.contextFiles)) {
         const kept = new Set(req.contextFiles.map(String));
-        const approved = { ...plan, approved: true, skills: wanted, agents: enabledAgents(project), contextFiles: plan.contextFiles.filter((f) => kept.has(f.path)) };
+        const keptFolders = new Set(Array.isArray(req.folders) ? req.folders.map(String) : []);
+        const approved = { ...plan, approved: true, skills: wanted, agents: enabledAgents(project), contextFiles: plan.contextFiles.filter((f) => kept.has(f.path)), folders: plan.folders.filter((f) => keptFolders.has(f.path)) };
         writeFileSync(join(projectDir(project), 'plan.json'), `${JSON.stringify(approved, null, 2)}\n`);
       }
       return projectSummary(project, root);
@@ -1870,6 +1943,8 @@ export function createService(root: string, deps: Deps) {
       const project = typeof req?.project === 'string' && listProjects(root).includes(req.project) ? req.project : null;
       if (!project) throw new ServiceError('Unknown project.');
       const activity = String(req.activity ?? '');
+      const trackingId = req.trackingId;
+      if (trackingId !== undefined && (typeof trackingId !== 'string' || !/^[a-f0-9]{32}$/.test(trackingId) || activity === 'resume' || activity === 'talk')) throw new ServiceError('Invalid activity tracking identifier.');
       const def = listActivities(root, project).find((a) => a.id === activity); // only the activities this project sees
       if (!def) throw new ServiceError('Unknown activity.');
       if (activity === 'talk' && !req.agent) throw new ServiceError('Choose the agent to talk with.');
@@ -1915,10 +1990,11 @@ export function createService(root: string, deps: Deps) {
         paths: s.paths.filter((p) => !exclude.has(p) && !seen.has(p) && Boolean(seen.add(p))),
       }))).filter((s) => s.paths.length);
       const excluded = choice.own.filter((p) => exclude.has(p));
-      const prompt = buildPrompt({ project, activity, root, files: readableInputs(files, root), note, run, language, agent, repository: projectRepository(project, root), shared, excluded, workspace: workspaceLabel(root),
+      const request = buildPrompt({ project, activity, root, files: readableInputs(files, root), note, run, language, agent, repository: projectRepository(project, root), shared, excluded, workspace: workspaceLabel(root),
         skills: installedSkills(project, root), agents: installedAgents(project, root),
         description: cleanPrompt(projectSummary(project, root).description).slice(0, 2000), globalSkills: linkedGlobalSkills(project),
         available: activity === 'plan' ? { skills: [...linkableSkills()].sort(), agents: listAgents(root).filter(isUsableAgent).map((a) => a.name) } : undefined });
+      const prompt = trackingId ? `${request} If this request creates a run, use the slug moki-${trackingId} when creating it, so Moki can identify it. Do not create a run solely for tracking; follow the skill's procedure and approval gates.` : request;
       const t = TOOLS[tool];
       if (t.print || t.chat) {
         const upload = t.chat ? [

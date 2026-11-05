@@ -11,6 +11,7 @@ const NOTES = 'qa-recent-notes';
 const LOOSE = 'qa-loose-notes';
 const FAVORITES = 'qa-favorite-notes';
 const LOOSE_FAVORITES = 'qa-favorite-loose-notes';
+const RECENT_FILES = 'qa-recent-files';
 const NOTE_LIMIT = 6;
 
 // The active workspace; the default one keeps the original keys.
@@ -22,11 +23,21 @@ const NOTES_KEY = () => NOTES + scope;
 const FAVORITES_KEY = () => FAVORITES + scope;
 
 export interface RecentNote { project: string; path: string; title: string; at: number }
+export interface RecentFile { project: string; path: string }
 export type NoteRef = { project: string; path: string } | { loose: string };
 export interface LooseNote { id: string; title: string; text: string; at: number }
 
 const readList = (key: string): unknown[] => {
   try { const v = JSON.parse(recall(key) ?? ''); return Array.isArray(v) ? v : []; } catch { return []; }
+};
+
+export const recentFiles = (): RecentFile[] => readList(RECENT_FILES + scope).flatMap((item) => {
+  const file = (item ?? {}) as Partial<RecentFile>;
+  return typeof file.project === 'string' && typeof file.path === 'string' ? [{ project: file.project, path: file.path }] : [];
+});
+export const touchRecentFile = (project: string, path: string): void => {
+  const next = [{ project, path }, ...recentFiles().filter((file) => file.project !== project || file.path !== path)].slice(0, 20);
+  remember(RECENT_FILES + scope, JSON.stringify(next));
 };
 
 export const pinnedIds = (): string[] => readList(PINS_KEY()).filter((id): id is string => typeof id === 'string');
@@ -56,6 +67,7 @@ export const showProject = (id: string): string[] => {
 
 // A deleted project leaves no pin, hidden entry or recent note behind.
 export const forgetProject = (id: string): void => {
+  remember(RECENT_FILES + scope, JSON.stringify(recentFiles().filter((file) => file.project !== id)));
   remember(PINS_KEY(), JSON.stringify(pinnedIds().filter((x) => x !== id)));
   remember(HIDDEN_KEY(), JSON.stringify(hiddenIds().filter((x) => x !== id)));
   remember(NOTES_KEY(), JSON.stringify(recentNotes().filter((n) => n.project !== id)));
@@ -123,6 +135,7 @@ export const recentNotes = (): RecentNote[] => readList(NOTES_KEY()).flatMap((it
 // Opening or saving a note moves it to the front. The same file is not listed twice.
 export const touchNote = (project: string, path: string, title: string): void => {
   if (!path.startsWith('notes/')) return;
+  touchRecentFile(project, path);
   const next = [{ project, path, title: title.trim() || noteTitle(path), at: Date.now() },
     ...recentNotes().filter((n) => !(n.project === project && n.path === path))].slice(0, NOTE_LIMIT);
   remember(NOTES_KEY(), JSON.stringify(next));

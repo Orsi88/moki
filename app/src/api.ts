@@ -25,6 +25,7 @@ export type Starter = 'qa' | 'blank' | 'minimal';
 export interface Plan {
   approved: boolean; skills: string[]; agents: string[]; searchSkills: string[];
   contextFiles: { path: string; contains: string }[];
+  folders: { path: string; contains: string }[];
 }
 export interface SkillInfo { name: string; status: string; description: string }
 export type ToolKind = 'terminal' | 'editor' | 'chat' | 'print';
@@ -48,6 +49,7 @@ export interface OpenWithApps { dialog: boolean; apps: { id: string; name: strin
 // PDF comments and page edits, written by PdfCraft (desktop/pdfcraft.ts). Quads: 8 numbers, points from the page's top-left.
 export interface PdfComment { id: string; page: number; type: string; author: string | null; contents: string | null; color: string | null; rect: number[] | null; replies: PdfComment[] }
 export interface PdfMark { page: number; quads: number[][] }
+export interface PdfNote { id: string; after: number; note: { path: string } | { loose: string }; height?: number; color?: string }
 export type PdfChange =
   | { op: 'highlight'; page: number; find: string; all: boolean; contents?: string; color: string }
   | { op: 'highlight'; marks: PdfMark[]; contents?: string; color: string }
@@ -63,6 +65,7 @@ export interface CraftOption { file: string; size: number; url: string }
 export interface CraftDownloadInfo { id: string; label: string; tag: string; page: string; options: CraftOption[] } // options[0] is the recommended file
 export interface InboxFile { name: string; size: number; modified: string }
 export interface OpenRun { id: string; status: string; currentStep: string }
+export interface ActivityRun extends OpenRun { skill: string; workflow: string }
 
 export interface TreeNode {
   name: string; path: string; type: 'dir' | 'file'; size?: number; children?: TreeNode[];
@@ -87,6 +90,7 @@ export type FileContent =
 
 export interface RunState {
   id: string; status: string; currentStep?: string; skill?: string; workflow?: string; createdAt?: string; updatedAt?: string;
+  operation?: { id: string; name: string };
   completedSteps?: string[];
   pending?: { id: string; description: string; owner?: string }[];
   approvals?: { step: string; decision: string; by?: string; at: string; notes?: string }[];
@@ -168,7 +172,7 @@ export interface DocumentStyle {
 }
 export const DOCUMENT_FONTS = ['Calibri', 'Arial', 'Segoe UI', 'Helvetica', 'Verdana', 'Tahoma', 'Georgia', 'Times New Roman', 'Cambria', 'Garamond', 'Consolas'];
 
-export interface LaunchRequest { project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string; exclude?: string[] }
+export interface LaunchRequest { project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string; exclude?: string[]; trackingId?: string }
 export interface LaunchResult { opened: boolean; message?: string; copied?: boolean; prompt: string; upload?: string[]; bundleReady?: boolean; terminal?: TerminalRef }
 export interface TerminalRef { id: string; title: string }
 
@@ -227,6 +231,9 @@ export interface Bridge {
   openLink(url: string): Promise<void>;
   usage?(refresh: boolean): Promise<Usage | null>;
   openNoteWindow(target: { project?: string | null; path?: string | null; loose?: string | null; theme?: string }): Promise<boolean>;
+  openSearchWindow?(): Promise<boolean>;
+  closeSearchWindow?(): void;
+  searchOpen?(project: string, path: string): void;
   notesChanged(): void;
   onNotesChanged(callback: () => void): () => void;
   noteMax(): void;
@@ -270,6 +277,8 @@ export const api = {
   renameWorkspace: (id: string, name: string) => call<WorkspaceInfo>('renameWorkspace', id, name),
   forgetWorkspace: (id: string) => call<boolean>('forgetWorkspace', id),
   createProject: (name: string, starter: Starter, folder?: string, tags: string[] = []) => call<ProjectSummary & { backup?: string }>('createProject', name, starter, folder ?? null, tags),
+  setProjectName: (project: string, name: string) => call<ProjectSummary>('setProjectName', project, name),
+  setProjectDescription: (project: string, description: string) => call<ProjectSummary>('setProjectDescription', project, description),
   deleteProject: (project: string, confirm: string) => call<boolean>('deleteProject', project, confirm),
   deleteNote: (project: string, path: string) => call<boolean>('deleteNote', project, path),
   tags: () => call<Tag[]>('tags'),
@@ -280,6 +289,7 @@ export const api = {
   fileTags: (project: string) => call<Record<string, string[]>>('fileTags', project),
   setFileTags: (project: string, path: string, ids: string[]) => call<string[]>('setFileTags', project, path, ids),
   search: (query: string, tags: string[]) => call<SearchResult>('search', query, tags),
+  searchExpanded: (query: string, tags: string[], project?: string) => call<SearchResult>('searchExpanded', query, tags, project),
   contextChoice: (project: string) => call<ContextChoice>('contextChoice', project),
   // Open a project from a folder: the project already linked to it, or the folder and a suggested name (null: cancelled).
   pickFolder: () => call<{ folder: string; name: string; project?: ProjectSummary } | null>('pickFolder'),
@@ -313,11 +323,15 @@ export const api = {
   setAgentTags: (name: string, tags: string[]) => call<string[]>('setAgentTags', name, tags),
   saveAgentProfile: (name: string, profile: AgentProfile) => call<boolean>('saveAgentProfile', name, profile),
   createNote: (project: string, title: string, text: string) => call<string>('createNote', project, title, text),
+  noteTitles: (project: string) => call<{ path: string; title: string }[]>('noteTitles', project),
+  setNoteTitle: (project: string, path: string, title: string) => call<boolean>('setNoteTitle', project, path, title),
+  writeNoteIfUnchanged: (project: string, path: string, text: string, expected: string) => call<boolean>('writeNoteIfUnchanged', project, path, text, expected),
   exportNote: (project: string, path: string, format: 'pdf' | 'md' | 'txt') => call<string | null>('exportNote', project, path, format),
   run: (project: string, runId: string) => call<RunState>('run', project, runId),
   inbox: (project: string) => call<InboxFile[]>('inbox', project),
   importFiles: (project: string, paths: string[]) => call<{ saved: string[]; skipped: string[] }>('importFiles', project, paths),
   openRuns: (project: string) => call<OpenRun[]>('openRuns', project),
+  activityRuns: (project: string) => call<ActivityRun[]>('activityRuns', project),
   openFolder: (project: string, path = '') => call<boolean>('openFolder', project, path),
   openExternal: (project: string, path: string) => call<boolean>('openExternal', project, path),
   createEntry: (project: string, parent: string, name: string, kind: 'file' | 'folder') => call<string>('createEntry', project, parent, name, kind),
@@ -327,6 +341,8 @@ export const api = {
   openWith: (project: string, path: string, app: string) => call<boolean>('openWith', project, path, app),
   pdfcraftStatus: () => call<{ available: boolean; platform: string }>('pdfcraftStatus'),
   pdfComments: (project: string, path: string) => call<PdfComment[]>('pdfComments', project, path),
+  pdfNotes: (project: string, path: string) => call<PdfNote[]>('pdfNotes', project, path),
+  setPdfNotes: (project: string, path: string, notes: PdfNote[]) => call<PdfNote[]>('setPdfNotes', project, path, notes),
   // path: where the change was saved (a "-edited" copy for files in inbox/ and for page edits).
   pdfChange: (project: string, path: string, change: PdfChange) => call<{ path: string; comments: PdfComment[] }>('pdfChange', project, path, change),
   linkRepository: (project: string) => call<(ProjectSummary & { backup?: string }) | null>('linkRepository', project),
@@ -391,7 +407,7 @@ export const api = {
   projectItems: (project: string) => call<ProjectItems>('projectItems', project),
   removeProjectItem: (project: string, kind: 'skill' | 'agent', name: string, allowClaudeWrite = false) => call<{ backup?: string }>('removeProjectItem', project, kind, name, allowClaudeWrite),
   globalItems: () => call<GlobalItems>('globalItems'),
-  setupProject: (project: string, req: { description: string; linkedSkills: string[]; agents?: string[]; contextFiles?: string[] }) => call<ProjectSummary>('setupProject', project, req),
+  setupProject: (project: string, req: { description: string; linkedSkills: string[]; agents?: string[]; contextFiles?: string[]; folders?: string[] }) => call<ProjectSummary>('setupProject', project, req),
   readPlan: (project: string) => call<Plan | null>('readPlan', project),
   globalAgent: (name: string) => call<GlobalAgentDetail>('globalAgent', name),
   saveGlobalAgent: (name: string, text: string) => call<boolean>('saveGlobalAgent', name, text),

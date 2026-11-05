@@ -14,11 +14,12 @@ interface Props {
   tagColors?: (path: string) => string[]; // colors of the file's tags
   onMenu?: (node: TreeNode, at: { left: number; top: number }) => void; // the item's menu: right click or its ⋯ button
   favorites?: Set<string>; // favorite notes: a star, and first in the notes folder
+  noteTitles?: Record<string, string>;
   onIde?: (at: { left: number; top: number }) => void; // "Open in the IDE" on the linked folder's row
 }
 
 export const friendlyName = (name: string): string => ({
-  context: t('Context'), inbox: t('Inbox'), runs: t('Activities'), notes: t('Notes'), temporary: t('Temporary'),
+  context: t('Context'), inbox: t('Inbox'), runs: t('Execution files'), notes: t('Notes'), temporary: t('Temporary'),
   'proposed-updates.md': t('Proposed updates'), 'activity-log.md': t('Activity log'),
 } as Record<string, string>)[name] ?? name;
 
@@ -59,7 +60,7 @@ export function FileTree(props: Props) {
   return <ul className="tree" role="tree">{props.nodes.map((n) => <Node key={n.path} node={n} depth={0} {...props} />)}</ul>;
 }
 
-function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, tagColors, onMenu, favorites, onIde }: Props & { node: TreeNode; depth: number }) {
+function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, tagColors, onMenu, favorites, onIde, noteTitles }: Props & { node: TreeNode; depth: number }) {
   const [hover, setHover] = useState(false);
   const isDir = node.type === 'dir';
   const open = expanded.has(node.path);
@@ -70,7 +71,7 @@ function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, 
     </div></li>;
   }
   const section = depth === 0 && isDir && isSectionIconName(node.name) ? node.name : null;
-  const label = run ? run.title : depth === 0 || !node.path.includes('/') ? friendlyName(node.name) : node.path.startsWith('notes/') ? node.name.replace(/\.md$/, '') : node.name;
+  const label = run ? run.title : depth === 0 || !node.path.includes('/') ? friendlyName(node.name) : node.path.startsWith('notes/') ? noteTitles?.[node.path] ?? node.name.replace(/\.md$/, '') : node.name;
   const menu = node.path.startsWith('.') ? undefined : onMenu; // a group of the sidebar, not a folder: nothing to create, reveal or copy
 
   return (
@@ -80,6 +81,8 @@ function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, 
         type="button"
         className={`tree-row${activePath === node.path ? ' active' : ''}${depth === 0 && isDir ? ' top' : ''}`}
         style={{ paddingLeft: 8 + depth * INDENT }}
+        draggable={!isDir && /^notes\/[^/]+\.md$/.test(node.path)}
+        onDragStart={(e) => { if (!isDir && /^notes\/[^/]+\.md$/.test(node.path)) { e.dataTransfer.setData('application/x-moki-note', JSON.stringify({ path: node.path })); e.dataTransfer.effectAllowed = 'copy'; } }}
         onClick={() => (isDir ? onToggle(node.path) : onOpen(node.path))}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
@@ -114,7 +117,7 @@ function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, 
       {isDir && open && node.children && (
         <ul role="group">
           {(node.path === 'notes' && favorites ? [...node.children].sort((a, b) => Number(favorites.has(b.path)) - Number(favorites.has(a.path))) : node.children)
-            .map((c) => <Node key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} expanded={expanded} onToggle={onToggle} onNewNote={onNewNote} tagColors={tagColors} onMenu={onMenu} favorites={favorites} onIde={onIde} nodes={[]} />)}
+            .map((c) => <Node key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} expanded={expanded} onToggle={onToggle} onNewNote={onNewNote} tagColors={tagColors} onMenu={onMenu} favorites={favorites} onIde={onIde} noteTitles={noteTitles} nodes={[]} />)}
           {node.path === 'notes' && (
             <li><button type="button" className="tree-row tree-new" style={{ paddingLeft: 8 + (depth + 1) * INDENT }} onClick={onNewNote}><span className="tree-icon"><IconPlus size={14} /></span><span className="tree-label">{t('New note')}</span></button></li>
           )}

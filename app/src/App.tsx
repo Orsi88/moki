@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, hasBridge, pageParams, type ProjectSummary, type Starter, type TerminalRef, type ToolInfo, type WorkspaceInfo } from './api';
 import { t, useLang } from './i18n';
 import { Notebook } from './components/Notebook';
+import { SearchPanel } from './components/SearchPanel';
 import { hiddenIds, setMenuWorkspace } from './side-menu';
 import { Ribbon } from './components/Ribbon';
 import { UsageStatus } from './components/UsageStatus';
@@ -12,6 +13,7 @@ import type { SettingsTab } from './screens/Settings';
 
 const noteParams = pageParams();
 const isNoteWindow = noteParams.get('view') === 'note';
+const isSearchWindow = noteParams.get('view') === 'search';
 
 const LAST_PROJECT = 'qa-last-project';
 const recall = () => { try { return window.localStorage.getItem(LAST_PROJECT); } catch { return null; } };
@@ -36,12 +38,12 @@ export function App() {
   // The open workspace. null: the app starts on the workspace picker, like Obsidian's vault switcher.
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [search, setSearch] = useState(false); // the search panel replaces the left list
-  const toggleSearch = useCallback(() => setSearch((s) => !s), []);
+  const toggleSearch = useCallback(() => { void window.qa?.openSearchWindow?.(); }, []);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); setSearch(true); } };
+    const onKey = (e: KeyboardEvent) => { if (!isSearchWindow && !isNoteWindow && (e.ctrlKey || e.metaKey) && (e.shiftKey || projectId) && e.key.toLowerCase() === 'f') { e.preventDefault(); toggleSearch(); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [toggleSearch, projectId]);
 
   // Note windows can show a terminal they started, or open a file they mention, here.
   useEffect(() => {
@@ -56,6 +58,7 @@ export function App() {
   const loadTools = useCallback(() => { api.integrations().then(setTools).catch(() => { /* keeps the list it has */ }); }, []);
 
   useEffect(() => {
+    if (isSearchWindow) { setMenuWorkspace(noteParams.get('workspace') ?? ''); setReady(true); return; }
     if (!hasBridge()) { setError(t('Moki must be opened with the qa command.')); return; }
     Promise.all([api.session(), api.projects(), api.integrations(), api.workspaces()])
       .then(([session, list, toolList, spaces]) => {
@@ -92,6 +95,7 @@ export function App() {
   const onProjectChanged = useCallback(() => { void loadProjects(); }, [loadProjects]);
   // A workspace was opened (picker or switcher): its projects, on the start screen. null goes back to the picker.
   const openWorkspace = (w: WorkspaceInfo | null) => {
+    window.qa?.closeSearchWindow?.();
     setSettings(null); setProjectId(null); setCreated(null); remember(null);
     setWorkspace(w);
     if (!w) return;
@@ -101,6 +105,7 @@ export function App() {
 
   if (error) return <div className="notice"><img src="./favicon.svg" alt="" width={40} height={40} /><h1>{t('Something went wrong')}</h1><p>{error}</p></div>;
   if (!ready) return <div className="notice muted">{t('Loading…')}</div>;
+  if (isSearchWindow) return <div className="search-window"><SearchPanel onOpenProject={(id) => window.qa?.searchOpen?.(id, '')} onOpenFile={(id, path) => window.qa?.searchOpen?.(id, path)} onClose={() => window.close()} /></div>;
   if (isNoteWindow) {
     const loose = noteParams.get('loose');
     return (
@@ -136,5 +141,5 @@ export function App() {
       </div>
     );
   }
-  return <Workspace key={project.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created?.id === project.id && created.setup} startNotice={created?.id === project.id ? created.notice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} onToolsChanged={loadTools} />;
+  return <Workspace key={`${workspace.id}:${project.id}`} workspaceId={workspace.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created?.id === project.id && created.setup} startNotice={created?.id === project.id ? created.notice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} onToolsChanged={loadTools} />;
 }

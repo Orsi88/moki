@@ -1,17 +1,33 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type DragEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { api, type PdfChange, type PdfComment, type PdfMark } from '../api';
+import { api, type PdfChange, type PdfComment, type PdfMark, type PdfNote } from '../api';
 import { t } from '../i18n';
 import { selectionNote, stackCards } from '../pdf-quads';
-import { IconChat, IconHighlight, IconPlus, IconSearch, IconTrash, IconX } from './Icons';
+import { IconChat, IconEdit, IconHighlight, IconNativeViewer, IconNotePlus, IconPages, IconPlus, IconSearch, IconTrash, IconX } from './Icons';
 import { recall, remember } from '../prefs';
 import { PdfPages } from './PdfPages';
+import { NoteDialog } from './NoteDialog';
+import { COLORS, SWATCH as COLOR_SWATCH } from '../md-comments';
+import { colorName } from './CommentColors';
 
-const COLORS = ['yellow', 'green', 'blue', 'pink', 'orange', 'red', 'purple'];
-const SWATCH: Record<string, string> = { yellow: '#f5d90a', green: '#46c46a', blue: '#4a8ff0', pink: '#f06ab0', orange: '#f59b2a', red: '#e5484d', purple: '#9b6cf0' };
-const colorName = (c: string) => ({ yellow: t('Yellow'), green: t('Green'), blue: t('Blue'), pink: t('Pink'), orange: t('Orange'), red: t('Red'), purple: t('Purple') })[c] ?? c;
+const SWATCH: Record<string, string> = COLOR_SWATCH;
 const CSS_UNITS = 96 / 72; // as PdfPages draws the pages
 const CARD_GAP = 10;
+const KEPT_SELECTION = 'pdf-selection';
+
+// The comment box takes focus, and the browser then hides the text selection. A cloned range painted
+// with the same colour stays on the passage until the box closes.
+const keepSelection = () => {
+  const sel = window.getSelection();
+  const marks = CSS as unknown as { highlights?: { set: (name: string, value: unknown) => void } };
+  const Highlight = (window as unknown as { Highlight?: new (range: Range) => unknown }).Highlight;
+  if (!sel?.rangeCount || !marks.highlights || !Highlight) return;
+  marks.highlights.set(KEPT_SELECTION, new Highlight(sel.getRangeAt(0).cloneRange()));
+};
+const dropSelection = () => {
+  (CSS as unknown as { highlights?: { delete: (name: string) => void } }).highlights?.delete(KEPT_SELECTION);
+  window.getSelection()?.removeAllRanges();
+};
 
 // The panel mode stays when a change opens the -edited copy in a new tab.
 let lastTab: 'comment' | 'edit' = 'comment';
@@ -25,6 +41,42 @@ interface Props {
 }
 
 interface Placed { id: string; ax: number; ay: number; edge: number; top: number; color: string } // edge: the right side of its page
+
+// The browser's resize grip does not reliably dispatch mouseup, so observe the
+// card and save its final size after the person stops dragging.
+function ResizableNote({ height, borderColor, onHeight, children }: { height: number; borderColor?: string; onHeight: (height: number) => void; children: ReactNode }) {
+  const element = useRef<HTMLDivElement>(null);
+  const current = useRef({ height, onHeight });
+  current.current = { height, onHeight };
+  useEffect(() => {
+    const box = element.current;
+    if (!box) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observer = new ResizeObserver(() => {
+      const next = Math.max(140, Math.min(2400, Math.round(box.getBoundingClientRect().height)));
+      clearTimeout(timer);
+      if (Math.abs(next - current.current.height) > 2) timer = setTimeout(() => current.current.onHeight(next), 500);
+    });
+    observer.observe(box);
+    return () => { clearTimeout(timer); observer.disconnect(); };
+  }, []);
+  return <div ref={element} className="pdf-inline-note" style={{ height, borderLeftColor: borderColor }}>{children}</div>;
+}
+
+function NoteBorderColor({ color, disabled, onChange }: { color?: string; disabled: boolean; onChange: (color: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return <div className="note-border-color" onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); } }}>
+    {open && <div className="pdf-colors" role="radiogroup" aria-label={t('Note border color')}>
+      {COLORS.map((c) => <button key={c} type="button" role="radio" className={`pdf-color${color === c ? ' on' : ''}`}
+        aria-checked={color === c} title={colorName(c)} aria-label={colorName(c)} style={{ background: SWATCH[c] }} disabled={disabled}
+        onClick={() => { onChange(c); setOpen(false); }} />)}
+    </div>}
+    <button type="button" className="icon-btn note-border-color-toggle" title={t('Change note border color')} aria-label={t('Change note border color')}
+      aria-expanded={open} disabled={disabled} onClick={() => setOpen((v) => !v)}>
+      <span className="note-border-color-dot" style={{ background: color ? SWATCH[color] : 'var(--accent)' }} />
+    </button>
+  </div>;
+}
 
 // A PDF with its comments and page edits. On the left, fixed: the view, zoom, the colour,
 // highlight by search, and the page edits (a bar under each page: rotate, move, insert a blank
@@ -41,6 +93,9 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [mac, setMac] = useState(false);
   const [comments, setComments] = useState<PdfComment[]>([]);
+  const [notes, setNotes] = useState<PdfNote[]>([]);
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [draggingNote, setDraggingNote] = useState(false);
   const [color, setColor] = useState('yellow');
   // The search field: every match in the document (page, and which match of that page), the one shown.
   const [query, setQuery] = useState('');
@@ -48,7 +103,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [hit, setHit] = useState(0);
   const pdf = useRef<PDFDocumentProxy | null>(null);
   const onDoc = useCallback((d: PDFDocumentProxy | null) => { pdf.current = d; setHits(null); }, []);
-  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string; quote: string } | null>(null);
+  const [composer, setComposer] = useState<{ marks: PdfMark[]; x: number; y: number; text: string; quote: string; rects: { left: number; top: number; width: number; height: number }[] } | null>(null);
   const [editing, setEditing] = useState<{ id: string; mode: 'reply' | 'edit'; text: string } | null>(null);
   const [active, setActive] = useState('');
   // The comment column, opened or closed from the bar (remembered); closed, the pages take the room and marks on their edge show where comments are.
@@ -63,6 +118,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const [placed, setPlaced] = useState<{ items: Placed[]; rail: number; railTop: number; height: number }>({ items: [], rail: 0, railTop: 0, height: 0 });
   const stage = useRef<HTMLDivElement>(null);
   const rail = useRef<HTMLDivElement>(null);
+  const properties = useRef<HTMLDetailsElement>(null);
   const toNative = useCallback(() => setView('native'), []);
   const onLoad = useCallback((i: { pages: number; title: string; author: string }) => { setInfo(i); setProps({ title: i.title, author: i.author }); }, []);
   // The service saves to a "-edited" copy: always for files from the inbox, and for page edits of any file.
@@ -70,6 +126,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const copied = path.startsWith('inbox/') && !isCopy;
 
   useEffect(() => { api.pdfcraftStatus().then((s) => { setAvailable(s.available); setMac(s.platform === 'darwin'); }).catch(() => setAvailable(false)); }, []);
+  useEffect(() => { api.pdfNotes(project, path).then(setNotes).catch((e: Error) => setError(e.message)); }, [project, path]);
   useEffect(() => {
     if (!available) return;
     api.pdfComments(project, path).then(setComments).catch((e: Error) => setError(e.message));
@@ -141,7 +198,15 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     setBusy(true);
     setError('');
     return api.pdfChange(project, path, change)
-      .then((r) => { setComments(r.comments); onSaved(r.path); return true; })
+      .then(async (r) => {
+        setComments(r.comments);
+        if (r.path === path) {
+          try { setNotes(await api.pdfNotes(project, path)); }
+          catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+        }
+        onSaved(r.path);
+        return true;
+      })
       .catch((e: Error) => { setError(e.message); return false; })
       .finally(() => setBusy(false));
   };
@@ -151,16 +216,20 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     const box = stage.current;
     const sel = window.getSelection();
     if (!marks || !box || !sel?.rangeCount) { setComposer((c) => (c && !c.text ? null : c)); return; }
+    keepSelection();
     const r = sel.getRangeAt(0).getBoundingClientRect();
     const origin = box.getBoundingClientRect();
-    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '', quote: sel.toString() });
+    const rects = [...sel.getRangeAt(0).getClientRects()].filter((item) => item.width > 1 && item.height > 1 && item.height < 80).map((item) => ({
+      left: item.left - origin.left, top: item.top - origin.top, width: item.width, height: item.height,
+    }));
+    setComposer({ marks, x: Math.max(8, r.left - origin.left), y: r.bottom - origin.top + 8, text: '', quote: sel.toString(), rects });
   };
   const highlightSelection = () => {
     if (!composer) return;
     void apply({ op: 'highlight', marks: composer.marks, contents: composer.text.trim() || undefined, color }).then((ok) => {
       if (!ok) return;
       setComposer(null);
-      window.getSelection()?.removeAllRanges();
+      dropSelection();
     });
   };
   // The selected text as a note of this project (notes/), opened in the notebook; the PDF is not changed.
@@ -169,7 +238,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     const { title, text } = selectionNote(path, composer.marks, composer.quote);
     setError('');
     api.createNote(project, title, text)
-      .then((created) => { setComposer(null); window.getSelection()?.removeAllRanges(); return api.openNoteWindow({ project, path: created }); })
+      .then((created) => { setComposer(null); dropSelection(); return api.openNoteWindow({ project, path: created }); })
       .catch((e: Error) => setError(e.message));
   };
   // Every match of the field's text in the document, from each page's text (case ignored).
@@ -242,8 +311,57 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     if (window.confirm(t('Delete this comment?'))) void apply({ op: 'delete', id: c.id });
   };
 
-  const off = !available || busy;
+  const off = !available || busy || noteBusy;
   const edit = (change: PdfChange) => { if (!off) void apply(change); };
+
+  const saveNotes = async (next: PdfNote[]) => {
+    setNoteBusy(true); setError('');
+    try { setNotes(await api.setPdfNotes(project, path, next)); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setNoteBusy(false); }
+  };
+  const addNote = (after: number, note: PdfNote['note']) => {
+    void saveNotes([...notes, { id: crypto.randomUUID(), after, note }]);
+  };
+  const newNote = async (after: number) => {
+    setNoteBusy(true);
+    try { const created = await api.createNote(project, t('New note'), ''); addNote(after, { path: created }); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); setNoteBusy(false); }
+  };
+  const isNoteDrag = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('application/x-moki-note');
+  const dropNote = (e: DragEvent, after: number) => {
+    if (!isNoteDrag(e) || noteBusy) return;
+    e.preventDefault(); e.stopPropagation(); setDraggingNote(false);
+    try {
+      const ref: unknown = JSON.parse(e.dataTransfer.getData('application/x-moki-note'));
+      if (!ref || typeof ref !== 'object') return;
+      const candidate = ref as { project?: unknown; path?: unknown; loose?: unknown };
+      if (candidate.project && candidate.project !== project) { setError(t('This note belongs to another project.')); return; }
+      if (typeof candidate.path === 'string' && /^notes\/[^/]+\.md$/.test(candidate.path)) addNote(after, { path: candidate.path });
+      else if (typeof candidate.loose === 'string' && /^[0-9a-f-]{36}$/i.test(candidate.loose)) addNote(after, { loose: candidate.loose });
+    } catch { setError(t('Could not add the note.')); }
+  };
+  const afterPage = (n: number) => (
+    <div className="pdf-between">
+      {notes.filter((entry) => entry.after === n).map((entry) => (
+        <ResizableNote key={entry.id} height={entry.height ?? 300} borderColor={entry.color ? SWATCH[entry.color] : undefined} onHeight={(height) => {
+          void saveNotes(notes.map((item) => item.id === entry.id ? { ...item, height } : item));
+        }}>
+          <NoteDialog project={'path' in entry.note ? project : null} path={'path' in entry.note ? entry.note.path : null}
+            looseId={'loose' in entry.note ? entry.note.loose : null} embedded inline closeLabel={t('Remove note from PDF')}
+            inlineActions={<NoteBorderColor color={entry.color} disabled={noteBusy} onChange={(next) => {
+              void saveNotes(notes.map((item) => item.id === entry.id ? { ...item, color: next } : item));
+            }} />}
+            onClose={() => { void saveNotes(notes.filter((item) => item.id !== entry.id)); }} />
+        </ResizableNote>
+      ))}
+      {draggingNote && (
+        <div className={`pdf-note-drop${draggingNote ? ' dragging' : ''}`} onDragOver={(e) => { if (isNoteDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }} onDrop={(e) => dropNote(e, n)}>
+          <span className="muted small">{t('Drop note here')}</span>
+        </div>
+      )}
+    </div>
+  );
 
   // Edit mode: a bar under each page drawn by pdf.js.
   const pageTools = (n: number, total: number) => (
@@ -254,6 +372,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
       <button type="button" className="icon-btn" disabled={off || n === 1} title={t('Move up')} aria-label={t('Move up')} onClick={() => edit({ op: 'move-page', page: n, to: n - 1 })}>↑</button>
       <button type="button" className="icon-btn" disabled={off || n === total} title={t('Move down')} aria-label={t('Move down')} onClick={() => edit({ op: 'move-page', page: n, to: n + 1 })}>↓</button>
       <button type="button" className="icon-btn" disabled={off} title={t('Insert blank page after')} aria-label={t('Insert blank page after')} onClick={() => edit({ op: 'insert-blank', at: n + 1 })}><IconPlus size={15} /></button>
+      <button type="button" className="icon-btn" disabled={noteBusy || busy} title={t('Add a note here')} aria-label={t('Add a note here')} onClick={() => { void newNote(n); }}><IconNotePlus size={16} /></button>
       <button type="button" className="icon-btn" disabled={off || total === 1} title={t('Delete page')} aria-label={t('Delete page')}
         onClick={() => { if (window.confirm(t('Delete page {n}?', { n }))) edit({ op: 'delete-pages', pages: [n] }); }}><IconTrash size={15} /></button>
     </div>
@@ -263,7 +382,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
     <div className="pdf-colors" role="radiogroup" aria-label={t('Color')}>
       {COLORS.map((c) => (
         <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={colorName(c)} title={colorName(c)}
-          className={`pdf-color${color === c ? ' on' : ''}`} style={{ background: SWATCH[c] }} onClick={() => setColor(c)} />
+          className={`pdf-color${color === c ? ' on' : ''}`} onClick={() => setColor(c)}><span style={{ background: SWATCH[c] }} /></button>
       ))}
     </div>
   );
@@ -307,11 +426,14 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const showRail = Boolean(available) && tab === 'comment' && !railOff;
 
   return (
-    <div className="pdf-doc">
+    <div className="pdf-doc" onDragEnter={(e) => { if (isNoteDrag(e)) { setDraggingNote(true); setView('pages'); setTab('edit'); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDraggingNote(false); }}
+      onDragEnd={() => setDraggingNote(false)} onDrop={(e) => { if (isNoteDrag(e)) setDraggingNote(false); }}>
       <div className="pdf-bar" role="toolbar" aria-label={t('PDF tools')}>
+        <div className="pdf-bar-leading">
         <div className="view-toggle" role="group" aria-label={t('PDF view')}>
-          <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => setView('pages')}>{t('Pages')}</button>
-          <button type="button" className={view === 'native' ? 'on' : ''} aria-pressed={view === 'native'} onClick={() => setView('native')}>{t('Native viewer')}</button>
+          <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => setView('pages')} title={t('Pages')} aria-label={t('Pages')}><IconPages size={16} /></button>
+          <button type="button" className={view === 'native' ? 'on' : ''} aria-pressed={view === 'native'} onClick={() => setView('native')} title={t('Native viewer')} aria-label={t('Native viewer')}><IconNativeViewer size={16} /></button>
         </div>
         {view === 'pages' && (
           <div className="pdf-zoom">
@@ -322,8 +444,9 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
         )}
         <span className="pdf-bar-sep" />
         <div className="view-toggle pdf-tabs" role="group" aria-label={t('PDF panel')}>
-          <button type="button" className={tab === 'comment' ? 'on' : ''} aria-pressed={tab === 'comment'} onClick={() => setTab('comment')}>{t('Highlight and comment')}</button>
-          <button type="button" className={tab === 'edit' ? 'on' : ''} aria-pressed={tab === 'edit'} onClick={() => setTab('edit')}>{t('Edit PDF')}</button>
+          <button type="button" className={tab === 'comment' ? 'on' : ''} aria-pressed={tab === 'comment'} onClick={() => setTab('comment')} title={t('Highlight and comment')} aria-label={t('Highlight and comment')}><IconHighlight size={16} /></button>
+          <button type="button" className={tab === 'edit' ? 'on' : ''} aria-pressed={tab === 'edit'} onClick={() => setTab('edit')} title={t('Edit PDF')} aria-label={t('Edit PDF')}><IconEdit size={16} /></button>
+        </div>
         </div>
         {available && tab === 'comment' && (
           <>
@@ -353,13 +476,13 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
           </>
         )}
         {available && tab === 'edit' && (
-          <details className="pdf-drop">
+          <details className="pdf-drop" ref={properties} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}>
             <summary className="btn btn-ghost btn-sm">{t('Document properties')}</summary>
             <fieldset disabled={off} className="pdf-form pdf-drop-body">
               <label>{t('Title')}<input type="text" maxLength={1000} value={props.title} onChange={(e) => setProps({ ...props, title: e.target.value })} /></label>
               <label>{t('Author')}<input type="text" maxLength={1000} value={props.author} onChange={(e) => setProps({ ...props, author: e.target.value })} /></label>
               <button type="button" className="btn btn-sm" disabled={off || (props.title === info.title && props.author === info.author)}
-                onClick={() => edit({ op: 'set-info', ...props })}>{busy ? t('Saving…') : t('Save')}</button>
+                onClick={() => { void apply({ op: 'set-info', ...props }).then((ok) => { if (ok && properties.current) properties.current.open = false; }); }}>{busy ? t('Saving…') : t('Save')}</button>
             </fieldset>
           </details>
         )}
@@ -379,7 +502,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
         <div className="pdf-scroll" ref={scroller}>
           <div className={`pdf-stage${showRail ? ' with-rail' : ''}`} ref={stage}>
             <PdfPages data={data} zoom={zoom} onSelection={tab === 'comment' && available ? onSelection : () => {}} onError={toNative} onLoad={onLoad} onDoc={onDoc}
-              pageTools={tab === 'edit' && available ? pageTools : undefined} />
+              pageTools={tab === 'edit' ? pageTools : undefined} afterPage={afterPage} />
             {showRail && (
               <>
                 <svg className="pdf-links" width="100%" height={placed.height} aria-hidden="true">
@@ -408,12 +531,13 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
                   onClick={() => { setRailOff(false); setActive(p.id); }} />
               );
             })}
+            {composer?.rects.map((box, i) => <span key={i} className="pdf-kept-selection" aria-hidden="true" style={{ left: box.left, top: box.top, width: box.width, height: box.height }} />)}
             {composer && available && tab === 'comment' && (
               <div className="pdf-composer" style={{ left: composer.x, top: composer.y }} role="dialog" aria-label={t('Highlight and comment')}
-                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setComposer(null); } }}>
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setComposer(null); dropSelection(); } }}>
                 <div className="pdf-composer-head">
                   {swatches}
-                  <button type="button" className="icon-btn" onClick={() => setComposer(null)} aria-label={t('Close')} title={t('Close')}><IconX size={14} /></button>
+                  <button type="button" className="icon-btn" onClick={() => { setComposer(null); dropSelection(); }} aria-label={t('Close')} title={t('Close')}><IconX size={14} /></button>
                 </div>
                 <textarea autoFocus rows={3} maxLength={4000} value={composer.text} placeholder={t('Comment (optional)')}
                   onChange={(e) => setComposer({ ...composer, text: e.target.value })}

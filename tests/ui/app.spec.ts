@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { PDFDocument } from 'pdf-lib';
 import { ROOT } from '../../scripts/lib/repo.mjs';
 
 const require = createRequire(import.meta.url);
@@ -459,7 +460,22 @@ test.describe.serial('Moki workspaces', () => {
   test('the app starts on the workspace picker; a new workspace opens empty and can be switched back', async () => {
     await expect(wsPage.getByText('Escolha um workspace', { exact: false })).toBeVisible();
     await expect(wsPage.locator('.picker-cat')).toBeVisible();
+    await wsPage.getByRole('button', { name: 'Gerenciar' }).click();
+    const manager = wsPage.locator('.workspace-management-main');
+    await expect(manager).toBeVisible();
+    await manager.getByRole('searchbox').fill('no-such-workspace');
+    await expect(manager.locator('.workspace-manage-row')).toHaveCount(0);
+    await manager.getByRole('searchbox').fill('Workspace');
+    await expect(manager.locator('.workspace-manage-row')).toHaveCount(1);
+    const star = manager.getByRole('button', { name: 'Adicionar Workspace aos favoritos' });
+    await star.click();
+    await expect(manager.getByRole('button', { name: 'Remover Workspace dos favoritos' })).toHaveAttribute('aria-pressed', 'true');
+    await manager.getByRole('button', { name: 'Voltar', exact: true }).click();
+    await wsPage.getByRole('button', { name: 'Gerenciar' }).click();
+    await expect(manager.getByRole('button', { name: 'Remover Workspace dos favoritos' })).toBeVisible();
+    await manager.getByRole('button', { name: 'Voltar', exact: true }).click();
     await wsPage.getByRole('button', { name: 'Criar' }).click();
+    await expect(wsPage.getByRole('dialog', { name: 'Criar um novo workspace' })).toBeVisible();
     await wsPage.getByPlaceholder('ex.: Cliente X').fill('Cliente X');
     await wsPage.getByRole('button', { name: 'Criar workspace' }).click();
     await expect(wsPage.locator('.ws-switch-name')).toHaveText('Cliente X');
@@ -469,6 +485,36 @@ test.describe.serial('Moki workspaces', () => {
     await wsPage.getByRole('menuitem', { name: 'Workspace', exact: true }).click();
     await expect(wsPage.locator('.ws-switch-name')).toHaveText('Workspace');
     await expect(wsPage.getByRole('button', { name: /Acme Library/ })).toBeVisible();
+    await wsPage.evaluate(() => window.qa!.call('saveTag', { name: 'Filtro de teste' }));
+    const newWindow = wsApp.waitForEvent('window');
+    await wsPage.keyboard.press('Control+Shift+f');
+    const searchPage = await newWindow;
+    await searchPage.getByText('+ tag', { exact: true }).click();
+    await expect(searchPage.getByRole('button', { name: /Filtro de teste/ })).toBeVisible();
+    await searchPage.getByRole('textbox', { name: 'Buscar em projetos e arquivos' }).click();
+    await expect(searchPage.getByRole('button', { name: /Filtro de teste/ })).toBeHidden();
+    await searchPage.getByText('+ tag', { exact: true }).click();
+    await searchPage.getByRole('button', { name: /Filtro de teste/ }).click();
+    await expect(searchPage.getByRole('button', { name: 'Remover tag' })).toBeVisible();
+    await searchPage.getByRole('button', { name: 'Remover tag' }).click();
+    await searchPage.getByRole('textbox', { name: 'Buscar em projetos e arquivos' }).fill('projeto: Acme');
+    await expect(searchPage.getByRole('button', { name: /Acme Library/ })).toBeVisible();
+    await searchPage.getByRole('button', { name: 'Limpar pesquisa' }).click();
+    await expect(searchPage.getByRole('textbox', { name: 'Buscar em projetos e arquivos' })).toHaveValue('');
+    await searchPage.getByRole('textbox', { name: 'Buscar em projetos e arquivos' }).fill('projeto: Acme');
+    await searchPage.getByRole('button', { name: /Acme Library/ }).click();
+    await expect(wsPage.locator('.workspace')).toBeVisible();
+    await searchPage.close();
+    await wsPage.getByRole('button', { name: /Acompanhamento/ }).click();
+    await wsPage.locator('.tree-row[title="activity-log.md"]').click();
+    const reopenedWindow = wsApp.waitForEvent('window');
+    await wsPage.keyboard.press('Control+f');
+    const reopenedSearch = await reopenedWindow;
+    await expect(reopenedSearch.getByRole('textbox', { name: 'Buscar em projetos e arquivos' })).toBeVisible();
+    await expect(reopenedSearch.getByText('Arquivos recentes')).toBeVisible();
+    await expect(reopenedSearch.getByRole('button', { name: /activity-log\.md/ })).toBeVisible();
+    await reopenedSearch.close();
+    await wsPage.getByRole('button', { name: 'Todos os projetos' }).click();
   });
 
   test('a hidden project is deleted for good only after typing delete', async () => {
@@ -494,8 +540,10 @@ test.describe.serial('Moki workspaces', () => {
     expect(existsSync(join(dirs[0], 'workspace', 'projects', 'old-portal'))).toBe(false);
   });
 
-  test('creating a project: Enter on the name opens it with the standard folders; Create and customize opens with Set up', async () => {
+  test('creating a project opens directly without setup or AI planning', async () => {
     await wsPage.getByRole('button', { name: 'Criar', exact: true }).click(); // the + of "Create a new project"
+    await expect(wsPage.getByRole('dialog', { name: 'Criar um novo projeto' })).toBeVisible();
+    await expect(wsPage.getByRole('button', { name: 'Criar e personalizar…' })).toHaveCount(0);
     await wsPage.getByRole('textbox', { name: /Nome do projeto/ }).fill('Rapido');
     await wsPage.keyboard.press('Enter');
     await expect(wsPage.locator('.project-switch')).toHaveText('Rapido');
@@ -505,18 +553,6 @@ test.describe.serial('Moki workspaces', () => {
     expect(readdirSync(join(quick, 'context'))).toEqual([]);
 
     await wsPage.locator('.project-switch').click(); // back to the start screen
-    await wsPage.getByRole('button', { name: 'Criar', exact: true }).click();
-    await wsPage.getByRole('textbox', { name: /Nome do projeto/ }).fill('Personalizado');
-    await wsPage.getByRole('button', { name: 'Criar e personalizar…' }).click();
-    const dialog = wsPage.getByRole('dialog', { name: 'Personalizar o projeto' });
-    await expect(dialog.getByLabel('Nome do projeto')).toHaveValue('Personalizado');
-    await expect(dialog.getByRole('radio')).toHaveText([/Vazio/, /Planejado pela IA/]); // nothing specific to QA
-    await dialog.getByRole('button', { name: 'Criar e configurar' }).click();
-    await expect(wsPage.locator('.project-switch')).toHaveText('Personalizado');
-    await expect(wsPage.getByRole('dialog')).toBeVisible(); // Set up the project
-    expect(readdirSync(join(dirs[0], 'workspace', 'projects', 'personalizado', 'context'))).toEqual([]);
-    await wsPage.keyboard.press('Escape');
-    await wsPage.locator('.project-switch').click();
   });
 
   test('a loose note opens inside the app; its notebook window lists the loose notes opened, as tabs', async () => {
@@ -593,6 +629,7 @@ test.describe.serial('Moki project tree', () => {
     const project = join(dirs[0], 'workspace', 'projects', 'acme');
     expect(existsSync(join(project, 'inbox', 'cenarios.md'))).toBe(true);
     await expect(treePage.locator('.tree-row[title="inbox/cenarios.md"]')).toBeVisible();
+    await treePage.getByRole('button', { name: 'Código Markdown' }).click();
     await expect(treePage.locator('textarea')).toBeVisible();
     // A .md file has the notes' / commands too.
     const md = treePage.locator('textarea.editor');
@@ -607,6 +644,9 @@ test.describe.serial('Moki project tree', () => {
     await expect(md).toHaveValue(/\| Coluna 1 \| Coluna 2 \| Coluna 3 \|/);
     await treePage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
     await expect.poll(() => readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'cenarios.md'), 'utf8')).toContain('| Coluna 1 |');
+    await treePage.getByRole('button', { name: 'Editor visual', exact: true }).click();
+    await expect(treePage.getByRole('status').filter({ hasText: 'precisa do código Markdown' })).toBeVisible();
+    await expect(md).toBeVisible();
 
     await treePage.getByRole('button', { name: 'Opções da pasta do projeto' }).click();
     await expect(treePage.getByRole('menuitem', { name: 'Copiar caminho' })).toBeVisible();
@@ -644,9 +684,16 @@ test.describe.serial('Moki project tree', () => {
     await expect(treePage.locator('.tree-row[title=".mcps"]')).toBeVisible();
     await config.click();
     await expect(treePage.locator('.tree-row[title="project.json"]')).toBeVisible();
-    // Operations is the last card of the project panel, below the AI assistant; with nothing under way it opens on the operations to start.
-    const ops = treePage.locator('.panel').getByRole('region', { name: 'Operações' });
-    await expect(ops.getByRole('tab', { name: 'Iniciar' })).toHaveAttribute('aria-selected', 'true');
+    // Operations is the last card of the project panel, below the AI assistant. With nothing under way it stays on that list; an operation is chosen on the assistant card.
+    const ops = treePage.locator('.panel').getByRole('region', { name: 'Execuções' });
+    await expect(ops.getByRole('tab', { name: 'Em andamento' })).toHaveAttribute('aria-selected', 'true');
+    // The tabs are the header of both cards: neither shows a title of its own.
+    await expect(ops.getByText('Execuções', { exact: true })).toHaveCount(0);
+    await expect(treePage.locator('.panel').getByText('Assistente de IA', { exact: true })).toHaveCount(0);
+    await expect(ops.getByRole('button', { name: 'Vincular operações a este projeto' })).toHaveCount(0);
+    await ops.getByRole('tab', { name: 'Atividades', exact: true }).click();
+    await expect(ops.getByRole('tab', { name: 'Em andamento' })).toHaveAttribute('aria-selected', 'true');
+    await ops.getByRole('tab', { name: 'Operações', exact: true }).click();
     const order = await treePage.locator('.sidebar-scroll > *').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.className));
     expect(order).toEqual(['tree']); // only the files scroll
     // The sidebar keeps only the files and, fixed below them, the settings.
@@ -656,6 +703,61 @@ test.describe.serial('Moki project tree', () => {
     // Project settings and the MCP servers stay fixed at the bottom of the sidebar.
     await expect(treePage.locator('.sidebar-foot .tree-row[title=".settings"]')).toBeVisible();
     await expect(treePage.locator('.sidebar-foot .tree-row[title=".mcps"]')).toBeVisible();
+  });
+
+  test('the file sidebar resizes, collapses and remembers its width independently of the right panel', async () => {
+    const sidebar = treePage.locator('.sidebar');
+    const splitter = treePage.getByRole('separator', { name: 'Ajustar largura da barra de arquivos' });
+    const initial = await sidebar.boundingBox();
+    if (!initial) throw new Error('Sidebar is not visible');
+    await splitter.hover();
+    expect(await splitter.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    expect(await splitter.evaluate((el) => getComputedStyle(el, '::after').width)).toBe('2px');
+    expect((await splitter.evaluate((el) => getComputedStyle(el, '::after').boxShadow)).split('rgb').length).toBe(3);
+    await treePage.mouse.move(initial.x + initial.width - 1, initial.y + 100);
+    await treePage.mouse.down();
+    await treePage.mouse.move(initial.x + initial.width + 100, initial.y + 100, { steps: 5 });
+    await treePage.mouse.up();
+    await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeGreaterThan(initial.width + 80);
+    const expanded = await sidebar.boundingBox();
+    if (!expanded) throw new Error('Sidebar is not visible');
+    await splitter.focus();
+    await treePage.keyboard.press('ArrowLeft');
+    await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeLessThan(expanded.width - 10);
+    const savedWidth = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+    const rightPanel = treePage.locator('.panel');
+    await treePage.getByRole('button', { name: 'Recolher barra de arquivos' }).click();
+    await expect(sidebar).toBeHidden();
+    await expect(rightPanel).not.toHaveClass(/panel-rail/);
+    await treePage.getByRole('button', { name: 'Mostrar barra de arquivos' }).click();
+    await expect(sidebar).toBeVisible();
+    await expect.poll(async () => Math.abs((await sidebar.evaluate((el) => el.getBoundingClientRect().width)) - savedWidth)).toBeLessThan(2);
+    await rightPanel.getByRole('button', { name: 'Recolher o painel' }).click();
+    await expect(rightPanel).toHaveClass(/panel-rail/);
+    await treePage.getByRole('button', { name: 'Recolher barra de arquivos' }).click();
+    await expect(sidebar).toBeHidden();
+    await expect(rightPanel).toHaveClass(/panel-rail/);
+    await treePage.getByRole('button', { name: 'Mostrar barra de arquivos' }).click();
+    await rightPanel.getByRole('button', { name: 'Expandir o painel' }).click();
+    await treePage.getByRole('button', { name: 'Recolher barra de arquivos' }).click();
+    await treePage.getByRole('button', { name: 'Todos os projetos' }).click();
+    await treePage.locator('.home-project', { hasText: 'Acme Library' }).first().click();
+    await expect(treePage.locator('.sidebar')).toBeHidden();
+    await treePage.getByRole('button', { name: 'Mostrar barra de arquivos' }).click();
+    await expect.poll(async () => Math.abs((await treePage.locator('.sidebar').evaluate((el) => el.getBoundingClientRect().width)) - savedWidth)).toBeLessThan(2);
+    await treePage.getByRole('button', { name: 'Recolher barra de arquivos' }).click();
+    const searchWindow = treeApp.waitForEvent('window');
+    await treePage.getByRole('button', { name: 'Buscar (Ctrl+Shift+F)' }).click();
+    const searchPage = await searchWindow;
+    await expect(treePage.locator('.sidebar')).toBeVisible();
+    await expect(searchPage.getByRole('textbox', { name: 'Buscar em projetos e arquivos' })).toBeVisible();
+    await searchPage.close();
+    await treePage.getByRole('button', { name: 'Recolher barra de arquivos' }).click();
+    const keyboardSearchWindow = treeApp.waitForEvent('window');
+    await treePage.keyboard.press('Control+Shift+f');
+    const keyboardSearch = await keyboardSearchWindow;
+    await expect(treePage.locator('.sidebar')).toBeVisible();
+    await keyboardSearch.close();
   });
 
   test('a linked folder shows first in the tree, live, with Open in the IDE; its files open in the app', async () => {
@@ -833,13 +935,17 @@ test.describe.serial('Moki operations in a project', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  test('an operation is linked, started from its form, and moves on as each agent delivers its files', async () => {
-    const side = opsPage.getByRole('region', { name: 'Operações' });
-    await side.getByRole('button', { name: 'Vincular operações a este projeto' }).click();
-    await opsPage.getByRole('menuitemcheckbox', { name: /Fluxo QA/ }).click();
-    await opsPage.keyboard.press('Escape');
-    await expect(opsPage.locator('.menu-backdrop')).toHaveCount(0);
-    await side.getByRole('button', { name: /Fluxo QA/ }).click();
+  test('an operation is started from its form, and moves on as each agent delivers its files', async () => {
+    const side = opsPage.getByRole('region', { name: 'Execuções' });
+    const assistant = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await assistant.getByRole('tab', { name: 'Operação' }).click();
+    await assistant.getByRole('button', { name: 'Escolher operação' }).click();
+    const dialog = opsPage.getByRole('dialog');
+    await dialog.getByRole('searchbox', { name: 'Buscar operações' }).fill('fluxo');
+    await expect(dialog.locator('.catalog-card')).toHaveCount(1);
+    await dialog.locator('.catalog-card').click();
+    await expect(dialog).toHaveCount(0);
+    await assistant.getByRole('button', { name: 'Iniciar operação' }).click();
 
     const launch = opsPage.getByRole('region', { name: 'Iniciar Fluxo QA' });
     await expect(launch.locator('.ops-run-agent')).toHaveText(['requirements-analyst', 'test-designer']);
@@ -932,12 +1038,37 @@ test.describe.serial('Moki operations in a project', () => {
     await expect(side.locator('.ops-side-ended .ops-side-row')).toContainText('Fluxo QA');
   });
 
+  test('an operation starts from the assistant card: its steps keep their agent and each AI is changed with the same pick', async () => {
+    const card = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await card.getByRole('tab', { name: 'Operação' }).click();
+    await card.locator('button.pp-pick').click();
+    const dialog = opsPage.getByRole('dialog');
+    await dialog.getByRole('searchbox', { name: 'Buscar operações' }).fill('fluxo');
+    await expect(dialog.locator('.catalog-card')).toHaveCount(1);
+    await dialog.locator('.catalog-card').click();
+    await expect(dialog).toHaveCount(0);
+    await card.getByRole('button', { name: 'Iniciar operação' }).click();
+
+    // Each step arrives with its agent and AI; the operation's start is not flattened to one agent and one AI.
+    const launch = opsPage.getByRole('region', { name: 'Iniciar Fluxo QA' });
+    await expect(launch.locator('.ops-run-agent')).toHaveText(['requirements-analyst', 'test-designer']);
+    const analyst = launch.getByRole('button', { name: 'IA de requirements-analyst' });
+    const designer = launch.getByRole('button', { name: 'IA de test-designer' });
+    await expect(analyst).toBeVisible();
+    await analyst.click();
+    await opsPage.getByRole('dialog').locator('.catalog-card').filter({ hasText: 'Gemini CLI' }).click();
+    await expect(analyst).toContainText('Gemini CLI');
+    await expect(designer).not.toContainText('Gemini CLI');
+    await launch.getByRole('button', { name: 'Fechar' }).click();
+    await expect(launch).toHaveCount(0);
+  });
+
   test('a result picks the arrow: rejected goes to the fixer and back to the review; no valid result asks the user', async () => {
-    const side = opsPage.getByRole('region', { name: 'Operações' });
-    await side.getByRole('button', { name: 'Vincular operações a este projeto' }).click();
-    await opsPage.getByRole('menuitemcheckbox', { name: /Revisa até aprovar/ }).click();
-    await opsPage.keyboard.press('Escape');
-    await side.getByRole('button', { name: /Revisa até aprovar/ }).click();
+    const assistant = opsPage.getByRole('region', { name: 'Assistente de IA' });
+    await assistant.getByRole('tab', { name: 'Operação' }).click();
+    await assistant.locator('button.pp-pick').click();
+    await opsPage.getByRole('dialog').locator('.catalog-card').filter({ hasText: 'Revisa até aprovar' }).click();
+    await assistant.getByRole('button', { name: 'Iniciar operação' }).click();
     await opsPage.getByRole('region', { name: 'Iniciar Revisa até aprovar' }).getByRole('button', { name: 'Iniciar operação' }).click();
 
     const runView = opsPage.locator('.ops-run');
@@ -1137,6 +1268,7 @@ function smallPdf(lines: string[]): Buffer {
 }
 
 const REVIEW_MD = '# Revisão\n\nA senha expira em 30 dias.\n';
+const IRREGULAR_MD = '# Revisão\n\n## Pendências\n- Primeira <!--c:a1-->regra<!--/c:a1-->\n- Segunda regra\n\n<!-- moki-comments\n[{"id":"a1","author":"Ana","at":"2026-01-01","text":"Verificar","replies":[],"color":"blue"}]\n-->\n';
 
 test.describe.serial('Moki PDF comments', () => {
   let pdfApp: ElectronApplication;
@@ -1147,6 +1279,9 @@ test.describe.serial('Moki PDF comments', () => {
     const root = fixture();
     writeFileSync(join(root, 'workspace', 'projects', 'acme', 'relatorio.pdf'), smallPdf(['Requisito de login', 'Segunda pagina']));
     writeFileSync(join(root, 'workspace', 'projects', 'acme', 'revisao.md'), REVIEW_MD);
+    writeFileSync(join(root, 'workspace', 'projects', 'acme', 'visual.md'), '# Título\r\n\r\n**Como cliente** quero comprar.\r\n\r\n## Regras\r\n\r\n- Primeira regra\r\n- Segunda regra\r\n');
+    writeFileSync(join(root, 'workspace', 'projects', 'acme', 'irregular.md'), IRREGULAR_MD);
+    writeFileSync(join(root, 'workspace', 'projects', 'acme', 'irregular-windows.md'), '# Título\r\n## Regras\r\n- Primeira regra\r\n- Segunda regra\r\n');
     const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
     dirs.push(root, userData);
     ({ app: pdfApp, page: pdfPage } = await openApp(root, userData, 'acme'));
@@ -1155,6 +1290,19 @@ test.describe.serial('Moki PDF comments', () => {
   test.afterAll(async () => {
     await pdfApp?.close();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('every PDF toolbar control has the same height', async () => {
+    if (!await pdfPage.locator('.tree-row[title="relatorio.pdf"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
+    await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
+    const bar = pdfPage.getByRole('toolbar', { name: 'Ferramentas do PDF' });
+    await expect(bar.getByRole('searchbox', { name: 'Buscar no PDF' })).toBeVisible();
+    const heights = () => bar.locator('button:visible, input[type="search"]:visible, summary:visible').evaluateAll((els) => els.map((el) => ({ label: el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent, height: el.getBoundingClientRect().height })));
+    for (const item of await heights()) expect(item.height, String(item.label)).toBe(28);
+    await bar.getByRole('button', { name: 'Editar PDF' }).click();
+    await expect(bar.locator('summary')).toBeVisible();
+    for (const item of await heights()) expect(item.height, String(item.label)).toBe(28);
+    await bar.getByRole('button', { name: 'Destacar e comentar' }).click();
   });
 
   test('a selection is commented right on the page; the comment stays beside it, joined by a line', async () => {
@@ -1216,8 +1364,88 @@ test.describe.serial('Moki PDF comments', () => {
     await expect(pdfPage.locator('.workspace.panel-rail')).toHaveCount(1);
   });
 
+  test('notes can be inserted between PDF pages, edited and restored', async () => {
+    const bar = pdfPage.locator('.doc-bar');
+    await expect(pdfPage.locator('.file-tags-bar')).toHaveCount(0);
+    await bar.getByRole('button', { name: 'Mostrar detalhes do arquivo' }).click();
+    await expect(pdfPage.locator('.file-tags-bar')).toBeVisible();
+    await bar.getByRole('button', { name: 'Recolher detalhes do arquivo' }).click();
+    await pdfPage.getByRole('button', { name: 'Editar PDF' }).click();
+    const first = pdfPage.locator('.pdf-page-wrap').first();
+    await first.getByRole('button', { name: 'Adicionar nota aqui' }).click();
+    const card = first.locator('.pdf-inline-note');
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: 'Alterar cor da borda da nota' }).click();
+    const palette = card.getByRole('radiogroup', { name: 'Cor da borda da nota' });
+    await expect(palette.getByRole('radio')).toHaveCount(7);
+    await palette.getByRole('radio', { name: 'Verde' }).click();
+    await expect(card).toHaveCSS('border-left-color', 'rgb(70, 196, 106)');
+    await expect.poll(() => JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.color).toBe('green');
+    const title = card.getByRole('textbox', { name: 'Título da nota' });
+    await title.fill('Minha nota revisada');
+    await title.press('Enter');
+    await expect.poll(() => JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-note-titles.json'), 'utf8'))[0]?.title).toBe('Minha nota revisada');
+    await expect(card.getByRole('toolbar', { name: 'Formatação' })).toBeHidden();
+    await card.getByRole('button', { name: 'Mostrar ferramentas da nota' }).click();
+    await expect(card.getByRole('toolbar', { name: 'Formatação' })).toBeVisible();
+    await card.getByRole('button', { name: 'Recolher ferramentas da nota' }).click();
+    const noteEditor = card.locator('textarea.note-editor');
+    await noteEditor.fill(`Uma anotação entre páginas${'\n'.repeat(8)}`);
+    await noteEditor.press('End');
+    await noteEditor.press('/');
+    const commands = pdfPage.getByRole('listbox', { name: 'Comandos' });
+    await expect(commands).toBeVisible();
+    const menuBox = await commands.boundingBox();
+    const viewport = await pdfPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    if (!menuBox || !viewport) throw new Error('The commands menu is not visible');
+    expect(menuBox.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(await commands.evaluate((el) => { const r = el.getBoundingClientRect(); const at = document.elementFromPoint(r.left + 20, r.bottom - 10); return !!at && el.contains(at); })).toBe(true);
+    for (let i = 0; i < 10; i++) await noteEditor.press('ArrowDown');
+    await expect.poll(() => commands.evaluate((el) => { const selected = el.querySelector('[aria-selected="true"]')?.getBoundingClientRect(); const box = el.getBoundingClientRect(); return !!selected && selected.top >= box.top && selected.bottom <= box.bottom; })).toBe(true);
+    await commands.getByRole('option', { name: 'Checklist' }).click();
+    await expect(noteEditor).toHaveValue(/- \[ \]/);
+    await expect.poll(() => readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'notes', 'nova-nota.md'), 'utf8')).toContain('Uma anotação entre páginas');
+    await card.scrollIntoViewIfNeeded();
+    const initial = await card.boundingBox();
+    if (!initial) throw new Error('Note card is not visible');
+    await pdfPage.mouse.move(initial.x + initial.width - 6, initial.y + initial.height - 6);
+    await pdfPage.mouse.down();
+    await pdfPage.mouse.move(initial.x + initial.width - 6, initial.y + initial.height + 64, { steps: 5 });
+    await pdfPage.mouse.up();
+    await expect.poll(async () => (await card.boundingBox())?.height ?? 0).toBeGreaterThan(initial.height + 30);
+    await expect.poll(() => JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.height).toBeGreaterThan(initial.height + 30);
+    await card.scrollIntoViewIfNeeded();
+    const enlarged = await card.boundingBox();
+    if (!enlarged) throw new Error('Note card is not visible');
+    await pdfPage.mouse.move(enlarged.x + enlarged.width - 6, enlarged.y + enlarged.height - 6);
+    await pdfPage.mouse.down();
+    await pdfPage.mouse.move(enlarged.x + enlarged.width - 6, enlarged.y + enlarged.height - 66, { steps: 5 });
+    await pdfPage.mouse.up();
+    await expect.poll(async () => (await card.boundingBox())?.height ?? 0).toBeLessThan(enlarged.height - 30);
+    await expect.poll(() => JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.height).toBeLessThan(enlarged.height - 30);
+    await pdfPage.locator('.tree-row[title="revisao.md"]').click();
+    await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
+    await expect(pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note textarea')).toHaveValue(/Uma anotação entre páginas/);
+    await expect(pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note')).toHaveCSS('border-left-color', 'rgb(70, 196, 106)');
+    await expect(pdfPage.locator('.pdf-page-wrap').first().getByRole('textbox', { name: 'Título da nota' })).toHaveValue('Minha nota revisada');
+    const storedHeight = JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.height as number;
+    await expect.poll(async () => Math.abs(((await pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note').boundingBox())?.height ?? 0) - storedHeight)).toBeLessThan(2);
+    await pdfPage.locator('.tree-row[title="notes"]').click();
+    const source = pdfPage.locator('.tree-row[title="notes/nova-nota.md"]');
+    await expect(source).toContainText('Minha nota revisada');
+    const transfer = await pdfPage.evaluateHandle(() => new DataTransfer());
+    await source.dispatchEvent('dragstart', { dataTransfer: transfer });
+    await pdfPage.locator('.pdf-doc').dispatchEvent('dragenter', { dataTransfer: transfer });
+    const destination = pdfPage.locator('.pdf-page-wrap').nth(1).locator('.pdf-note-drop');
+    await destination.dispatchEvent('dragover', { dataTransfer: transfer });
+    await destination.dispatchEvent('drop', { dataTransfer: transfer });
+    await expect(pdfPage.locator('.pdf-page-wrap').nth(1).locator('.pdf-inline-note textarea')).toHaveValue(/Uma anotação entre páginas/);
+  });
+
   test('a .md file is commented the same way; the comment is kept inside the file, invisible to other viewers', async () => {
     const file = join(dirs[0], 'workspace', 'projects', 'acme', 'revisao.md');
+    if (!await pdfPage.locator('.tree-row[title="revisao.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
     await pdfPage.locator('.tree-row[title="revisao.md"]').click();
     const text = pdfPage.locator('.md-commented .markdown p', { hasText: 'A senha expira' });
     await expect(text).toBeVisible();
@@ -1231,14 +1459,52 @@ test.describe.serial('Moki PDF comments', () => {
       p.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     });
     const box = pdfPage.getByRole('dialog', { name: 'Comentário' });
+    await box.getByRole('radiogroup', { name: 'Cor do comentário' }).getByRole('radio', { name: 'Verde' }).click();
     await box.getByRole('textbox').fill('E quando expira?');
     await box.getByRole('button', { name: 'Comentar' }).click();
 
     await expect(pdfPage.locator('.md-card')).toContainText('E quando expira?');
+    const commentButton = pdfPage.locator('.doc-bar').getByRole('button', { name: 'Comentários (1)' });
+    const viewButtons = pdfPage.locator('.doc-bar .view-toggle');
+    await expect.poll(async () => Math.abs(((await commentButton.boundingBox())?.height ?? 0) - ((await viewButtons.boundingBox())?.height ?? 0))).toBeLessThan(1);
+    await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(70, 196, 106)');
+    await expect(pdfPage.locator('mark.md-comment')).toHaveCSS('--md-comment-color', '#46c46a');
     await expect(pdfPage.locator('mark.md-comment')).toHaveText('expira em 30 dias');
     await expect(pdfPage.locator('.md-links path')).toHaveCount(1);
     await expect.poll(() => readFileSync(file, 'utf8')).toMatch(/A senha <!--c:[a-z0-9]+-->expira em 30 dias<!--\/c:[a-z0-9]+-->\./);
     expect(readFileSync(file, 'utf8')).toContain('<!-- moki-comments');
+    await pdfPage.locator('.md-card').getByRole('button', { name: 'Alterar cor do comentário' }).click();
+    await pdfPage.locator('.md-card').getByRole('radio', { name: 'Azul' }).click();
+    await expect.poll(() => readFileSync(file, 'utf8')).toContain('"color":"blue"');
+    await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(74, 143, 240)');
+    await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
+    await pdfPage.locator('.tree-row[title="revisao.md"]').click();
+    await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(74, 143, 240)');
+    await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
+    const visual = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    await expect(visual).toHaveAttribute('contenteditable', 'true');
+    await expect(visual.locator('mark.md-comment')).toHaveText('expira em 30 dias');
+    await expect(visual.locator('mark.md-comment')).toHaveCSS('--md-comment-color', '#4a8ff0');
+    await visual.locator('p').filter({ hasText: 'A senha expira' }).evaluate((p) => {
+      const node = p.firstChild as Text;
+      const range = document.createRange();
+      range.setStart(node, node.length); range.collapse(true);
+      const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range);
+      (p.closest('[contenteditable]') as HTMLElement).focus();
+    });
+    await pdfPage.keyboard.insertText('alterada ');
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    await expect.poll(() => readFileSync(file, 'utf8')).toContain('A senha alterada <!--c:');
+    await visual.locator('mark.md-comment').evaluate((mark) => {
+      const range = document.createRange(); range.selectNodeContents(mark);
+      const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range);
+    });
+    await pdfPage.keyboard.press('Backspace');
+    await expect(pdfPage.getByRole('status').filter({ hasText: 'pode remover a formatação ou comentários' })).toBeVisible();
+    await expect(visual.locator('mark.md-comment')).toHaveText('expira em 30 dias');
+    await pdfPage.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
+    await expect(pdfPage.locator('.md-card')).toContainText('E quando expira?');
+    await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(74, 143, 240)');
 
     // The bar's comments button hides the column (a mark on the text's edge stays) and the mark brings it back.
     await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Comentários (1)' }).click();
@@ -1250,7 +1516,113 @@ test.describe.serial('Moki PDF comments', () => {
     pdfPage.once('dialog', (d) => { void d.accept(); });
     await pdfPage.locator('.md-card').getByRole('button', { name: 'Excluir' }).click();
     await expect(pdfPage.locator('.md-card')).toHaveCount(0);
-    await expect.poll(() => readFileSync(file, 'utf8')).toBe(REVIEW_MD);
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(REVIEW_MD.replace('A senha ', 'A senha alterada '));
+  });
+
+  test('visual Markdown editing keeps headings, bold, lists and Windows line endings', async () => {
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'visual.md');
+    if (!await pdfPage.locator('.tree-row[title="visual.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
+    await pdfPage.locator('.tree-row[title="visual.md"]').click();
+    await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
+    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await expect(editor.locator('h1')).toHaveText('Título');
+    await expect(editor.locator('strong')).toHaveText('Como cliente');
+    await expect(editor.locator('li')).toHaveCount(2);
+    await editor.locator('strong').evaluate((strong) => {
+      (strong.closest('[contenteditable]') as HTMLElement).focus();
+      const range = document.createRange(); range.selectNodeContents(strong); range.collapse(false);
+      const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range);
+    });
+    await pdfPage.keyboard.insertText(' fiel');
+    await expect(editor.locator('strong')).toHaveText('Como cliente fiel');
+    await editor.locator('li').first().click();
+    await pdfPage.keyboard.press('End');
+    await pdfPage.keyboard.insertText(' revisada');
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    await expect.poll(() => readFileSync(file, 'utf8')).toContain('- Primeira regra revisada\r\n- Segunda regra');
+    expect(readFileSync(file, 'utf8')).toContain('**Como cliente fiel** quero comprar.\r\n');
+    await editor.locator('p').first().click();
+    await pdfPage.keyboard.press('End');
+    await pdfPage.keyboard.press('Enter');
+    await pdfPage.keyboard.insertText('Outra informação.');
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    await expect.poll(() => readFileSync(file, 'utf8')).toContain('Outra informação.');
+  });
+
+  test('visual editing preserves original spacing and comments when a heading touches a list', async () => {
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'irregular.md');
+    if (!await pdfPage.locator('.tree-row[title="irregular.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
+    await pdfPage.locator('.tree-row[title="irregular.md"]').click();
+    await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
+    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await expect(editor.locator('h2')).toHaveText('Pendências');
+    await expect(editor.locator('li')).toHaveCount(2);
+    expect(readFileSync(file, 'utf8')).toBe(IRREGULAR_MD);
+    await editor.locator('li').nth(1).click();
+    await pdfPage.keyboard.press('End');
+    await pdfPage.keyboard.insertText(' revisada');
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    const expected = IRREGULAR_MD.replace('- Segunda regra', '- Segunda regra revisada');
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(expected);
+    await pdfPage.getByRole('button', { name: 'Código Markdown' }).click();
+    await expect(pdfPage.locator('textarea.editor')).toHaveValue(expected);
+    await pdfPage.getByRole('button', { name: 'Editor visual', exact: true }).click();
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await expect(editor.locator('mark.md-comment')).toHaveText('regra');
+    await expect(editor.locator('mark.md-comment')).toHaveCSS('--md-comment-color', '#4a8ff0');
+    await pdfPage.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
+    await expect(pdfPage.locator('.md-card')).toContainText('Verificar');
+  });
+
+  test('visual editing preserves adjacent headings and list with Windows line endings', async () => {
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'irregular-windows.md');
+    if (!await pdfPage.locator('.tree-row[title="irregular-windows.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
+    await pdfPage.locator('.tree-row[title="irregular-windows.md"]').click();
+    await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
+    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+    await editor.locator('li').nth(1).click();
+    await pdfPage.keyboard.press('End');
+    await pdfPage.keyboard.insertText(' revisada');
+    await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe('# Título\r\n## Regras\r\n- Primeira regra\r\n- Segunda regra revisada\r\n');
+  });
+
+  test('the native viewer has an icon and PDF properties stay visible and save', async () => {
+    await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
+    const native = pdfPage.getByRole('button', { name: 'Visualizador nativo' });
+    await expect(native).toHaveAttribute('title', 'Visualizador nativo');
+    await expect(native.locator('svg')).toHaveCount(1);
+    await native.click();
+    await expect(native).toHaveAttribute('aria-pressed', 'true');
+    await pdfPage.getByRole('button', { name: 'Páginas', exact: true }).click();
+    await pdfPage.getByRole('button', { name: 'Editar PDF' }).click();
+    const properties = pdfPage.locator('.pdf-drop');
+    await properties.locator('summary').click();
+    const panel = properties.locator('.pdf-drop-body');
+    await expect(panel).toBeVisible();
+    const box = await panel.boundingBox();
+    const button = await properties.locator('summary').boundingBox();
+    const toolbar = await pdfPage.locator('.pdf-bar').boundingBox();
+    const viewport = await pdfPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+    if (!box || !button || !toolbar || !viewport) throw new Error('Properties panel is not visible');
+    expect(Math.abs(box.x + box.width / 2 - (button.x + button.width / 2))).toBeLessThan(2);
+    expect(Math.abs(button.x + button.width / 2 - (toolbar.x + toolbar.width / 2))).toBeLessThan(2);
+    expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(await panel.evaluate((el) => { const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + 10, r.top + 10); return !!top && el.contains(top); })).toBe(true);
+    expect(await panel.evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingTop))).toBeGreaterThan(0);
+    await panel.getByLabel('Título', { exact: true }).fill('Documento revisado');
+    await panel.getByLabel('Autor', { exact: true }).fill('Ana');
+    await panel.getByRole('button', { name: 'Salvar' }).click();
+    const edited = join(dirs[0], 'workspace', 'projects', 'acme', 'relatorio-edited.pdf');
+    await expect.poll(() => existsSync(edited)).toBe(true);
+    const pdf = await PDFDocument.load(readFileSync(edited));
+    expect(pdf.getTitle()).toBe('Documento revisado');
+    expect(pdf.getAuthor()).toBe('Ana');
   });
 });
 
@@ -1437,18 +1809,221 @@ test.describe.serial('Moki my AIs and the project panel', () => {
     expect(await aiPage.evaluate(() => localStorage.getItem('qa-tool'))).toBe('gemini');
   });
 
-  test('the project panel only acts: an activity, or a conversation with an agent', async () => {
+  test('the project panel starts three ways under tabs with no title: an agent, an activity, an operation', async () => {
     const panel = aiPage.locator('.pp');
-    await expect(panel.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
+    const card = panel.getByRole('region', { name: 'Assistente de IA' });
+    await expect(card.getByRole('heading')).toHaveCount(0);
+    await expect(panel.getByText('Assistente de IA', { exact: true })).toHaveCount(0);
+    await expect(card.getByRole('tab')).toHaveText(['Agente', 'Atividade', 'Operação']);
+    await expect(card.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
     for (const gone of ['Minha pasta', 'Agentes deste projeto', 'Entregáveis']) await expect(panel.getByText(gone)).toHaveCount(0);
-    await panel.getByRole('button', { name: 'Chamar agente' }).click();
+
+    // Call an agent stops at the agent and the AI: no activity, no files, no note.
+    await card.getByRole('tab', { name: 'Agente' }).click();
+    const call = card.getByRole('button', { name: 'Chamar agente' });
+    await expect(call).toBeDisabled();
+    await expect(card.getByRole('button', { name: 'Escolher atividade' })).toHaveCount(0);
+    await card.getByRole('button', { name: 'Escolher agente' }).click();
     const dialog = aiPage.getByRole('dialog', { name: 'Com quem você quer conversar?' });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole('textbox', { name: 'Sobre o quê? (opcional)' }).fill('Uma regra de cupom');
+    await expect(dialog.getByRole('textbox', { name: 'Sobre o quê? (opcional)' })).toHaveCount(0);
+    await expect(dialog.locator('.catalog-card', { hasText: 'Deixar a skill decidir' })).toHaveCount(0); // here the agent is required
     await dialog.getByRole('searchbox', { name: 'Buscar agentes' }).fill('test-designer');
     await expect(dialog.locator('.catalog-card')).toHaveCount(1);
     await dialog.locator('.catalog-card').click();
     await expect(dialog).toHaveCount(0);
-    await expect(panel.locator('.pp-msg')).toHaveText('fake'); // QA_FAKE_TOOLS: started, nothing opened
+    await expect(call).toBeEnabled();
+    await call.click();
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0); // no wizard
+    await expect(card.locator('.pp-msg')).toHaveText('fake'); // QA_FAKE_TOOLS: started, nothing opened
+    await card.getByRole('tab', { name: 'Atividade' }).click();
+  });
+
+  test('an activity is found by search, its agent is optional and its AI is the same pick', async () => {
+    const card = aiPage.locator('.pp').getByRole('region', { name: 'Assistente de IA' });
+    await card.getByRole('tab', { name: 'Atividade' }).click();
+    await card.getByRole('button', { name: 'Escolher atividade' }).click();
+    const catalog = aiPage.getByRole('dialog');
+    const all = await catalog.locator('.catalog-card').count();
+    expect(all).toBeGreaterThan(1);
+    const search = catalog.getByRole('searchbox', { name: 'Buscar atividades' });
+    await search.fill('zzzz-nada');
+    await expect(catalog.locator('.catalog-card')).toHaveCount(0);
+    await expect(catalog.getByText('Nenhuma atividade corresponde.')).toBeVisible();
+    await search.fill('');
+    await expect(catalog.locator('.catalog-card')).toHaveCount(all);
+    await aiPage.keyboard.press('Escape');
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
+
+    // The agent is optional here (the skill decides) and the AI is the one picked in Call an agent.
+    const agent = card.getByRole('button', { name: 'Deixar a skill decidir' });
+    await expect(agent).toBeVisible();
+    await agent.click();
+    const agents = aiPage.getByRole('dialog');
+    await expect(agents.locator('.catalog-card', { hasText: 'Deixar a skill decidir' })).toHaveCount(1);
+    await agents.getByRole('searchbox', { name: 'Buscar agentes' }).fill('test-designer');
+    await agents.locator('.catalog-card', { hasText: 'test-designer' }).click();
+    await expect(card.getByRole('button', { name: 'test-designer' })).toBeVisible();
+    await card.getByRole('button', { name: 'test-designer' }).click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'Deixar a skill decidir' }).click();
+    await expect(card.getByRole('button', { name: 'Deixar a skill decidir' })).toBeVisible();
+    await expect(card.locator('.pp-field').filter({ has: aiPage.locator('.pp-field-label', { hasText: /^Onde$/ }) })).toHaveCount(1);
+  });
+
+  test('the project title and description are edited without opening setup', async () => {
+    const panel = aiPage.locator('.pp');
+    await panel.getByRole('button', { name: 'Editar nome do projeto' }).click();
+    await panel.getByRole('textbox', { name: 'Nome do projeto' }).fill('Novo nome');
+    await panel.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await expect(panel.getByRole('heading', { name: 'Novo nome' })).toBeVisible();
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Adicionar uma descrição' }).click();
+    const card = panel.getByRole('region', { name: 'Descrição' });
+    await card.getByRole('textbox', { name: 'Descrição' }).fill('Primeira linha\nDescrição completa do projeto.');
+    await card.getByRole('button', { name: 'Salvar' }).click();
+    await expect(panel.getByRole('button', { name: 'Ver completa...' })).toBeVisible();
+    await panel.getByRole('button', { name: 'Ver completa...' }).click();
+    await expect(card.getByText('Descrição completa do projeto.', { exact: false })).toBeVisible();
+    await card.getByRole('button', { name: 'Editar descrição' }).click();
+    await card.getByRole('textbox', { name: 'Descrição' }).fill('Outra descrição');
+    await card.getByRole('button', { name: 'Salvar' }).click();
+    await expect(panel.locator('.pp-desc')).toHaveText('Outra descrição');
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('an activity request appears in executions and follows its registered run', async () => {
+    const panel = aiPage.locator('.pp');
+    await panel.getByRole('button', { name: 'Escolher atividade' }).click();
+    await aiPage.locator('.catalog-card').filter({ hasText: 'Começa na hora' }).first().click();
+    await panel.getByRole('button', { name: 'Iniciar atividade' }).click();
+    const side = aiPage.getByRole('region', { name: 'Execuções' });
+    await expect(side.getByRole('tab', { name: 'Atividades', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(side.getByText('Aguardando registro da execução')).toBeVisible();
+    const token = await aiPage.evaluate(() => {
+      const key = Object.keys(localStorage).find((item) => item.startsWith('qa-activity-launches:'))!;
+      return (JSON.parse(localStorage.getItem(key)!) as { id: string }[])[0].id;
+    });
+    const run = `20260101-1200-project-context-moki-${token}`;
+    const path = join(dirs[0], 'workspace', 'projects', 'acme', 'runs', run);
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'state.json'), JSON.stringify({ status: 'in-progress', skill: 'project-context' }));
+    await expect(side.getByText('Aguardando registro da execução')).toHaveCount(0);
+    await expect(side.getByText('Em andamento', { exact: true })).toBeVisible();
+    writeFileSync(join(path, 'state.json'), JSON.stringify({ status: 'completed', skill: 'project-context' }));
+    await side.getByRole('tab', { name: 'Concluídas' }).click();
+    await expect(side.getByText('Concluída', { exact: true })).toBeVisible();
+  });
+
+  test('an activity that needs inbox files asks only for them, with the agent and the AI already chosen in the card', async () => {
+    writeFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'us-1.md'), '# US-1');
+    const card = aiPage.locator('.pp').getByRole('region', { name: 'Assistente de IA' });
+    await card.locator('.pp-field').filter({ has: aiPage.locator('.pp-field-label', { hasText: /^O que fazer$/ }) }).locator('.pp-pick').click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'requirements-review' }).first().click();
+    await card.getByRole('button', { name: 'Deixar a skill decidir' }).click();
+    await aiPage.getByRole('dialog').locator('.catalog-card', { hasText: 'requirements-analyst' }).click();
+    await card.getByRole('button', { name: 'Iniciar atividade' }).click();
+
+    // Files first; no step asks for the agent or the AI again.
+    const wizard = aiPage.getByRole('dialog');
+    await expect(wizard.locator('.wizard-progress')).toContainText('etapa 1 de 3');
+    await wizard.getByText('us-1.md').click();
+    await wizard.getByRole('button', { name: 'Continuar', exact: true }).click();
+    await wizard.getByRole('button', { name: 'Nada mais — continuar' }).click();
+    const picks = wizard.locator('.wizard-picks');
+    await expect(picks.getByRole('button', { name: 'requirements-analyst' })).toBeVisible();
+    await expect(picks.locator('.pp-field')).toHaveCount(2);
+    await aiPage.keyboard.press('Escape');
+    await expect(aiPage.getByRole('dialog')).toHaveCount(0);
+  });
+});
+
+test.describe('Moki run details panel', () => {
+  test('the executions card shows all finished activity and operation runs in the right tabs', async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    const project = join(root, 'workspace', 'projects', 'acme');
+    for (const kind of ['activity', 'operation']) {
+      for (let i = 0; i < 8; i++) {
+        const id = `20261105-120${i}-${kind}-example`;
+        const run = join(project, 'runs', id);
+        mkdirSync(run, { recursive: true });
+        const status = i === 0 ? 'in-progress' : i === 1 ? 'cancelled' : 'completed';
+        writeFileSync(join(run, 'state.json'), JSON.stringify({ id, status, currentStep: '', ...(kind === 'operation' ? { operation: { id: 'demo', name: `Operação ${i}` }, steps: [], visits: [] } : { skill: 'project-context' }) }));
+      }
+    }
+    let window: ElectronApplication | undefined;
+    try {
+      const opened = await openApp(root, userData); window = opened.app;
+      const page = opened.page;
+      await expect(page.locator('.tree-row[title="runs"]')).toContainText('Arquivos de execuções');
+      const card = page.getByRole('region', { name: 'Execuções' });
+      await expect(card.getByRole('tab', { name: 'Operações', exact: true })).toHaveAttribute('aria-selected', 'true');
+      await expect(card.getByText('Operação 0', { exact: true })).toBeVisible();
+      await card.getByRole('tab', { name: 'Concluídas' }).click();
+      await expect(card.locator('.ops-side-row')).toHaveCount(7);
+      await expect(card.getByText('Operação 1', { exact: true })).toBeAttached();
+      await card.getByRole('tab', { name: 'Atividades', exact: true }).click();
+      await expect(card.locator('.activity-launch-row')).toHaveCount(1);
+      await card.getByRole('tab', { name: 'Concluídas' }).click();
+      await expect(card.locator('.activity-launch-row')).toHaveCount(7);
+      await expect(card.getByText('operation-example')).toHaveCount(0);
+    } finally {
+      await window?.close();
+      rmSync(root, { recursive: true, force: true });
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+
+  test('shows only the selected activity or operation and distinguishes repeated file names', async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    const project = join(root, 'workspace', 'projects', 'acme');
+    const activity = '20261105-1200-project-context-review';
+    const operation = '20261105-1201-operation-demo-review';
+    for (const id of [activity, operation]) {
+      const run = join(project, 'runs', id);
+      mkdirSync(join(run, 'outputs', 's1'), { recursive: true });
+      mkdirSync(join(run, 'outputs', 's2'), { recursive: true });
+      writeFileSync(join(run, 'outputs', 's1', 'revisao.md'), '# Primeira');
+      writeFileSync(join(run, 'outputs', 's2', 'revisao.md'), '# Segunda');
+      writeFileSync(join(run, 'state.json'), JSON.stringify({ id, status: 'in-progress', currentStep: 's2', completedSteps: ['s1'], approvals: [{ step: 's1', decision: 'approved' }], artifacts: [`workspace/projects/acme/runs/${id}/outputs/s1/revisao.md`, `workspace/projects/acme/runs/${id}/outputs/s2/revisao.md`], ...(id === operation ? { operation: { id: 'demo', name: 'Fluxo de teste' }, workflow: 'operation-demo' } : { skill: 'project-context' }) }));
+    }
+    let window: ElectronApplication | undefined;
+    try {
+      const opened = await openApp(root, userData); window = opened.app;
+      const page = opened.page;
+      await page.locator('.tree-row[title="runs"]').click();
+      await page.locator(`.tree-row[title^="${activity}"]`).click();
+      await page.locator(`.tree-row[title="runs/${activity}/state.json"]`).click();
+      await expect(page.locator('.panel.run-detail')).toHaveCount(0);
+      await expect(page.locator('.panel.pp')).toBeVisible();
+      const card = page.getByRole('region', { name: 'Execuções' });
+      await card.getByRole('tab', { name: 'Atividades', exact: true }).click();
+      await card.locator(`[title="${activity}"]`).click();
+      const details = page.locator('main .ops-run');
+      await expect(details).toHaveAttribute('aria-label', 'Atividade');
+      await expect(details.getByText('Etapas concluídas')).toBeVisible();
+      await expect(details.getByText('s2', { exact: true })).toBeVisible();
+      await expect(details.getByRole('button', { name: 'Continuar na sua ferramenta de IA' })).toBeVisible();
+      await expect(page.locator('.panel.pp')).toBeVisible();
+      await expect(page.locator('.panel.run-detail')).toHaveCount(0);
+      const files = details.locator('.run-detail-file');
+      await expect(files).toHaveCount(2);
+      await expect(files.nth(0)).toContainText('outputs/s1');
+      await expect(files.nth(1)).toContainText('outputs/s2');
+      await details.getByRole('button', { name: 'Fechar' }).click();
+      await page.locator(`.tree-row[title^="${operation}"]`).click();
+      await page.locator(`.tree-row[title="runs/${operation}/state.json"]`).click();
+      const operationDetails = page.locator('.panel.run-detail');
+      await expect(operationDetails).toHaveAttribute('aria-label', 'Operação');
+      await expect(operationDetails.getByRole('heading', { name: 'Fluxo de teste' })).toBeVisible();
+      await expect(operationDetails.getByRole('button', { name: 'Abrir operação' })).toBeVisible();
+      await expect(operationDetails.getByRole('button', { name: 'Continuar na sua ferramenta de IA' })).toHaveCount(0);
+      await expect(operationDetails.locator('.ops-side')).toHaveCount(0);
+    } finally {
+      await window?.close();
+      rmSync(root, { recursive: true, force: true });
+      rmSync(userData, { recursive: true, force: true });
+    }
   });
 });

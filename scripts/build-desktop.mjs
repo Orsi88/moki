@@ -24,6 +24,13 @@ await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'preload.ts')], o
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'run-tool.ts')], outfile: join(out, 'run-tool.mjs'), format: 'esm' });
 // Moki's MCP server for the AI tools the app starts (desktop/service.ts mokiServer).
 await esbuild({ ...common, entryPoints: [join(ROOT, 'ide', 'mcp', 'server.ts')], outfile: join(out, 'mcp.mjs'), format: 'esm' });
+// One picture of each diagram in an exported PDF. The installed framework has no
+// node_modules, so the browser bundle ships next to scripts/lib/diagram-images.mjs.
+await esbuild({
+  entryPoints: [join(ROOT, 'scripts', 'lib', 'diagram-frame.mjs')],
+  bundle: true, format: 'iife', platform: 'browser', legalComments: 'none', logLevel: 'warning',
+  outfile: join(ROOT, 'scripts', 'lib', 'diagram-frame.iife.js'),
+});
 
 // Identifies this build, so an installed app refreshes its framework files once per build.
 mkdirSync(out, { recursive: true });

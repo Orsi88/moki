@@ -30,6 +30,7 @@ export function Notebook({ project, path, loose, projects }: Props) {
   const first = (): Tab => (project ? (path ? tabOf({ project, path }) : newTab()) : loose && loose !== 'new' ? tabOf({ loose }) : newTab());
   const [opened, setOpened] = useState<Tab[]>(() => [first()]); // loose: the tabs; project: the tabs opened here
   const [notes, setNotes] = useState<string[]>([]); // project: all its notes
+  const [titles, setNoteTitles] = useState<Record<string, string>>({});
   const [activeId, setActiveId] = useState(() => opened[0].id);
   const [shown, setShown] = useState<Set<string>>(() => new Set([activeId])); // tabs mounted so far
   const [, setTitles] = useState(0); // loose titles change as they are saved
@@ -37,6 +38,7 @@ export function Notebook({ project, path, loose, projects }: Props) {
 
   const loadNotes = useCallback(() => {
     if (!project) return;
+    void api.noteTitles(project).then((items) => setNoteTitles(Object.fromEntries(items.map((item) => [item.path, item.title])))).catch(() => setNoteTitles({}));
     api.tree(project).then((nodes) => {
       const folder = nodes.find((n) => n.path === 'notes');
       const favorites = new Set(favoriteNotes().filter((n) => n.project === project).map((n) => n.path));
@@ -93,7 +95,7 @@ export function Notebook({ project, path, loose, projects }: Props) {
 
   const label = (tab: Tab): string => {
     if (!tab.ref) return t('New note');
-    if ('path' in tab.ref) return noteTitle(tab.ref.path);
+    if ('path' in tab.ref) return titles[tab.ref.path] ?? noteTitle(tab.ref.path);
     const id = tab.ref.loose;
     return looseNotes().find((n) => n.id === id)?.title || t('Note');
   };
@@ -103,7 +105,8 @@ export function Notebook({ project, path, loose, projects }: Props) {
     <div className="notebook">
       <div className="notebook-tabs" role="tablist" aria-label={project ? projects.find((p) => p.id === project)?.name ?? project : t('Loose notes')}>
         {tabs.map((tab) => (
-          <div key={tab.id} role="tab" aria-selected={tab.id === activeId} className={`notebook-tab${tab.id === activeId ? ' active' : ''}`}>
+          <div key={tab.id} role="tab" aria-selected={tab.id === activeId} className={`notebook-tab${tab.id === activeId ? ' active' : ''}`}
+            draggable={Boolean(tab.ref)} onDragStart={(e) => { if (tab.ref) { e.dataTransfer.setData('application/x-moki-note', JSON.stringify(tab.ref)); e.dataTransfer.effectAllowed = 'copy'; } }}>
             <button type="button" className="notebook-tab-label" onClick={() => show(tab.id)} title={label(tab)}>
               <span>{label(tab)}</span>
             </button>

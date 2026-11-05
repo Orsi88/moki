@@ -71,9 +71,9 @@ function Page({ doc, n, scale }: { doc: PDFDocumentProxy; n: number; scale: numb
 // Quads are in the coordinates of the page as displayed (rotation applied), which is what PdfCraft expects.
 // onLoad: page count, title and author once the file is open. pageTools: a bar under each page (Edit mode).
 // onDoc: the open document, for searching its text.
-export function PdfPages({ data, zoom, onSelection, onError, onLoad, onDoc, pageTools }: {
+export function PdfPages({ data, zoom, onSelection, onError, onLoad, onDoc, pageTools, afterPage }: {
   data: string; zoom: number; onSelection: (marks: PdfMark[] | null) => void; onError: () => void;
-  onLoad?: (info: { pages: number; title: string; author: string }) => void; onDoc?: (doc: PDFDocumentProxy | null) => void; pageTools?: (n: number, total: number) => ReactNode;
+  onLoad?: (info: { pages: number; title: string; author: string }) => void; onDoc?: (doc: PDFDocumentProxy | null) => void; pageTools?: (n: number, total: number) => ReactNode; afterPage?: (n: number, total: number) => ReactNode;
 }) {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -109,10 +109,12 @@ export function PdfPages({ data, zoom, onSelection, onError, onLoad, onDoc, page
 
   return (
     <div ref={ref} className="pdf-pages" onMouseUp={onMouseUp}>
+      {doc && afterPage?.(0, doc.numPages)}
       {doc && Array.from({ length: doc.numPages }, (_, i) => (
         <div key={i} className="pdf-page-wrap">
           <Page doc={doc} n={i + 1} scale={zoom} />
           {pageTools?.(i + 1, doc.numPages)}
+          {afterPage?.(i + 1, doc.numPages)}
         </div>
       ))}
     </div>

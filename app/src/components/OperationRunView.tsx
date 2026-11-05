@@ -17,7 +17,7 @@ import { useEffect, useState } from 'react';
 import { api, statusLabel, type OperationRun, type OperationVisit, type ToolInfo } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { recall, remember } from '../prefs';
-import { IconFolder, IconPlay, IconTerminal, IconX } from './Icons';
+import { IconPause, IconPlay, IconStop, IconTerminal, IconX } from './Icons';
 import { hasBoard, OperationRunBoard, visitText } from './OperationRunBoard';
 import { RunVisitFiles } from './RunVisitFiles';
 
@@ -254,11 +254,10 @@ export function OperationRunView({ project, run, tick, tools, hasTerminal, onTer
               <button type="button" className={view === 'list' ? 'on' : ''} aria-pressed={view === 'list'} onClick={() => show('list')}>{t('List')}</button>
             </div>
           )}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { void api.openFolder(project, folder); }}><IconFolder size={15} /> {t('Open folder')}</button>
           {!ended && (state.paused
-            ? <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { void act(() => api.pauseOperation(project, run, false)); }}><IconPlay size={14} /> {t('Resume')}</button>
-            : <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { void act(() => api.pauseOperation(project, run, true)); }}>{t('Pause')}</button>)}
-          {!ended && <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { if (window.confirm(t('Cancel this operation? The steps already done stay in its folder.'))) void act(() => api.cancelOperation(project, run)); }}>{t('Cancel operation')}</button>}
+            ? <button type="button" className="icon-btn" disabled={busy} title={t('Resume')} aria-label={t('Resume')} onClick={() => { void act(() => api.pauseOperation(project, run, false)); }}><IconPlay size={16} /></button>
+            : <button type="button" className="icon-btn" disabled={busy} title={t('Pause')} aria-label={t('Pause')} onClick={() => { void act(() => api.pauseOperation(project, run, true)); }}><IconPause size={16} /></button>)}
+          {!ended && <button type="button" className="icon-btn" disabled={busy} title={t('Cancel operation')} aria-label={t('Cancel operation')} onClick={() => { if (window.confirm(t('Cancel this operation? The steps already done stay in its folder.'))) void act(() => api.cancelOperation(project, run)); }}><IconStop size={15} /></button>}
           <button type="button" className="icon-btn" onClick={onClose} title={t('Close')} aria-label={t('Close')}><IconX size={18} /></button>
         </div>
       </header>
