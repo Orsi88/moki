@@ -4,12 +4,13 @@
 // by the AI tools appear live.
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
-import { existsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT } from '../scripts/lib/repo.mjs';
 import { TOOLS, isTool, listProjects, projectRepository, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
 import { callService, createService } from './service.ts';
+import { watchProject } from './project-watch.ts';
 import { launchInTerminal, launchTool, openFolder } from './launcher.ts';
 import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './notes.ts';
 import { setWorkspaceEnv } from './workspaces.ts';
@@ -77,8 +78,8 @@ const service = createService(ROOT, {
 
 let win: BrowserWindow | null = null;
 let searchWindow: BrowserWindow | null = null;
-let watcher: FSWatcher | null = null;
-let linkedWatcher: FSWatcher | null = null; // the open project's linked folder
+let watcher: (() => void) | null = null; // stops the watch of the open project
+let linkedWatcher: (() => void) | null = null; // stops the watch of the open project's linked folder
 const noteWindows = new Map<string, BrowserWindow>();
 
 function isNoteWindow(contents: WebContents): boolean {
@@ -205,9 +206,9 @@ function createWindow(): void {
     searchWindow?.close();
     for (const note of noteWindows.values()) if (!note.isDestroyed()) note.close();
     noteWindows.clear();
-    watcher?.close();
+    watcher?.();
     watcher = null;
-    linkedWatcher?.close();
+    linkedWatcher?.();
     linkedWatcher = null;
     terminals.killAll();
   });
@@ -248,27 +249,20 @@ if (!app.requestSingleInstanceLock()) {
     // Watch one project at a time; changes are debounced and sent to the UI.
     ipcMain.handle('qa:watch', (event, project: unknown) => {
       if (!trusted(event)) return false;
-      watcher?.close();
+      watcher?.();
       watcher = null;
-      linkedWatcher?.close();
+      linkedWatcher?.();
       linkedWatcher = null;
       if (typeof project !== 'string' || !listProjects(ROOT).includes(project)) return false;
-      let timer: NodeJS.Timeout | null = null;
-      const changed = () => {
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(() => win?.webContents.send('qa:changed', project), 400);
-      };
+      const changed = () => win?.webContents.send('qa:changed', project);
       try {
-        watcher = watch(join(projectsDir(ROOT), project), { recursive: true }, changed);
+        watcher = watchProject(join(projectsDir(ROOT), project), changed);
       } catch { return false; }
       // The linked folder shows live in the tree too; changes in its build and dependency folders are not news.
       const linked = projectRepository(project, ROOT);
       if (linked) {
         try {
-          linkedWatcher = watch(linked, { recursive: true }, (_e, name) => {
-            if (name && /(^|[\\/])(node_modules|\.git|dist|build|__pycache__)([\\/]|$)/.test(String(name))) return;
-            changed();
-          });
+          linkedWatcher = watchProject(linked, changed, { ignore: ['dist', 'build', '__pycache__'], maxDepth: 6, maxDirs: 500 });
         } catch { /* a folder that cannot be watched still lists; it just does not refresh by itself */ }
       }
       return true;

@@ -18,6 +18,7 @@ const DESCRIBE = /^\s*test\.describe(?:\.serial)?\((['"`])((?:\\.|(?!\1).)*)\1/;
 const U = 'Unit';
 const I = 'Integration';
 const RULES = {
+  'project-watch.test.ts': [[/./, 'Files and confinement', U]],
   'desktop.test.ts': [
     [/^projects and project creation|^deleting a project|^tree lists/, 'Projects', I],
     [/^fs-guard/, 'Files and confinement', U],
