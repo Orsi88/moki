@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Orsi88/moki/releases/latest"><b>⬇️ Download Moki for Windows</b></a>
-  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/releases/download/v0.3.0/Moki.Setup.0.3.0.exe">Moki.Setup.0.3.0.exe</a>
+  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/releases/download/v0.4.0/Moki.Setup.0.4.0.exe">Moki.Setup.0.4.0.exe</a>
   &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/wiki">documentation</a>
 </p>
 
@@ -20,11 +20,11 @@ It started as software quality work: review a story, design tests, look at a fai
 
 ## Install
 
-1. Download [Moki.Setup.0.3.0.exe](https://github.com/Orsi88/moki/releases/download/v0.3.0/Moki.Setup.0.3.0.exe) (or the latest file on [Releases](https://github.com/Orsi88/moki/releases)).
+1. Download [Moki.Setup.0.4.0.exe](https://github.com/Orsi88/moki/releases/download/v0.4.0/Moki.Setup.0.4.0.exe) (or the latest file on [Releases](https://github.com/Orsi88/moki/releases)).
 2. If Windows says it protected your PC, choose **More info → Run anyway**. The installer is not digitally signed yet.
 3. Install an AI tool too (Claude Code, Cursor, Codex, Gemini, or a chat you already use).
 
-For VS Code, download [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) and run `code --install-extension moki-0.3.0.vsix`: [Moki in the IDE](https://github.com/Orsi88/moki/wiki/Moki-in-the-IDE).
+For VS Code, download [moki-0.4.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.4.0/moki-0.4.0.vsix) and run `code --install-extension moki-0.4.0.vsix`: [Moki in the IDE](https://github.com/Orsi88/moki/wiki/Moki-in-the-IDE).
 
 Your projects live in **Documents\Moki**, and a newer installer never touches them. macOS, Linux and running from the source: [Getting started](https://github.com/Orsi88/moki/wiki/Getting-started).
 

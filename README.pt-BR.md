@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Orsi88/moki/releases/latest"><b>⬇️ Baixar o Moki para Windows</b></a>
-  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/releases/download/v0.3.0/Moki.Setup.0.3.0.exe">Moki.Setup.0.3.0.exe</a>
+  &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/releases/download/v0.4.0/Moki.Setup.0.4.0.exe">Moki.Setup.0.4.0.exe</a>
   &nbsp;·&nbsp; <a href="https://github.com/Orsi88/moki/wiki">documentação</a>
 </p>
 
@@ -20,11 +20,11 @@ Começou como trabalho de qualidade de software: revisar uma história, projetar
 
 ## Instalar
 
-1. Baixe o [Moki.Setup.0.3.0.exe](https://github.com/Orsi88/moki/releases/download/v0.3.0/Moki.Setup.0.3.0.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/moki/releases)).
+1. Baixe o [Moki.Setup.0.4.0.exe](https://github.com/Orsi88/moki/releases/download/v0.4.0/Moki.Setup.0.4.0.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/moki/releases)).
 2. Se o Windows disser que protegeu o computador, escolha **Mais informações → Executar assim mesmo**. O instalador ainda não tem assinatura digital.
 3. Instale também uma ferramenta de IA (Claude Code, Cursor, Codex, Gemini, ou um chat que você já usa).
 
-Para o VS Code, baixe o [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) e rode `code --install-extension moki-0.3.0.vsix`: [Moki na IDE](https://github.com/Orsi88/moki/wiki/Moki-na-IDE).
+Para o VS Code, baixe o [moki-0.4.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.4.0/moki-0.4.0.vsix) e rode `code --install-extension moki-0.4.0.vsix`: [Moki na IDE](https://github.com/Orsi88/moki/wiki/Moki-na-IDE).
 
 Os seus projetos ficam em **Documentos\Moki**, e um instalador mais novo nunca mexe neles. macOS, Linux e rodar a partir do código: [Primeiros passos](https://github.com/Orsi88/moki/wiki/Primeiros-passos).
 
