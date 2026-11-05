@@ -82,8 +82,8 @@ after(() => rmSync(root, { recursive: true, force: true }));
 
 const flatten = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((n) => [n, ...flatten(n.children ?? [])]);
 
-test('projects and project creation', () => {
-  assert.deepEqual(service.projects().map((p) => p.id), ['acme']);
+test('projects and project creation', async () => {
+  assert.deepEqual((await service.projects()).map((p) => p.id), ['acme']);
   const created = service.createProject('Billing Portal — Fase 2');
   assert.equal(created.id, 'billing-portal-fase-2');
   assert.equal(created.name, 'Billing Portal — Fase 2');
@@ -93,7 +93,7 @@ test('projects and project creation', () => {
   assert.equal(slugify('Ação & Crítica!'), 'acao-critica');
 });
 
-test('deleting a project needs the word "delete" and removes only its folder', () => {
+test('deleting a project needs the word "delete" and removes only its folder', async () => {
   const linked = mkdtempSync(join(tmpdir(), 'qa-linked-'));
   writeFileSync(join(linked, 'keep.txt'), 'x');
   service.createProject('Doomed');
@@ -106,7 +106,7 @@ test('deleting a project needs the word "delete" and removes only its folder', (
   assert.equal(service.deleteProject('doomed', 'delete'), true);
   assert.ok(!existsSync(dir));
   assert.ok(existsSync(join(linked, 'keep.txt')), 'the linked folder stays');
-  assert.ok(!service.projects().some((p) => p.id === 'doomed'));
+  assert.ok(!(await service.projects()).some((p) => p.id === 'doomed'));
   rmSync(linked, { recursive: true, force: true });
 });
 
@@ -480,7 +480,7 @@ test('launch builds the request; Word files are extracted', () => {
   assert.equal(launched.length, 1, 'chat does not launch anything');
 });
 
-test('tags share context between projects; launch lists it and applies exclusions', () => {
+test('tags share context between projects; launch lists it and applies exclusions', async () => {
   const projects = join(root, 'workspace', 'projects');
   try {
     const a = service.saveTag({ name: 'Pagamentos' });
@@ -517,7 +517,7 @@ test('tags share context between projects; launch lists it and applies exclusion
 
     service.removeTag(a.id);
     assert.deepEqual(service.tags(), []);
-    assert.deepEqual(service.projects().find((p) => p.id === 'acme')?.tags, []);
+    assert.deepEqual((await service.projects()).find((p) => p.id === 'acme')?.tags, []);
     assert.deepEqual(service.fileTags('plain'), {});
     assert.doesNotMatch(service.launch(base).prompt, /Shared context/);
   } finally {
@@ -1125,8 +1125,8 @@ test('agents per project: enabled list in project.json gates the launch', () => 
   service.setProjectAgents('acme', all);
 });
 
-test('plugins per project: caveman is saved in project.json and reaches only that project\'s launches', () => {
-  assert.deepEqual(service.projects().find((p) => p.id === 'acme')?.plugins, []);
+test('plugins per project: caveman is saved in project.json and reaches only that project\'s launches', async () => {
+  assert.deepEqual((await service.projects()).find((p) => p.id === 'acme')?.plugins, []);
   assert.throws(() => service.setProjectPlugins('acme', ['ponytail']), /Unknown plugin/);
   assert.deepEqual(service.setProjectPlugins('acme', ['caveman', 'caveman']).plugins, ['caveman']);
   service.launch({ project: 'acme', activity: 'open', tool: 'claude', files: [], language: 'English', note: '' });
@@ -1155,7 +1155,7 @@ test('linked folder: linking records it and backs up its AI settings inside it',
     pickFolder: async () => pick,
   });
   try {
-    assert.equal(svc.projects().find((p) => p.id === 'linked')?.repository, '');
+    assert.equal((await svc.projects()).find((p) => p.id === 'linked')?.repository, '');
     assert.throws(() => svc.openLinkedFolder('linked'), /No folder is linked/);
     assert.equal(await svc.linkRepository('linked'), null, 'cancelled dialog');
     for (const [bad, msg] of [[join(repo, 'nope'), /not found/], [root, /outside Moki/], [join(root, 'skills'), /outside Moki/], [homedir(), /user folder/]] as const) {
@@ -1164,7 +1164,7 @@ test('linked folder: linking records it and backs up its AI settings inside it',
     }
     const file = join(project, 'project.json');
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), repositories: [{ name: 'app', localPath: repo, writeAllowed: true }] }));
-    assert.equal(svc.projects().find((p) => p.id === 'linked')?.repository, '', 'a localPath alone is not the linked folder');
+    assert.equal((await svc.projects()).find((p) => p.id === 'linked')?.repository, '', 'a localPath alone is not the linked folder');
     pick = repo;
     const r = await svc.linkRepository('linked');
     assert.equal(r?.repository, repo);
@@ -2040,13 +2040,13 @@ test('workspaces: each one has its own projects; requests name a workspace outsi
     const start = svc.workspaces();
     assert.equal(start.active, 'default');
     assert.deepEqual(start.list.map((w) => [w.id, w.isDefault]), [['default', true]]);
-    const defaultProjects = svc.projects().map((p) => p.id);
+    const defaultProjects = (await svc.projects()).map((p) => p.id);
     assert.ok(defaultProjects.includes('acme'));
 
     const client = svc.createWorkspace('Cliente X');
     assert.equal(client.path, join(root, 'workspaces', 'cliente-x'));
     assert.equal(svc.workspaces().active, client.id);
-    assert.deepEqual(svc.projects(), [], 'a new workspace starts empty');
+    assert.deepEqual((await svc.projects()), [], 'a new workspace starts empty');
     assert.throws(() => svc.createWorkspace('Cliente X'), /already/);
     const made = svc.createProject('Portal');
     assert.ok(existsSync(join(client.path, 'projects', 'portal', 'project.json')));
@@ -2070,7 +2070,7 @@ test('workspaces: each one has its own projects; requests name a workspace outsi
     svc.forgetWorkspace(opened!.id);
     assert.ok(existsSync(join(outside, 'projects')), 'removing from the list keeps the folder');
     svc.selectWorkspace('default');
-    assert.ok(svc.projects().some((p) => p.id === 'acme'));
+    assert.ok((await svc.projects()).some((p) => p.id === 'acme'));
     assert.doesNotMatch(svc.launch({ project: 'acme', activity: 'open', tool: 'print', files: [], language: 'English', note: '' }).prompt, /Workspace folder/);
   } finally {
     svc.selectWorkspace('default');
@@ -2079,26 +2079,26 @@ test('workspaces: each one has its own projects; requests name a workspace outsi
   }
 });
 
-test('search: projects by name, files by name and text, filters by tag', () => {
+test('search: projects by name, files by name and text, filters by tag', async () => {
   const inbox = join(root, 'workspace', 'projects', 'acme', 'inbox');
   writeFileSync(join(inbox, 'renewal.md'), '# Story\n\nThe user renews the Loan before the due date.');
   try {
-    assert.deepEqual(service.search('', []), { projects: [], files: [], truncated: false }, 'nothing asked, nothing listed');
-    assert.deepEqual(service.search('acm', []).projects.map((p) => p.id), ['acme']);
-    const hit = service.search('LOAN', []).files.find((f) => f.path === 'inbox/renewal.md');
+    assert.deepEqual((await service.search('', [])), { projects: [], files: [], truncated: false }, 'nothing asked, nothing listed');
+    assert.deepEqual((await service.search('acm', [])).projects.map((p) => p.id), ['acme']);
+    const hit = (await service.search('LOAN', [])).files.find((f) => f.path === 'inbox/renewal.md');
     assert.ok(hit, 'content matches ignore case');
     assert.equal(hit.line, 3);
     assert.match(hit.snippet, /renews the Loan before/);
-    assert.ok(service.search('renewal', []).files.some((f) => f.path === 'inbox/renewal.md'), 'file names match too');
+    assert.ok((await service.search('renewal', [])).files.some((f) => f.path === 'inbox/renewal.md'), 'file names match too');
 
     const tag = service.saveTag({ name: 'Emprestimos' });
-    assert.deepEqual(service.search('', [tag.id]).files, [], 'no file has the tag yet');
+    assert.deepEqual((await service.search('', [tag.id])).files, [], 'no file has the tag yet');
     service.setFileTags('acme', 'inbox/renewal.md', [tag.id]);
-    assert.deepEqual(service.search('', [tag.id]).files.map((f) => f.path), ['inbox/renewal.md']);
-    assert.deepEqual(service.search('', [tag.id]).projects, [], 'the project itself has no tag');
-    assert.deepEqual(service.search('story', [tag.id]).files.map((f) => f.path), ['inbox/renewal.md'], 'text and tag together');
+    assert.deepEqual((await service.search('', [tag.id])).files.map((f) => f.path), ['inbox/renewal.md']);
+    assert.deepEqual((await service.search('', [tag.id])).projects, [], 'the project itself has no tag');
+    assert.deepEqual((await service.search('story', [tag.id])).files.map((f) => f.path), ['inbox/renewal.md'], 'text and tag together');
     service.setProjectTags('acme', [tag.id]);
-    assert.deepEqual(service.search('', [tag.id]).projects.map((p) => p.id), ['acme']);
+    assert.deepEqual((await service.search('', [tag.id])).projects.map((p) => p.id), ['acme']);
   } finally {
     service.setProjectTags('acme', []);
     rmSync(join(inbox, 'renewal.md'), { force: true });

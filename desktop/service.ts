@@ -9,7 +9,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
-  CRAFT_APPS, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects,
+  CRAFT_APPS, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects, listProjectsAsync, mapLimit, projectSummaryAsync, IO_LIMIT,
   listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, which, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
@@ -144,9 +144,14 @@ const AI_CONFIG = ['.claude', '.agents', '.codex', '.gemini', '.cursor', 'CLAUDE
 // ponytail: skips only node_modules and .claude/worktrees (full repo copies); other bulky folders are copied too.
 const backupFilter = (src: string): boolean => basename(src) !== 'node_modules' && !/[\\/]\.claude[\\/]worktrees$/.test(src);
 
+const PROJECTS_TTL_MS = 1500;
+
 export function createService(root: string, deps: Deps) {
+  let projectsScan: Promise<ProjectSummary[]> | null = null; // the `projects` scan in flight, or finished less than PROJECTS_TTL_MS ago
+  let projectsDoneAt = 0; // when projectsScan finished (0: still running)
   // Every project path goes through the active workspace; it starts as the one opened last.
   const useWorkspace = (w: WorkspaceInfo): WorkspaceInfo => {
+    projectsScan = null; // another workspace: a scan in flight is of the old one
     setWorkspaceDir(root, w.path);
     deps.onWorkspace?.(w.path);
     return w;
@@ -256,6 +261,7 @@ export function createService(root: string, deps: Deps) {
 
   // Records the folder in project.json and backs up its AI settings inside it (.moki-backup/link-<date>/).
   function linkFolder(project: string, folder: string) {
+    projectsScan = null;
     const file = join(projectDir(project), 'project.json');
     const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
     const repos = (Array.isArray(data.repositories) ? data.repositories : []) as Record<string, unknown>[];
@@ -677,7 +683,16 @@ export function createService(root: string, deps: Deps) {
   return {
     session: () => ({ version: appVersion(), platform: process.platform }),
 
-    projects: () => listProjects(root).map((id) => projectSummary(id, root)),
+    // Async (disk reads must not block the main process). Calls made while a scan runs share it, and its result is kept for
+    // PROJECTS_TTL_MS: the watcher only sees the open project, so a longer cache could go stale for the others (CLI, AI tools).
+    projects: (): Promise<ProjectSummary[]> => {
+      if (projectsScan && (!projectsDoneAt || Date.now() - projectsDoneAt < PROJECTS_TTL_MS)) return projectsScan;
+      projectsDoneAt = 0;
+      const scan = listProjectsAsync(root).then((ids) => mapLimit(ids, IO_LIMIT, (id) => projectSummaryAsync(id, root)));
+      projectsScan = scan;
+      scan.then(() => { if (projectsScan === scan) projectsDoneAt = Date.now(); }, () => { if (projectsScan === scan) projectsScan = null; });
+      return scan;
+    },
 
     // Workspaces (start screen): choose one, create one, open a folder as one.
     workspaces: () => ({ list: listWorkspaces(root), active: activeWorkspace(root).id }),
@@ -718,6 +733,7 @@ export function createService(root: string, deps: Deps) {
       if (folder != null && (!picked || folder !== picked)) throw new ServiceError('Choose the folder again.');
       const linked = folder == null ? undefined : checkFolder(String(folder));
       let created: ProjectSummary;
+      projectsScan = null; // a scan in flight may miss the new project; later calls start their own
       try { created = createProject(id, display, root, starter as Starter); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); }
       if (Array.isArray(tags) && tags.length) { setProjectTags(id, tags, root); created = projectSummary(id, root); }
       if (!linked) return created;
@@ -729,6 +745,7 @@ export function createService(root: string, deps: Deps) {
     deleteProject: (project: string, confirm: unknown) => {
       if (confirm !== 'delete') throw new ServiceError('Type delete to confirm.');
       failing(() => rmSync(projectDir(project), { recursive: true, force: true }));
+      projectsScan = null; // see createProject
       return true;
     },
 
@@ -760,17 +777,20 @@ export function createService(root: string, deps: Deps) {
     saveTag: (tag: unknown) => {
       const t = (tag ?? {}) as { id?: unknown; name?: unknown; color?: unknown; description?: unknown };
       try {
+        projectsScan = null;
         return saveTag({ id: t.id == null ? undefined : String(t.id), name: String(t.name ?? ''), color: t.color == null ? undefined : String(t.color), description: t.description == null ? undefined : String(t.description) }, root);
       } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); }
     },
     removeTag: (id: unknown) => {
       if (!listTags(root).some((t) => t.id === id)) throw new ServiceError('Unknown tag.');
       removeTag(String(id), root);
+      projectsScan = null;
       return true;
     },
     setProjectTags: (project: string, ids: unknown) => {
       projectDir(project);
       setProjectTags(project, ids, root);
+      projectsScan = null;
       return projectSummary(project, root);
     },
     // Turns the optional app plugins on or off for this project only.
@@ -781,6 +801,7 @@ export function createService(root: string, deps: Deps) {
       if (unknown.length) throw new ServiceError(`Unknown plugin: ${unknown.join(', ')}`);
       const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       writeFileSync(file, `${JSON.stringify({ ...data, plugins: list.sort() }, null, 2)}\n`);
+      projectsScan = null;
       return projectSummary(project, root);
     },
     fileTags: (project: string) => { projectDir(project); return fileTags(project, root); },
