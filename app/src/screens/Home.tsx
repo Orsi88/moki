@@ -124,6 +124,7 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
     <li key={p.id} className="home-row" onContextMenu={menuOn([
       { label: pinnedRow ? t('Unpin') : t('Pin'), icon: <IconPin size={15} />, run: () => setPins(togglePin(p.id)) },
       { label: t('Hide from Moki'), icon: <IconEyeOff size={15} />, run: () => hide(p) },
+      { label: t('Delete for good'), icon: <IconTrash size={15} />, danger: true, run: () => setDeleting(p) },
     ])}>
       <button type="button" className="home-project" onClick={() => onOpen(p.id)}>
         <span className="home-project-name">{p.name}</span>

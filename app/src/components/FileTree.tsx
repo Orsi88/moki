@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useState, type DragEvent as ReactDragEvent, type ReactElement } from 'react';
 import { describeRun, statusLabel, type TreeNode } from '../api';
 import { t } from '../i18n';
 import { IconChevron, IconCode, IconFolder, IconLink, IconList, IconMcp, IconMore, IconPlus, IconSliders, IconStar } from './Icons';
@@ -16,6 +16,7 @@ interface Props {
   favorites?: Set<string>; // favorite notes: a star, and first in the notes folder
   noteTitles?: Record<string, string>;
   onIde?: (at: { left: number; top: number }) => void; // "Open in the IDE" on the linked folder's row
+  onReceive?: (folder: string, event: ReactDragEvent) => void; // a file dropped on this folder
 }
 
 export const friendlyName = (name: string): string => ({
@@ -60,8 +61,12 @@ export function FileTree(props: Props) {
   return <ul className="tree" role="tree">{props.nodes.map((n) => <Node key={n.path} node={n} depth={0} {...props} />)}</ul>;
 }
 
-function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, tagColors, onMenu, favorites, onIde, noteTitles }: Props & { node: TreeNode; depth: number }) {
+const canMove = (path: string) => !path.startsWith('.') && path !== 'project.json' && path !== 'tags.json' && !path.startsWith('runs/') && !path.startsWith('@folder');
+const canReceive = (path: string) => !path.startsWith('.') && path !== 'runs' && !path.startsWith('runs/') && path !== '@folder' && !path.startsWith('@folder/');
+
+function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, tagColors, onMenu, favorites, onIde, noteTitles, onReceive }: Props & { node: TreeNode; depth: number }) {
   const [hover, setHover] = useState(false);
+  const [dropOn, setDropOn] = useState(false);
   const isDir = node.type === 'dir';
   const open = expanded.has(node.path);
   const run = node.run ? describeRun(node.name) : null;
@@ -73,16 +78,30 @@ function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, 
   const section = depth === 0 && isDir && isSectionIconName(node.name) ? node.name : null;
   const label = run ? run.title : depth === 0 || !node.path.includes('/') ? friendlyName(node.name) : node.path.startsWith('notes/') ? noteTitles?.[node.path] ?? node.name.replace(/\.md$/, '') : node.name;
   const menu = node.path.startsWith('.') ? undefined : onMenu; // a group of the sidebar, not a folder: nothing to create, reveal or copy
+  const noteDrag = !isDir && /^notes\/[^/]+\.md$/.test(node.path);
+  const movable = !isDir && canMove(node.path);
+  const receive = isDir && canReceive(node.path) && Boolean(onReceive);
+  const accepts = (e: ReactDragEvent) => {
+    const types = Array.from(e.dataTransfer.types);
+    return types.includes('Files') || types.includes('application/x-moki-move');
+  };
 
   return (
     <li role="treeitem" aria-expanded={isDir ? open : undefined}>
       <div className="tree-line">
       <button
         type="button"
-        className={`tree-row${activePath === node.path ? ' active' : ''}${depth === 0 && isDir ? ' top' : ''}`}
+        className={`tree-row${activePath === node.path ? ' active' : ''}${depth === 0 && isDir ? ' top' : ''}${dropOn ? ' drop-on' : ''}`}
         style={{ paddingLeft: 8 + depth * INDENT }}
-        draggable={!isDir && /^notes\/[^/]+\.md$/.test(node.path)}
-        onDragStart={(e) => { if (!isDir && /^notes\/[^/]+\.md$/.test(node.path)) { e.dataTransfer.setData('application/x-moki-note', JSON.stringify({ path: node.path })); e.dataTransfer.effectAllowed = 'copy'; } }}
+        draggable={noteDrag || movable}
+        onDragStart={(e) => {
+          if (noteDrag) e.dataTransfer.setData('application/x-moki-note', JSON.stringify({ path: node.path }));
+          if (movable) e.dataTransfer.setData('application/x-moki-move', node.path);
+          e.dataTransfer.effectAllowed = noteDrag && movable ? 'copyMove' : noteDrag ? 'copy' : 'move';
+        }}
+        onDragOver={receive ? (e) => { if (!accepts(e)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = Array.from(e.dataTransfer.types).includes('Files') ? 'copy' : 'move'; setDropOn(true); } : undefined}
+        onDragLeave={receive ? () => setDropOn(false) : undefined}
+        onDrop={receive ? (e) => { if (!accepts(e)) return; e.preventDefault(); e.stopPropagation(); setDropOn(false); onReceive?.(node.path, e); } : undefined}
         onClick={() => (isDir ? onToggle(node.path) : onOpen(node.path))}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
@@ -117,7 +136,7 @@ function Node({ node, depth, activePath, onOpen, expanded, onToggle, onNewNote, 
       {isDir && open && node.children && (
         <ul role="group">
           {(node.path === 'notes' && favorites ? [...node.children].sort((a, b) => Number(favorites.has(b.path)) - Number(favorites.has(a.path))) : node.children)
-            .map((c) => <Node key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} expanded={expanded} onToggle={onToggle} onNewNote={onNewNote} tagColors={tagColors} onMenu={onMenu} favorites={favorites} onIde={onIde} noteTitles={noteTitles} nodes={[]} />)}
+            .map((c) => <Node key={c.path} node={c} depth={depth + 1} activePath={activePath} onOpen={onOpen} expanded={expanded} onToggle={onToggle} onNewNote={onNewNote} tagColors={tagColors} onMenu={onMenu} favorites={favorites} onIde={onIde} noteTitles={noteTitles} onReceive={onReceive} nodes={[]} />)}
           {node.path === 'notes' && (
             <li><button type="button" className="tree-row tree-new" style={{ paddingLeft: 8 + (depth + 1) * INDENT }} onClick={onNewNote}><span className="tree-icon"><IconPlus size={14} /></span><span className="tree-label">{t('New note')}</span></button></li>
           )}

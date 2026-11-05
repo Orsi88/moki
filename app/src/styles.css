@@ -274,6 +274,8 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .tree-row:hover { background: var(--bg-3); }
 .tree-row.active { background: var(--accent-soft); color: var(--text); }
+.tree-row.drop-on { outline: 1px solid var(--accent); background: var(--accent-soft); }
+.workspace.dropping .sidebar { z-index: 31; }
 .tree-row.top { font-weight: 600; color: var(--muted); margin-top: 4px; }
 .tree-caret { display: grid; place-items: center; width: 14px; color: var(--faint); transition: transform 0.12s; }
 .tree-caret.open { transform: rotate(90deg); }
@@ -437,6 +439,61 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .markdown th { background: var(--bg-2); }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
 .visual-markdown-editor { flex: 1; min-height: 50vh; outline: none; overflow-wrap: anywhere; }
+.tiptap-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* A project .md writes in the same column as the source field, so the text is not flush with the pane. */
+.doc-body > .tiptap-wrap { width: min(820px, 100%); margin: 0 auto; padding: 28px 24px 80px; box-sizing: border-box; }
+.tiptap-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 0 8px; }
+.tiptap-wrap .ProseMirror { flex: 1; min-height: 50vh; outline: none; overflow-wrap: anywhere; }
+.tiptap-wrap .ProseMirror p { margin: 0.6em 0; }
+.tiptap-wrap .ProseMirror img {
+  display: block; max-width: 100%; height: auto;
+  object-fit: contain; background: #fff; border-radius: 6px;
+}
+.tiptap-wrap [data-resize-container] { width: 100%; margin: 8px 0; }
+.tiptap-wrap [data-resize-container]:has(img[data-align="center"]) { justify-content: center; }
+.tiptap-wrap [data-resize-container]:has(img[data-align="right"]) { justify-content: flex-end; }
+.tiptap-wrap [data-resize-wrapper] { max-width: 100%; }
+.tiptap-wrap .ProseMirror-selectednode [data-resize-wrapper] { outline: 1px solid var(--accent); outline-offset: 2px; }
+.tiptap-wrap [data-resize-handle] {
+  width: 10px; height: 10px; background: var(--bg); border: 2px solid var(--accent); border-radius: 2px; z-index: 2; display: none;
+}
+.tiptap-wrap .ProseMirror-selectednode [data-resize-handle] { display: block; }
+.tiptap-wrap [data-resize-handle="top-left"] { transform: translate(-50%, -50%); cursor: nwse-resize; }
+.tiptap-wrap [data-resize-handle="top-right"] { transform: translate(50%, -50%); cursor: nesw-resize; }
+.tiptap-wrap [data-resize-handle="bottom-left"] { transform: translate(-50%, 50%); cursor: nesw-resize; }
+.tiptap-wrap [data-resize-handle="bottom-right"] { transform: translate(50%, 50%); cursor: nwse-resize; }
+.image-bubble { display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: 0 8px 24px rgb(0 0 0 / 0.28); }
+.markdown img[data-align="center"] { display: block; margin-left: auto; margin-right: auto; }
+.markdown img[data-align="right"] { display: block; margin-left: auto; margin-right: 0; }
+.tiptap-wrap .ProseMirror ul[data-type="taskList"] { list-style: none; margin: 0.4em 0; padding-left: 0.2em; }
+.tiptap-wrap .ProseMirror li.task-item {
+  display: flex; flex-flow: row nowrap; align-items: flex-start; gap: 0.45em;
+}
+.tiptap-wrap .ProseMirror li.task-item > label { flex: 0 0 auto; margin: 0.2em 0 0; cursor: pointer; }
+.tiptap-wrap .ProseMirror li.task-item > div { flex: 1 1 auto; min-width: 0; }
+.tiptap-wrap .ProseMirror li.task-item p { margin: 0; }
+.tiptap-wrap .ProseMirror li.task-item input[type="checkbox"] {
+  width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer;
+}
+.tiptap-wrap .ProseMirror li.task-item[data-checked="true"] > div { color: var(--muted); text-decoration: line-through; }
+.tiptap-wrap .ProseMirror table { border-collapse: collapse; width: 100%; margin: 0.8em 0; table-layout: fixed; }
+.tiptap-wrap .ProseMirror th, .tiptap-wrap .ProseMirror td {
+  border: 1px solid var(--border); padding: 6px 8px; vertical-align: top; min-width: 4em;
+}
+.tiptap-wrap .ProseMirror th { background: var(--bg-2); font-weight: 600; text-align: left; }
+.tiptap-wrap .ProseMirror td p, .tiptap-wrap .ProseMirror th p { margin: 0; }
+.link-bubble input {
+  width: min(280px, 70vw); border: 0; background: transparent; color: inherit; font: inherit; font-size: 0.85rem; outline: none; padding: 2px 6px;
+}
+.tiptap-wrap .code-embed {
+  margin: 8px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: hidden;
+}
+.tiptap-wrap .code-embed pre { margin: 0; background: transparent; border: 0; border-radius: 0; }
+.tiptap-wrap .code-embed .code-embed-body {
+  display: block; min-height: 2.6em; margin: 0; padding: 10px 12px 12px; background: none; border-radius: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.55; white-space: pre-wrap;
+}
+.note-visual .tiptap-wrap .ProseMirror { min-height: 240px; }
 .markdown pre:not(.diagram),
 .visual-markdown-editor pre:not(.diagram) {
   margin: 12px 0; padding: 0; border: 1px solid var(--border); border-radius: 10px;
@@ -1022,13 +1079,15 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 }
 .pp-card { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); }
 .pp-card .btn-block { margin: 0; }
-/* The three starts (agent, activity, operation) are the card's header: tabs, no title. */
-.pp-card .list-tabs { justify-content: space-around; padding: 0 2px; margin-bottom: 2px; }
-.pp-card .dialog-tab { padding: 4px 10px; font-size: 0.82rem; }
+/* Agent, activity, operation and skill are icon tabs: the names are the tooltips. */
+.pp-card .list-tabs { justify-content: space-around; gap: 2px; padding: 0; margin-bottom: 2px; overflow: visible; }
+.pp-card .dialog-tab { display: flex; flex: 1; justify-content: center; align-items: center; padding: 6px 0; min-width: 0; }
 .pp-tool { position: relative; display: flex; align-items: center; }
 .pp-tool-icon { position: absolute; left: 10px; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .pp-tool select { width: 100%; padding-left: 32px; font-size: 0.88rem; cursor: pointer; }
 .pp-hint { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--muted); }
+.pp-plugins { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.pp-plugins .check-row { font-size: 0.86rem; }
 .pp-more { color: var(--muted); }
 .pp-msg { margin: 0; padding: 7px 9px; border-radius: 6px; background: var(--bg-3); font-size: 0.8rem; line-height: 1.4; }
 .pp-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -1093,7 +1152,8 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .pp-pick.empty svg { color: var(--accent); }
 
 /* ---------- Activity catalog (components/ActivityCatalog.tsx) ---------- */
-.modal.catalog { width: min(980px, 100%); }
+/* Every "choose one" catalog opens at this size. Fewer cards leave empty space; more cards scroll. */
+.modal.catalog { width: min(980px, calc(100vw - 48px)); height: min(640px, calc(100vh - 48px)); }
 .catalog-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .catalog-card {
   display: flex; flex-direction: column; gap: 12px; width: 100%; height: 100%; padding: 12px 14px 14px;
@@ -1110,7 +1170,10 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .catalog-emblem { display: grid; place-items: center; flex-shrink: 0; width: 64px; height: 64px; margin: -4px 0 -4px -4px; }
 .catalog-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .catalog-title { font-weight: 700; font-size: 0.95rem; line-height: 1.25; }
-.catalog-hint { font-size: 0.8rem; line-height: 1.35; color: var(--muted); }
+.catalog-hint {
+  font-size: 0.8rem; line-height: 1.35; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
 .catalog-tags { display: flex; gap: 6px; margin-top: auto; }
 .catalog-tag {
   padding: 2px 7px; border: 1px solid var(--border); border-radius: 4px; font-family: "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
@@ -1119,9 +1182,8 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .catalog-tag.muted-tag { color: var(--faint); }
 
 /* The search of every catalog (CatalogModal); descriptions in three lines (all of it in the tooltip). */
-.catalog-search { margin-bottom: 14px; }
+.catalog-search { margin-bottom: 14px; flex-shrink: 0; }
 .catalog-search input { width: 100%; }
-.agent-catalog-hint { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* Settings › My AIs (AiToolsPage): one row per AI, its main action as an icon, the rest in "…". */
 .ai-grid { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, min(380px, 100%)); gap: 12px; }
@@ -1179,14 +1241,31 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .note-ai .pp-pick { padding: 6px 10px; }
 .note-ai .pp-hint, .note-ai-msg { grid-column: 1 / -1; margin: 0; }
 .note-editor-wrap { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; }
-.source-flow { display: flex; flex-direction: column; gap: 8px; flex: none; }
-.source-flow .note-editor, .source-flow .editor, .source-diagram-code {
-  flex: none; min-height: 72px; height: auto; max-height: none; field-sizing: content; overflow: hidden; resize: none;
+.source-flow { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.source-flow .note-editor, .source-flow .editor {
+  flex: none; min-height: 1.6em; height: auto; max-height: none; field-sizing: content; overflow: hidden; resize: none;
+  border: 0; border-radius: 0; background: transparent; padding: 2px 0; box-shadow: none;
 }
+.source-flow .note-editor:last-child, .source-flow .editor:last-child { flex: 1; min-height: 72px; }
 .source-diagram { flex: none; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); padding: 8px 10px; }
 .source-diagram-bar { display: flex; align-items: center; gap: 8px; }
 .source-diagram-main { flex: 1; min-width: 0; padding: 4px 2px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
-.source-diagram-code { display: block; width: 100%; margin-top: 8px; min-height: 0; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.45; }
+.source-diagram-code {
+  display: block; width: 100%; margin-top: 8px; height: 160px; max-height: 220px; overflow: auto; resize: vertical; field-sizing: fixed;
+  font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.45;
+}
+.source-image { flex: none; margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: hidden; }
+.source-image img { display: block; max-width: 100%; max-height: 280px; width: auto; height: auto; object-fit: contain; background: #fff; }
+.source-image figcaption { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+.source-image figcaption span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.tiptap-wrap .diagram { margin: 8px 0; }
+.tiptap-wrap .diagram-picture { min-height: 0; max-height: min(70vh, 640px); }
+.tiptap-wrap .diagram-picture svg {
+  width: auto; height: auto;
+  max-width: calc(100% * var(--diagram-zoom, 1));
+  max-height: calc(260px * var(--diagram-zoom, 1));
+}
+.diagram.on { box-shadow: inset 0 0 0 1px var(--accent); }
 .note-editor-wrap > .note-editor { flex: 1; }
 .md-editor-wrap { min-height: 0; }
 .md-editor-wrap .note-mention { left: 50%; right: auto; width: min(480px, 90%); transform: translateX(-50%); }
@@ -1194,7 +1273,10 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
   position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3; display: flex; flex-direction: column; gap: 1px; max-height: 260px; overflow: auto;
   padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); box-shadow: 0 12px 30px rgb(0 0 0 / 0.35);
 }
-.note-mention-floating { z-index: 100; box-sizing: border-box; }
+.note-mention-floating {
+  z-index: 100; box-sizing: border-box; right: auto; bottom: auto;
+  width: min(320px, calc(100vw - 16px)); max-height: min(280px, calc(100vh - 16px));
+}
 .note-mention p { margin: 6px 8px; }
 .note-mention button {
   display: flex; flex: 0 0 30px; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 5px;
@@ -1520,6 +1602,8 @@ select:disabled { cursor: not-allowed; opacity: 0.6; }
 .note-inline .modal-body { overflow: auto; padding: 8px 12px; }
 .note-inline .note-editor-wrap { min-height: 0; }
 .note-inline .note-editor { min-height: 0; height: 100%; resize: none; }
+.note-inline .source-flow .note-editor { height: auto; min-height: 1.6em; }
+.note-inline .source-flow .note-editor:last-child { flex: 1; min-height: 72px; }
 .note-inline .note-preview { min-height: 0; }
 .note-inline .modal-foot { padding: 5px 12px; }
 .note-inline-toggle svg { transform: rotate(90deg); }

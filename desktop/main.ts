@@ -8,7 +8,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { TOOLS, isTool, listProjects, projectRepository, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
+import { TOOLS, isTool, listProjects, projectRepository, projectSummary, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
 import { callService, createService } from './service.ts';
 import { watchProject } from './project-watch.ts';
 import { launchInTerminal, launchTool, openFolder } from './launcher.ts';
@@ -271,12 +271,13 @@ if (!app.requestSingleInstanceLock()) {
     // Embedded terminals: the UI only refers to terminals prepared here, by id.
     const isSize = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0 && (n as number) <= 1000;
     // New terminal tab: the user's shell (tool '') or a terminal AI tool started without a request.
-    ipcMain.handle('qa:term-new', (event, tool: unknown) => {
+    ipcMain.handle('qa:term-new', (event, tool: unknown, project: unknown) => {
       if (!trusted(event)) return { error: 'Untrusted caller.' };
       if (!terminals.available()) return { error: 'Terminals inside the app are not available on this computer (node-pty is not installed).' };
       if (tool === '') return { terminal: { id: terminals.prepare({ ...shellSpec(ROOT), title: 'Terminal' }), title: 'Terminal' } };
       if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].command || TOOLS[tool].clipboard) return { error: 'Unknown tool.' };
-      const r = launchInTerminal(tool, '', ROOT, terminals.prepare);
+      const plugins = typeof project === 'string' && listProjects(ROOT).includes(project) ? projectSummary(project, ROOT).plugins : [];
+      const r = launchInTerminal(tool, '', ROOT, terminals.prepare, plugins);
       return r.terminal ? { terminal: r.terminal } : { error: r.message };
     });
     ipcMain.handle('qa:term-start', (event, id: unknown, cols: unknown, rows: unknown, project: unknown) => {

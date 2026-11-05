@@ -1,4 +1,4 @@
-// Right panel: what to DO in the project — one card with three starts, each stopping at its
+// Right panel: what to DO in the project — one card with four starts, each stopping at its
 // own depth: call an agent (an agent and an AI, nothing else), start an activity (the same
 // two pickers plus what that activity needs) and start an operation (pick it; its steps,
 // their agents and AIs and its inputs are in the operation's own start screen). Then the
@@ -9,13 +9,15 @@
 // tags). It can be collapsed to a thin rail.
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, describeRun, statusLabel, type ActivityInfo, type AgentInfo, type Operation, type OpenRun, type ProjectSummary, type RunState, type TerminalRef, type ToolInfo } from '../api';
+import { api, describeRun, statusLabel, type ActivityInfo, type AgentInfo, type Operation, type OpenRun, type ProjectSummary, type RunState, type SkillInfo, type TerminalRef, type ToolInfo } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
-import { IconCheck, IconChevron, IconEdit, IconGraph, IconPanel, IconPlay, IconUsers, IconX } from './Icons';
+import { IconAgent, IconCheck, IconChevron, IconEdit, IconGraph, IconLanes, IconList, IconPanel, IconPlay, IconSkill, IconUsers, IconX } from './Icons';
 import { ActivityCatalog, ActivityPick } from './ActivityCatalog';
 import { AiPick, QUICK_KINDS } from './ToolCatalog';
 import { AgentPick } from './AgentCatalog';
+import { SkillPick } from './SkillCatalog';
+import { pluginList } from './SkillsDialog';
 import { OperationPick } from './OperationCatalog';
 import { ListTabs } from './ListPage';
 import type { ActivityLaunchPhase } from '../activity-launches';
@@ -43,7 +45,7 @@ interface Props {
   operations?: ReactNode; // the Operations card (OperationsPanel), below everything, taking the room left
 }
 
-type Start = 'agent' | 'activity' | 'operation'; // the three starts of the card
+type Start = 'agent' | 'activity' | 'operation' | 'skill'; // the starts of the card
 
 const toolName = (tool: ToolInfo) => t(tool.label).replace(/ \(.*\)$/, '');
 const statusDot = (s: string): string => (s === 'completed' ? 'dot-ok' : s === 'cancelled' ? 'dot-muted' : s === 'blocked' ? 'dot-err' : 'dot-warn');
@@ -83,6 +85,11 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
   // Start an operation: every operation on this computer, the same catalog as activities and agents.
   const [operationList, setOperationList] = useState<Operation[]>([]);
   const [operationId, setOperationId] = useState('');
+  const [skillList, setSkillList] = useState<SkillInfo[]>([]);
+  const [skillId, setSkillId] = useState('');
+  const [pluginOn, setPluginOn] = useState<string[]>(project.plugins);
+  const [pluginBusy, setPluginBusy] = useState(false);
+  useEffect(() => { setPluginOn(project.plugins); }, [project.id, project.plugins]);
 
   useEffect(() => {
     if (runId) api.run(project.id, runId).then(setRun).catch(() => setRun(null));
@@ -98,6 +105,7 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
       .catch(() => setAgents([]));
     api.readPlan(project.id).then((p) => setPlanPending(Boolean(p && !p.approved))).catch(() => setPlanPending(false));
     api.operations().then(setOperationList).catch(() => setOperationList([]));
+    api.skills().then((list) => setSkillList(list.filter((s) => s.status === 'draft' || s.status === 'stable'))).catch(() => setSkillList([]));
   }, [project.id, refreshKey]);
   useEffect(() => { if (operationId && !operationList.some((o) => o.id === operationId)) setOperationId(''); }, [operationList, operationId]);
 
@@ -116,6 +124,13 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
 
   // Call an agent stops here: the agent and the AI, in a conversation (no activity, files or notes).
   const callAgent = () => { if (talkAgent) void quickOpen('talk', talkAgent); };
+  const callSkill = () => { if (skillId) void quickOpen('skill', undefined, '', skillId); };
+  const togglePlugin = (name: string) => {
+    const next = pluginOn.includes(name) ? pluginOn.filter((p) => p !== name) : [...pluginOn, name];
+    setPluginOn(next);
+    setPluginBusy(true);
+    api.setProjectPlugins(project.id, next).then(() => onProjectChanged()).catch((e: Error) => { setPluginOn(project.plugins); setLaunchMsg(e.message); }).finally(() => setPluginBusy(false));
+  };
 
   // Start an activity: the agent and the AI chosen here arrive filled. Activities that need inbox files go
   // through the dialog (already past "what to do"); the others start right away in the chosen tool.
@@ -131,13 +146,13 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
   const startOperation = () => { if (operationId) onOperation?.(operationId); };
 
   // One click: the chosen activity, no files, in the chosen tool. With an agent and "talk": a conversation with it.
-  const quickOpen = async (id = 'open', agent?: string, note = '') => {
+  const quickOpen = async (id = 'open', agent?: string, note = '', skill = '') => {
     if (!tool) return;
     const chosen = activities.find((a) => a.id === id);
-    const trackingId = onActivityStart(id, chosen ? t(chosen.label) : id);
+    const trackingId = onActivityStart(id, skill || (chosen ? t(chosen.label) : id));
     setLaunching(true); setLaunchMsg('');
     try {
-      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note, language: conversationLanguage(), ...(agent ? { agent } : {}), ...(trackingId ? { trackingId } : {}) });
+      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note, language: conversationLanguage(), ...(agent ? { agent } : {}), ...(skill ? { skill } : {}), ...(trackingId ? { trackingId } : {}) });
       onActivityUpdate(trackingId, r.copied ? 'prepared' : r.terminal || r.opened ? 'sent' : r.prompt && !r.message ? 'prepared' : 'failed');
       if (r.terminal) { onTerminal(r.terminal); return; }
       if (!r.opened) setLaunchMsg(r.message || t('Could not open the tool.'));
@@ -248,7 +263,10 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
       {/* The tabs are the card's header: where you start something, no title above them. */}
       <section className="pp-card" aria-label={t('AI assistant')}>
         <ListTabs<Start> label={t('Start')} value={start} onChange={(next) => { setStart(next); setLaunchMsg(''); }} tabs={[
-          { id: 'agent', label: t('Agent') }, { id: 'activity', label: t('Activity') }, { id: 'operation', label: t('Operation') },
+          { id: 'agent', label: t('Agent'), icon: <IconAgent size={16} /> },
+          { id: 'activity', label: t('Activity'), icon: <IconList size={16} /> },
+          { id: 'operation', label: t('Operation'), icon: <IconLanes size={16} /> },
+          { id: 'skill', label: t('Skill'), icon: <IconSkill size={16} /> },
         ]} />
         {start === 'operation' ? (
           <>
@@ -263,6 +281,8 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
             {start === 'agent' ? (
               <AgentPick label={t('Agent')} agents={agents} value={talkAgent} onChange={(name) => { setTalkAgent(name); setLaunchMsg(''); }}
                 title={t('Who do you want to talk to?')} hint={t('A conversation with the agent in {tool}, about anything: no activity starts and nothing is written unless you ask.', { tool: toolName(tool) })} />
+            ) : start === 'skill' ? (
+              <SkillPick skills={skillList} value={skillId} onChange={(name) => { setSkillId(name); setLaunchMsg(''); }} />
             ) : (
               <>
                 <ActivityPick label={t('What to do')} activities={choices} value={activity?.id ?? ''} onChange={pickActivity} />
@@ -276,6 +296,11 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
                 title={t('Talk an idea through with an agent, without an activity')}>
                 <IconUsers size={15} /> {launching ? t('Starting…') : t('Call an agent')}
               </button>
+            ) : start === 'skill' ? (
+              <button type="button" className="btn btn-block" disabled={launching || !skillId} onClick={callSkill}
+                title={t('The request opens in {tool} and names this skill.', { tool: toolName(tool) })}>
+                <IconPlay size={15} /> {launching ? t('Starting…') : t('Use a skill')}
+              </button>
             ) : (
               <button type="button" className="btn btn-block" disabled={launching || !activity} onClick={startActivity}>
                 <IconPlay size={15} /> {launching ? t('Starting…') : t('Start activity')}
@@ -288,6 +313,18 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
             <p className="pp-hint">{t('No AI tool found on this computer.')} <button type="button" className="link" onClick={onMyAis}>{t('Install in Settings › My AIs')}</button></p>
             <button type="button" className="btn btn-block" onClick={() => onLaunch()}><IconPlay size={15} /> {t('Open in your AI tool')}</button>
           </>
+        )}
+        {start === 'skill' && (
+          <div className="pp-plugins">
+            <span className="pp-field-label">{t('Plugins')}</span>
+            {pluginList().filter((p) => p.optional).map((p) => (
+              <label key={p.name} className="check-row" title={p.text}>
+                <input type="checkbox" checked={pluginOn.includes(p.name)} disabled={pluginBusy} onChange={() => togglePlugin(p.name)} />
+                <span>{p.name}</span>
+              </label>
+            ))}
+            <p className="pp-hint">{t('When on, these load in every AI session opened from this project.')}</p>
+          </div>
         )}
       </section>
 

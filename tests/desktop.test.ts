@@ -278,6 +278,31 @@ test('files dropped on the workspace are copied into the inbox and stay there', 
   assert.throws(() => service.importFiles('acme', [outside, 1]), /Drop files/);
 });
 
+test('a file moves between folders, and a drop can land in one; execution files stay out', () => {
+  const project = join(root, 'workspace', 'projects', 'acme');
+  writeFileSync(join(project, 'inbox', 'historia.md'), '# story');
+  assert.equal(service.moveEntry('acme', 'inbox/historia.md', 'context'), 'context/historia.md');
+  assert.equal(existsSync(join(project, 'inbox', 'historia.md')), false);
+  assert.equal(readFileSync(join(project, 'context', 'historia.md'), 'utf8'), '# story');
+  assert.equal(service.moveEntry('acme', 'context/historia.md', 'context'), 'context/historia.md');
+  writeFileSync(join(project, 'inbox', 'historia.md'), 'other');
+  assert.equal(service.moveEntry('acme', 'context/historia.md', 'inbox'), 'inbox/historia-1.md');
+  assert.throws(() => service.moveEntry('acme', 'runs/qualquer.md', 'inbox'), /structure/);
+  assert.throws(() => service.moveEntry('acme', 'inbox/historia-1.md', 'runs'), /structure/);
+  assert.throws(() => service.moveEntry('acme', 'project.json', 'context'), /stays/);
+  assert.throws(() => service.moveEntry('acme', '../fora.md', 'inbox'), ServiceError);
+  const outside = join(root, 'solto.md');
+  writeFileSync(outside, 'novo');
+  assert.deepEqual(service.importFiles('acme', [outside], 'context').saved, ['context/solto.md']);
+  assert.equal(readFileSync(join(project, 'context', 'solto.md'), 'utf8'), 'novo');
+  assert.ok(service.importFiles('acme', [outside]).saved[0]?.startsWith('inbox/'));
+  assert.throws(() => service.importFiles('acme', [outside], 'runs'), /structure/);
+  rmSync(join(project, 'inbox', 'historia.md'));
+  rmSync(join(project, 'inbox', 'historia-1.md'));
+  rmSync(join(project, 'inbox', 'solto.md'));
+  rmSync(join(project, 'context', 'solto.md'));
+});
+
 test('open folder / open with default program are confined and filtered', () => {
   service.openFolder('acme', 'inbox');
   assert.ok(folders[0].endsWith(join('acme', 'inbox')));
@@ -285,6 +310,24 @@ test('open folder / open with default program are confined and filtered', () => 
   service.openExternal('acme', 'inbox/us-1.md');
   assert.equal(opened.length, 1);
   assert.throws(() => service.openExternal('acme', 'inbox/tool.exe'), /not opened from the app/);
+});
+
+test('delete sends a file to the trash, empties a fixed folder and keeps project.json', async () => {
+  const project = join(root, 'workspace', 'projects', 'acme');
+  writeFileSync(join(project, 'inbox', 'apagar.md'), 'x');
+  assert.equal(await service.deleteEntry('acme', 'inbox/apagar.md'), true);
+  assert.equal(existsSync(join(project, 'inbox', 'apagar.md')), false);
+  mkdirSync(join(project, 'temporary'), { recursive: true });
+  writeFileSync(join(project, 'temporary', 'rascunho.md'), 'g');
+  assert.equal(await service.deleteEntry('acme', 'temporary'), true);
+  assert.equal(existsSync(join(project, 'temporary')), true);
+  assert.equal(existsSync(join(project, 'temporary', 'rascunho.md')), false);
+  rmSync(join(project, 'temporary'), { recursive: true, force: true });
+  service.tree('acme');
+  assert.equal(existsSync(join(project, 'temporary')), true);
+  await assert.rejects(() => service.deleteEntry('acme', 'project.json'), /project list/);
+  await assert.rejects(() => service.deleteEntry('acme', 'inbox/sumiu.md'), /not found/i);
+  await assert.rejects(() => service.deleteEntry('acme', '../..'), ServiceError);
 });
 
 test('new files and folders: Markdown, text, empty spreadsheet and Word files, safe names, never inside activities', () => {

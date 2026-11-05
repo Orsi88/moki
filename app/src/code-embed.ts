@@ -4,7 +4,7 @@
 import { highlightParts } from './code-highlight';
 import { t } from './i18n';
 
-const LANGS: [string, string][] = [
+export const CODE_LANGS: [string, string][] = [
   ['javascript', 'JavaScript'], ['typescript', 'TypeScript'], ['python', 'Python'], ['json', 'JSON'],
   ['bash', 'Bash'], ['html', 'HTML'], ['css', 'CSS'], ['sql', 'SQL'], ['java', 'Java'],
   ['go', 'Go'], ['rust', 'Rust'], ['yaml', 'YAML'], ['c', 'C'], ['cpp', 'C++'],
@@ -43,7 +43,7 @@ export function dressCodeEmbeds(root: HTMLElement, editable: boolean) {
       select.className = 'code-lang';
       select.setAttribute('aria-label', t('Code'));
       if (!editable) select.disabled = true;
-      const choices: [string, string][] = [['', t('Text')], ...LANGS];
+      const choices: [string, string][] = [['', t('Text')], ...CODE_LANGS];
       if (current && !choices.some(([value]) => value === current)) choices.push([current, current]);
       for (const [value, label] of choices) {
         const option = document.createElement('option');
