@@ -21,7 +21,7 @@ import { TerminalView } from '../components/TerminalView';
 import { UsageStatus } from '../components/UsageStatus';
 import { TagPicker } from '../components/TagPicker';
 import { SearchPanel } from '../components/SearchPanel';
-import { IconCode, IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, IconMore, IconStar, IconTerminal, IconX } from '../components/Icons';
+import { IconCode, IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, IconMore, IconStar, IconTerminal, IconTrash, IconX } from '../components/Icons';
 import { NewEntryDialog } from '../components/NewEntryDialog';
 import { favoriteNotes, hideProject, isFavorite, setFavorite, touchRecentFile } from '../side-menu';
 import { AddButton } from '../components/AddButton';
@@ -205,6 +205,12 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   }, [project.id]);
 
   const update = (path: string, patch: Partial<Tab>) => setTabs((all) => all.map((t) => (t.path === path ? { ...t, ...patch } : t)));
+  const reloadFile = (path: string) => {
+    const current = tabsRef.current.find((item) => item.path === path);
+    const name = path.split('/').pop() ?? path;
+    if (current && isDirty(current) && !window.confirm(t('Reload {name}? Your unsaved edits in this file are dropped.', { name }))) return;
+    api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content), saving: false })).catch((e: Error) => setError(e.message));
+  };
 
   // "Open with": the program kept for a file type (by extension) is a preference of this computer; the system's default never changes.
   const [kept, setKept] = useState<Record<string, { id: string; name: string }>>(() => { try { return JSON.parse(recall('qa-open-with') ?? '{}'); } catch { return {}; } });
@@ -301,7 +307,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
     setError('');
     const bridge = api.term();
     if (!bridge) { setError(t('Terminals are only available in the desktop app.')); return; }
-    bridge.create(tool)
+    bridge.create(tool, project.id)
       .then((r) => (r.terminal ? addTerminal(r.terminal) : setError(r.error ?? t('Could not open the terminal.'))))
       .catch((e: Error) => setError(e.message));
   };
@@ -339,9 +345,45 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   const favorites = useMemo(() => new Set(favoriteNotes().filter((n) => n.project === project.id).map((n) => n.path)), [favTick, project.id]); // eslint-disable-line react-hooks/exhaustive-deps
   // The sidebar shows the tree in blocks (files on top, the Operations card, Project settings and MCPs at the bottom); each block is a FileTree with the same behavior.
   const groups = useMemo(() => groupTree(tree), [tree]);
+  const folderLabel = (path: string) => friendlyName((path.split('/').pop() || path) || t('the project folder'));
+  const dropOnFolder = (folder: string, e: DragEvent) => {
+    dragDepth.current = 0;
+    setDropping(false);
+    const from = e.dataTransfer.getData('application/x-moki-move');
+    if (from) {
+      api.moveEntry(project.id, from, folder).then((path) => {
+        loadTree();
+        setExpanded((s) => new Set(s).add(folder));
+        setTabs((all) => all.map((tab) => (tab.path === from ? { ...tab, path, content: { ...tab.content, path } } : tab)));
+        setActive((cur) => (cur === from ? path : cur));
+        if (note?.path === from && !/^notes\/[^/]+\.md$/.test(path)) openPath(path);
+        setNote((cur) => (cur?.path === from ? (/^notes\/[^/]+\.md$/.test(path) ? { path } : null) : cur));
+        if (isFavorite({ project: project.id, path: from })) {
+          setFavorite({ project: project.id, path: from }, false);
+          if (/^notes\/[^/]+\.md$/.test(path)) setFavorite({ project: project.id, path }, true);
+          setFavTick((n) => n + 1);
+          window.qa?.notesChanged();
+        }
+        setNotice(t('Moved {name} to {folder}.', { name: path.split('/').pop() ?? path, folder: folderLabel(folder) }));
+      }).catch((err: Error) => setError(err.message));
+      return;
+    }
+    const paths = Array.from(e.dataTransfer.files).map((f) => window.qa?.filePath(f) ?? '').filter(Boolean);
+    if (!paths.length) { setError(t('Drop files from your computer.')); return; }
+    api.importFiles(project.id, paths, folder).then((r) => {
+      loadTree();
+      setExpanded((s) => new Set(s).add(folder));
+      for (const p of r.saved.slice(0, 8)) openPath(p);
+      const label = folderLabel(folder);
+      setNotice(r.saved.length === 1
+        ? t('Added {name} to {folder}. It stays in this project.', { name: r.saved[0].split('/').pop() ?? '', folder: label })
+        : t('Added {n} files to {folder}. They stay in this project.', { n: r.saved.length, folder: label }));
+      setError(r.skipped.length ? t('Skipped {names}. Only files are kept, not folders.', { names: r.skipped.join(', ') }) : '');
+    }).catch((err: Error) => setError(t(err.message)));
+  };
   const treeProps = {
     tagColors: colorsOf, activePath: activeTerm || graphFocus ? null : active, onOpen: openPath, expanded,
-    onNewNote: () => setNote({ path: null }), onMenu: openItemMenu, favorites, onIde: openIde, noteTitles,
+    onNewNote: () => setNote({ path: null }), onMenu: openItemMenu, favorites, onIde: openIde, noteTitles, onReceive: dropOnFolder,
     onToggle: (p: string) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }),
   };
   // Where New › File may save: the project's own folders (not the activities), then its root.
@@ -368,6 +410,20 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
     window.qa?.notesChanged();
   };
   const startCreate = (parent: string, kind: 'file' | 'folder') => { setItemMenu(null); setCreating({ parent, kind }); };
+  const FIXED = new Set(['context', 'inbox', 'notes', 'temporary', 'runs']);
+  const removeItem = (path: string) => {
+    setItemMenu(null);
+    const name = friendlyName(path.split('/').pop() ?? path);
+    const ask = FIXED.has(path)
+      ? t('Empty "{name}"? Everything inside goes to the trash. The folder stays.', { name })
+      : t('Delete "{name}"? It goes to the trash.', { name });
+    if (!window.confirm(ask)) return;
+    api.deleteEntry(project.id, path).then(() => {
+      loadTree();
+      setTabs((all) => all.filter((tab) => tab.path !== path && !tab.path.startsWith(`${path}/`)));
+      setActive((cur) => (cur === path || cur?.startsWith(`${path}/`) ? null : cur));
+    }).catch((e: Error) => setError(e.message));
+  };
   // The new file opens to be written; a new folder shows open in the tree.
   const created = (path: string, kind: 'file' | 'folder') => {
     setCreating(null);
@@ -605,6 +661,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
             onSave={() => save(tab.path)}
             onCommit={(text) => commit(tab.path, text)}
             onOpenExternal={() => openExternal(tab.path)}
+            onReload={() => reloadFile(tab.path)}
             onLink={onLink}
             onPdfSaved={(path) => {
               if (path !== tab.path) { openPath(path); return; }
@@ -683,6 +740,9 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
             </>}
             <li><button type="button" role="menuitem" autoFocus={!itemMenu.canCreate && !isNote(itemMenu.path)} onClick={() => revealItem(itemMenu.path)}><IconFolder size={15} /> {t('Show in folder')}</button></li>
             <li><button type="button" role="menuitem" onClick={() => copyItemPath(itemMenu.path)}><IconCopy size={15} /> {t('Copy path')}</button></li>
+            {itemMenu.path !== 'project.json' && itemMenu.path !== '@folder' && !itemMenu.path.startsWith('.') && (
+              <li><button type="button" role="menuitem" className="danger" onClick={() => removeItem(itemMenu.path)}><IconTrash size={15} /> {t('Delete')}</button></li>
+            )}
           </ul>
         </div>
       )}

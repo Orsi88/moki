@@ -16,13 +16,12 @@ import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
 import { isFavorite, looseNotes, noteTitle, removeLooseNote, saveLooseNote, setFavorite, touchNote, type NoteRef } from '../side-menu';
 import { ActivityCatalog } from './ActivityCatalog';
-import { MarkdownBody } from './MarkdownBody';
-import { VisualMarkdownEditor } from './VisualMarkdownEditor';
+import { TipTapEditor, type TipTapCommand, type TipTapHandle } from './TipTapEditor';
 import { DiagramSourceEditor } from './DiagramSourceEditor';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
 import { FileIcon } from '../icons';
-import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconNotes, IconPlay, IconStar, IconTerminal, IconX } from './Icons';
+import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconNotes, IconPlay, IconRefresh, IconStar, IconTerminal, IconX } from './Icons';
 import { ToolCatalog } from './ToolCatalog';
 import { TagPicker } from './TagPicker';
 import { TABLE_ICON, useMarkdownEditing } from './useMarkdownEditing';
@@ -61,8 +60,9 @@ function imageToDataUrl(file: File): Promise<string> {
     img.onload = () => {
       const scale = Math.min(1, IMAGE_MAX / Math.max(img.width, img.height));
       const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
-      canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.width = Math.max(1, Math.round(img.width * scale)); canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      if (ctx) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height); }
       URL.revokeObjectURL(url);
       // Photos become JPEG (small); screenshots and transparent images stay PNG unless very large.
       const png = file.type === 'image/jpeg' ? '' : canvas.toDataURL('image/png');
@@ -90,10 +90,8 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [error, setError] = useState('');
   const [exportMenu, setExportMenu] = useState<{ left: number; top: number } | null>(null);
   const [exported, setExported] = useState('');
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
-  const [visualOk, setVisualOk] = useState(true); // formatted view edits like a Markdown file, until the note cannot round-trip
+  const [mode, setMode] = useState<'edit' | 'preview'>('preview');
   const [inlineTools, setInlineTools] = useState(false);
-  const [html, setHtml] = useState('');
   const [pos, setPos] = useState({ x: 0, y: 0 }); // offset from the centered position
   const [loaded, setLoaded] = useState(!path && !looseId);
   // Where the note is saved: a new note gets its file (or loose id) on its first save.
@@ -113,6 +111,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [tagCatalog, setTagCatalog] = useState<Tag[]>([]);
   const [tags, setTags] = useState<string[]>([]); // a saved project note's tags (shared context)
   const editor = useRef<HTMLTextAreaElement>(null);
+  const visual = useRef<TipTapHandle>(null);
   const picker = useRef<HTMLInputElement>(null);
   const loose = project == null;
   const target = project ?? (destination || null); // the project the note belongs to (or is going to)
@@ -134,6 +133,14 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       .then((c) => { const body = c.kind === 'markdown' || c.kind === 'text' ? c.text : ''; setText(body); setSaved(body); setLoaded(true); })
       .catch((e: Error) => setError(e.message));
   }, [project, path]);
+  const reloadNote = () => {
+    if (!project || !curPath) return;
+    const name = curPath.split('/').pop() ?? curPath;
+    if (text !== saved && !window.confirm(t('Reload {name}? Your unsaved edits in this file are dropped.', { name }))) return;
+    api.readFile(project, curPath)
+      .then((c) => { const body = c.kind === 'markdown' || c.kind === 'text' ? c.text : ''; setText(body); setSaved(body); })
+      .catch((e: Error) => setError(e.message));
+  };
 
   useEffect(() => {
     if (!project || !path) return;
@@ -233,8 +240,6 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     api.setFileTags(project, curPath, ids).then(setTags).catch((e: Error) => setError(e.message));
   };
 
-  useEffect(() => { if (mode === 'preview' && !visualOk) api.renderMarkdown(text).then(setHtml).catch((e: Error) => setError(e.message)); }, [mode, text, visualOk]);
-
   useEffect(() => {
     if (!target) { setFiles([]); return; }
     api.tree(target).then((nodes) => setFiles(flatten(nodes))).catch(() => setFiles([]));
@@ -312,6 +317,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const addImages = async (list: File[]) => {
     const images = list.filter((f) => f.type.startsWith('image/'));
     if (!images.length) return false;
+    if (mode === 'preview') { visual.current?.addImages(images); return true; }
     setError('');
     try {
       for (const file of images) {
@@ -363,26 +369,6 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     md.listKey(e);
   };
 
-  // ---------- reading view: tick boxes and open @ mentions ----------
-  const onPreviewClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    const el = e.target as HTMLElement;
-    const item = el.closest('li');
-    const box = item?.querySelector(':scope > input.task');
-    if (box && !el.closest('a')) {
-      const index = Array.from(e.currentTarget.querySelectorAll('input.task')).indexOf(box);
-      let n = -1;
-      const next = text.replace(/^(\s*[-*] )\[([ xX])\]/gm, (all, lead: string, mark: string) => (++n === index ? `${lead}[${mark === ' ' ? 'x' : ' '}]` : all));
-      setText(next);
-      return;
-    }
-    const a = el.closest('a');
-    if (!a) return;
-    e.preventDefault();
-    const href = a.getAttribute('href') ?? '';
-    if (/^https?:\/\//i.test(href)) { void window.qa?.openLink(href); return; }
-    if (target && files.includes(href)) window.qa?.openInMain?.(target, href);
-  };
-
   // ---------- use the note with the AI ----------
   const choices = activities.filter((a) => a.id !== 'resume' && a.available && a.target.kind !== 'operation'); // a note goes to a request, not to an operation
   const activity = choices.find((a) => a.id === activityId);
@@ -420,7 +406,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === 's') { e.preventDefault(); void persist().catch(() => { /* the error is shown */ }); }
-      if (k === 'e') { e.preventDefault(); setVisualOk(true); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
+      if (k === 'e') { e.preventDefault(); setMode((m) => (m === 'edit' ? 'preview' : 'edit')); }
       if (mode === 'edit' && k === 'b') { e.preventDefault(); wrap('**'); }
       if (mode === 'edit' && k === 'i') { e.preventDefault(); wrap('*'); }
       if (mode === 'edit' && k === 'k') { e.preventDefault(); link(); }
@@ -444,8 +430,12 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
     window.addEventListener('mouseup', stop);
   };
 
+  const act = (cmd: TipTapCommand, source: () => void) => () => {
+    if (mode === 'preview') visual.current?.command(cmd);
+    else source();
+  };
   const tool_ = (label: ReactNode, title: string, run: () => void, style?: object) => (
-    <button type="button" className="icon-btn" title={title} aria-label={title} style={style} disabled={mode !== 'edit'} onMouseDown={(e) => e.preventDefault()} onClick={run}>{label}</button>
+    <button type="button" className="icon-btn" title={title} aria-label={title} style={style} onMouseDown={(e) => e.preventDefault()} onClick={run}>{label}</button>
   );
 
   const dialog = (
@@ -467,6 +457,9 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
             </button>
           )}
           {project && curPath && (
+            <button type="button" className="icon-btn" onClick={reloadNote} title={t('Reload this file')} aria-label={t('Reload this file')}><IconRefresh size={16} /></button>
+          )}
+          {project && curPath && (
             <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={Boolean(exportMenu)} title={t('Export the note')} aria-label={t('Export the note')}
               onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setExportMenu({ left: Math.max(8, r.right - 200), top: r.bottom + 4 }); }}>
               <IconFile size={17} />
@@ -485,34 +478,34 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
           <button type="button" className={`icon-btn${inline ? ' note-inline-remove' : ''}`} onClick={close} title={closeLabel ?? t('Close (Esc)')} aria-label={closeLabel ?? t('Close (Esc)')}><IconX size={18} /></button>
         </header>
         <div className="note-tools" role="toolbar" aria-label={t('Formatting')}>
-          {tool_('/', t('Commands (type /)'), openSlash, { fontWeight: 700 })}
+          {tool_('/', t('Commands (type /)'), act('slash', openSlash), { fontWeight: 700 })}
           <span className="sep" />
-          {tool_('B', t('Bold (Ctrl+B)'), () => wrap('**'), { fontWeight: 700 })}
-          {tool_('I', t('Italic (Ctrl+I)'), () => wrap('*'), { fontStyle: 'italic' })}
-          {tool_('S', t('Strikethrough'), () => wrap('~~'), { textDecoration: 'line-through' })}
+          {tool_('B', t('Bold (Ctrl+B)'), act('bold', () => wrap('**')), { fontWeight: 700 })}
+          {tool_('I', t('Italic (Ctrl+I)'), act('italic', () => wrap('*')), { fontStyle: 'italic' })}
+          {tool_('S', t('Strikethrough'), act('strike', () => wrap('~~')), { textDecoration: 'line-through' })}
           <span className="sep" />
-          {tool_('H1', t('Large title'), () => heading(1))}
-          {tool_('H2', t('Medium title'), () => heading(2))}
-          {tool_('H3', t('Small title'), () => heading(3))}
+          {tool_('H1', t('Large title'), act('h1', () => heading(1)))}
+          {tool_('H2', t('Medium title'), act('h2', () => heading(2)))}
+          {tool_('H3', t('Small title'), act('h3', () => heading(3)))}
           <span className="sep" />
-          {tool_('•', t('List'), bullets)}
-          {tool_('1.', t('Numbered list'), numbers)}
-          {tool_(<span className="note-check-glyph" aria-hidden="true">✓</span>, t('Checklist'), checks)}
-          {tool_('❝', t('Quote'), quote)}
+          {tool_('•', t('List'), act('list', bullets))}
+          {tool_('1.', t('Numbered list'), act('numbered', numbers))}
+          {tool_(<span className="note-check-glyph" aria-hidden="true">✓</span>, t('Checklist'), act('checklist', checks))}
+          {tool_('❝', t('Quote'), act('quote', quote))}
           <span className="sep" />
-          {tool_(<IconCode size={15} />, t('Code'), code)}
-          {tool_(<IconLink size={15} />, t('Link (Ctrl+K)'), link)}
-          {tool_(TABLE_ICON, t('Table'), table)}
-          {tool_('—', t('Divider'), divider)}
+          {tool_(<IconCode size={15} />, t('Code'), act('codeBlock', code))}
+          {tool_(<IconLink size={15} />, t('Link (Ctrl+K)'), act('link', link))}
+          {tool_(TABLE_ICON, t('Table'), act('table', table))}
+          {tool_('—', t('Divider'), act('divider', divider))}
           {tool_(IMAGE_ICON, t('Image (paste or drop it too)'), () => picker.current?.click())}
-          {tool_('@', t('Mention a project file'), () => insert('@'))}
+          {tool_('@', t('Mention a project file'), act('mention', () => insert('@')))}
           <span className="statusbar-spacer" />
           <button type="button" className={`icon-btn note-ai-toggle${ai ? ' on' : ''}`} onClick={() => setAi((v) => !v)} aria-expanded={ai} title={t('Use this note with the AI')}>
             <IconPlay size={14} /> <span>{t('Use with the AI')}</span>
           </button>
           {mode === 'edit'
-            ? <button type="button" className="icon-btn" onClick={() => { setVisualOk(true); setMode('preview'); }} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
-            : <button type="button" className="icon-btn" onClick={() => setMode('edit')} title={t('Edit (Ctrl+E)')}><IconEdit size={17} /></button>}
+            ? <button type="button" className="icon-btn" onClick={() => setMode('preview')} title={t('Reading view (Ctrl+E)')}><IconEye size={17} /></button>
+            : <button type="button" className="icon-btn" onClick={() => setMode('edit')} title={t('Markdown source')}><IconEdit size={17} /></button>}
           <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => { void addImages(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
         </div>
 
@@ -595,16 +588,10 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
               )}
             </div>
           )
-            : visualOk ? (
-              <div className="note-visual" onClick={onPreviewClick}>
-                <VisualMarkdownEditor text={text} project={project ?? undefined} path={path ?? 'notes/note.md'} onChange={setText} onUnsupported={() => setVisualOk(false)} />
+            : (
+              <div className="note-visual">
+                <TipTapEditor ref={visual} bar={false} text={text} path={path ?? curPath ?? 'notes/note.md'} onChange={setText} />
               </div>
-            ) : (
-              <>
-                <p className="notice-bar" role="status">{t('This file contains formatting that needs Markdown source to edit safely.')}</p>
-                {/* HTML comes from the main process renderer, which escapes all markup from the note. */}
-                <MarkdownBody className="markdown note-preview" html={html} text={text} onChange={setText} onClick={onPreviewClick} />
-              </>
             )}
         </div>
         <footer className="modal-foot">

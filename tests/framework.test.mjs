@@ -277,6 +277,8 @@ test('markdown: deep lists, setext headings, rules and autolinks', () => {
   assert.doesNotMatch(markdownToHtml('![a](img.png)'), /<img/);
   assert.match(markdownToHtml('![a](img.png)', { image: () => 'data:image/png;base64,AA==' }), /<img alt="a" src="data:image\/png;base64,AA==">/);
   assert.doesNotMatch(markdownToHtml('![a](img.png)', { image: () => 'data:image/svg+xml;base64,AA==' }), /<img/);
+  assert.match(markdownToHtml('![a](data:image/png;base64,AA== "w=320 center")'), /<img alt="a" src="data:image\/png;base64,AA==" width="320" data-align="center">/);
+  assert.doesNotMatch(markdownToHtml('![a](data:image/png;base64,AA== "onerror=x")'), /<img/);
 });
 
 test('markdown diagrams stay escaped until the app draws them', () => {

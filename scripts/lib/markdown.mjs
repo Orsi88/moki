@@ -14,12 +14,18 @@ let resolveImage = null;
 function inline(text) {
   return unhide(escHtml(hide(text))
     // Relative images become data: URIs through the caller's resolver; the line below still accepts only raster data: URIs.
-    .replace(/!\[([^\]]*)\]\(([^)\s:]+)\)/g, (m, alt, src) => {
+    .replace(/!\[([^\]]*)\]\(([^)\s:]+)(?: &quot;((?:w=\d+(?: center| right)?)|center|right)&quot;)?\)/g, (m, alt, src, title) => {
       const uri = resolveImage?.(src.replace(/&amp;/g, '&'));
-      return uri ? `![${alt}](${uri})` : m;
+      if (!uri) return m;
+      return title ? `![${alt}](${uri} "${title}")` : `![${alt}](${uri})`;
     })
     // Only embedded raster images (Word previews); no remote or file images.
-    .replace(/!\[([^\]]*)\]\((data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+)\)/g, '<img alt="$1" src="$2">')
+    // A title is only the editor's size and alignment (w=400, center, right), never free text.
+    .replace(/!\[([^\]]*)\]\((data:image\/(?:png|jpeg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+)(?: &quot;((?:w=\d+(?: center| right)?)|center|right)&quot;)?\)/g, (_m, alt, src, title) => {
+      const width = title?.match(/w=(\d+)/)?.[1];
+      const align = title?.match(/(center|right)/)?.[1];
+      return `<img alt="${alt}" src="${src}"${width ? ` width="${width}"` : ''}${align ? ` data-align="${align}"` : ''}>`;
+    })
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')

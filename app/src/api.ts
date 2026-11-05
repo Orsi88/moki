@@ -172,7 +172,7 @@ export interface DocumentStyle {
 }
 export const DOCUMENT_FONTS = ['Calibri', 'Arial', 'Segoe UI', 'Helvetica', 'Verdana', 'Tahoma', 'Georgia', 'Times New Roman', 'Cambria', 'Garamond', 'Consolas'];
 
-export interface LaunchRequest { project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string; exclude?: string[]; trackingId?: string }
+export interface LaunchRequest { project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string; skill?: string; exclude?: string[]; trackingId?: string }
 export interface LaunchResult { opened: boolean; message?: string; copied?: boolean; prompt: string; upload?: string[]; bundleReady?: boolean; terminal?: TerminalRef }
 export interface TerminalRef { id: string; title: string }
 
@@ -243,7 +243,7 @@ export interface Bridge {
   onShowTerminal?(callback: (project: string, terminal: TerminalRef) => void): () => void;
   onOpenInMain?(callback: (project: string, path: string) => void): () => void;
   term?: { // absent in VS Code, where the AI tools open in VS Code's own terminals
-    create(tool: string): Promise<{ terminal?: TerminalRef; error?: string }>; // tool '' = the user's shell
+    create(tool: string, project?: string): Promise<{ terminal?: TerminalRef; error?: string }>; // tool '' = the user's shell; a project brings its plugins
     start(id: string, cols: number, rows: number, project: string): Promise<string>;
     input(id: string, data: string): void;
     resize(id: string, cols: number, rows: number): void;
@@ -329,12 +329,14 @@ export const api = {
   exportNote: (project: string, path: string, format: 'pdf' | 'md' | 'txt') => call<string | null>('exportNote', project, path, format),
   run: (project: string, runId: string) => call<RunState>('run', project, runId),
   inbox: (project: string) => call<InboxFile[]>('inbox', project),
-  importFiles: (project: string, paths: string[]) => call<{ saved: string[]; skipped: string[] }>('importFiles', project, paths),
+  importFiles: (project: string, paths: string[], into?: string) => call<{ saved: string[]; skipped: string[] }>('importFiles', project, paths, into),
+  moveEntry: (project: string, from: string, toDir: string) => call<string>('moveEntry', project, from, toDir),
   openRuns: (project: string) => call<OpenRun[]>('openRuns', project),
   activityRuns: (project: string) => call<ActivityRun[]>('activityRuns', project),
   openFolder: (project: string, path = '') => call<boolean>('openFolder', project, path),
   openExternal: (project: string, path: string) => call<boolean>('openExternal', project, path),
   createEntry: (project: string, parent: string, name: string, kind: 'file' | 'folder') => call<string>('createEntry', project, parent, name, kind),
+  deleteEntry: (project: string, path: string) => call<boolean>('deleteEntry', project, path),
   revealPath: (project: string, path: string) => call<boolean>('revealPath', project, path),
   copyPath: (project: string, path: string) => call<string>('copyPath', project, path),
   openWithApps: (project: string, path: string) => call<OpenWithApps>('openWithApps', project, path),

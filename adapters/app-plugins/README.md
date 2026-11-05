@@ -6,7 +6,7 @@ Plugins the desktop app loads **only in the sessions it opens** (`desktop/launch
 |---|---|---|---|
 | `ponytail/` | `--plugin-dir` (skills + hooks) | `-c developer_instructions` pointing to `ponytail/skills/ponytail/SKILL.md` | Node.js for the Claude hooks |
 | `rtk/` | `--plugin-dir` (PreToolUse hook `rtk hook claude`) | `-c developer_instructions` asking for the `rtk` prefix | the `rtk` CLI on the PATH |
-| `caveman/` | `--plugin-dir` (skills + hooks) | `-c developer_instructions` pointing to `caveman/skills/caveman/SKILL.md` | Node.js for the Claude hooks; **only in projects that turn it on** (Settings → Skills → Plugins, saved as `"plugins": ["caveman"]` in `project.json`) |
+| `caveman/` | `--plugin-dir` (skills + hooks) | `-c developer_instructions` pointing to `caveman/skills/caveman/SKILL.md` | Node.js for the Claude hooks; **only in projects that turn it on** (the Skill tab of the project panel, or Settings → Skills → Plugins, saved as `"plugins": ["caveman"]` in `project.json`) |
 | `superpowers/` | `--plugin-dir` (skills + SessionStart hook) | `-c developer_instructions` pointing to `superpowers/skills/using-superpowers/SKILL.md` | bash for the Claude hook (Git Bash on Windows; without it the skills load but the hook is skipped); **only in projects that turn it on** (`"plugins": ["superpowers"]`) |
 
 A plugin whose requirement is missing is skipped. ponytail and rtk are always on; caveman and superpowers are per project (`PROJECT_PLUGINS` in `scripts/lib/core.ts`).

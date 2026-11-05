@@ -519,9 +519,10 @@ export interface Request {
   excluded?: string[]; // this project's context files the user left out of the activity
   root?: string; // the framework whose activities/ and workspace library hold the activity (tests use another)
   workspace?: string; // workspaceLabel: "workspace", or the folder of another workspace
+  skill?: string; // the skill named by the project panel's "Use a skill" start
 }
 
-export function buildPrompt({ project, activity, files = [], note = '', run = '', language = 'English', agent, repository = '', skills = [], agents = [], description = '', globalSkills = [], available, shared = [], excluded = [], root = ROOT, workspace = 'workspace' }: Request): string {
+export function buildPrompt({ project, activity, files = [], note = '', run = '', language = 'English', agent, repository = '', skills = [], agents = [], description = '', globalSkills = [], available, shared = [], excluded = [], root = ROOT, workspace = 'workspace', skill = '' }: Request): string {
   const list = files.length ? files.join(', ') : '';
   const parts = [`Follow AGENTS.md. Project: ${project}.`];
   if (workspace !== 'workspace') {
@@ -555,6 +556,12 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
         + ` Then write the plan to ${dir}/proposed-updates.md and the recommendation to ${dir}/plan.json, recommending only these names - skills: ${names(available?.skills)}; agents: ${names(available?.agents)}; skills I still need go in searchSkills as search terms.`
         + ' Stop and tell me to review the plan in the app. Do not create proposed folders or context files, install or link anything before I approve it there.');
       if (list) parts.push(`Documents to use: ${list}.`);
+      break;
+    }
+    case 'skill': {
+      const name = skill.trim();
+      if (!name) throw new Error('Using a skill needs its name.');
+      parts.push(`Use the ${name} skill: read skills/${name}/SKILL.md and follow its procedure and approval gates.`);
       break;
     }
     case 'talk':

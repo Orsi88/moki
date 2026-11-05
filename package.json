@@ -1,6 +1,6 @@
 {
   "name": "quality-agents",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Portable, vendor-neutral Agent Skills for software quality engineering.",
   "license": "MIT",
@@ -42,6 +42,15 @@
   "devDependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
     "@playwright/test": "1.64.1",
+    "@tiptap/extension-image": "^3.33.0",
+    "@tiptap/extension-link": "^3.33.0",
+    "@tiptap/extension-table": "^3.33.0",
+    "@tiptap/extension-task-item": "^3.33.0",
+    "@tiptap/extension-task-list": "^3.33.0",
+    "@tiptap/markdown": "^3.33.0",
+    "@tiptap/pm": "^3.33.0",
+    "@tiptap/react": "^3.33.0",
+    "@tiptap/starter-kit": "^3.33.0",
     "@types/node": "22.18.12",
     "@types/react": "19.1.17",
     "@types/react-dom": "19.1.11",

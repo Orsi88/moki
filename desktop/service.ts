@@ -3,7 +3,7 @@
 // folder, choices come from fixed lists. It reuses the shared core — no QA
 // logic lives here; the AI tools do the QA work following the skills.
 
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -105,6 +105,7 @@ export type FileContent =
 
 export interface LaunchRequest {
   project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string;
+  skill?: string; // activity "skill": the skill the request names
   exclude?: string[]; // context files (this project's or shared through tags) to leave out
   trackingId?: string; // optional UI request identity, never a run status
 }
@@ -139,6 +140,7 @@ const BLANK_FILES: Record<string, () => Uint8Array> = { '.xlsx': () => blankXlsx
 export const LINKED = '@folder'; // the linked folder in the paths of a project (see projectPath)
 const SKIP_LINKED = new Set(['node_modules', '.git', '.moki-backup', 'dist', 'build', '__pycache__']); // not listed from a linked folder
 const TOP_ORDER = ['context', 'inbox', 'runs', 'notes', PROPOSALS, 'proposed-updates.md', 'activity-log.md', 'project.json', 'README.md', 'temporary'];
+const FIXED_FOLDERS = new Set(['context', 'inbox', 'runs', 'notes', 'temporary']);
 
 const posix = (p: string): string => p.split(sep).join('/');
 const isWithin = (dir: string, p: string): boolean => { const r = relative(dir, p); return r === '' || (!r.startsWith('..') && !isAbsolute(r)); };
@@ -186,6 +188,21 @@ export function createService(root: string, deps: Deps) {
     const folder = projectRepository(project, root);
     if (!folder || !existsSync(folder)) throw new ServiceError('This project has no linked folder.');
     return inside(folder, r.slice(LINKED.length + 1));
+  };
+  // Execution files belong to the app. The linked folder is the repository, shown live, not a drop target.
+  const runsFolder = (rel: string) => rel === 'runs' || rel.startsWith('runs/');
+  const sealedFolder = (rel: string) => rel === LINKED || rel.startsWith(`${LINKED}/`) || rel.startsWith('.');
+  const uniqueName = (folder: string, dest: string, fileName: string) => {
+    const ext = extname(fileName);
+    const stem = basename(fileName, ext);
+    let name = fileName;
+    for (let i = 1; existsSync(join(folder, name)); i++) name = `${stem}-${i}${ext}`;
+    return dest ? `${dest}/${name}` : name;
+  };
+  const copyInto = (project: string, source: string, dest: string) => {
+    const rel = uniqueName(projectPath(project, dest), dest, basename(source));
+    copyFileSync(source, projectPath(project, rel));
+    return rel;
   };
 
   // An Excel, Word or PDF file of the project, and the system's "Open with".
@@ -418,6 +435,7 @@ export function createService(root: string, deps: Deps) {
 
   function tree(project: string): TreeNode[] {
     const base = projectDir(project);
+    for (const name of FIXED_FOLDERS) mkdirSync(join(base, name), { recursive: true });
     const runs = new Map(listRuns(project, root).map((r) => [r.id, r]));
     let count = 0;
     const walk = (dir: string, depth: number, from = base, prefix = ''): TreeNode[] => {
@@ -1452,13 +1470,18 @@ export function createService(root: string, deps: Deps) {
     inbox: (project: string) => inboxFiles(projectDir(project)),
 
     // Files dropped on the workspace are copied into the project inbox and stay there.
-    // Folders and anything that is not a real file are skipped; nothing outside the project is written.
-    importFiles: (project: string, paths: unknown) => {
+    // A drop on a folder copies them there instead. Folders and anything that is not a real file are skipped.
+    importFiles: (project: string, paths: unknown, into?: unknown) => {
       projectDir(project);
       if (!Array.isArray(paths) || paths.some((p) => typeof p !== 'string')) throw new ServiceError('Drop files from your computer.');
       const list = paths as string[];
       if (!list.length) throw new ServiceError('Drop files from your computer.');
       if (list.length > 40) throw new ServiceError('Drop up to 40 files.');
+      const dest = String(into ?? 'inbox').replace(/\\/g, '/').replace(/\/+$/, '') || 'inbox';
+      if (runsFolder(dest)) throw new ServiceError('Activities keep their own structure. Create it in another folder.');
+      if (sealedFolder(dest)) throw new ServiceError('This file stays where it is.');
+      const folder = projectPath(project, dest);
+      if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new ServiceError('Folder not found.');
       const saved: string[] = [];
       const skipped: string[] = [];
       for (const source of list) {
@@ -1466,10 +1489,34 @@ export function createService(root: string, deps: Deps) {
         if (!isAbsolute(source) || !existsSync(source)) { skipped.push(name); continue; }
         const st = statSync(source);
         if (!st.isFile() || st.size > 200 * 1024 * 1024) { skipped.push(name); continue; }
-        saved.push(`inbox/${basename(copyToInbox(project, source, root))}`);
+        if (dest === 'inbox') saved.push(`inbox/${basename(copyToInbox(project, source, root))}`);
+        else saved.push(copyInto(project, source, dest));
       }
       if (!saved.length) throw new ServiceError('Nothing was added. Drop files from your computer, not folders.');
       return { saved, skipped };
+    },
+
+    // A file dragged from one project folder onto another. Execution files, project.json and the linked folder stay put.
+    moveEntry: (project: string, from: unknown, toDir: unknown) => {
+      const source = String(from ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+      const dest = String(toDir ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+      if (!source || source === 'project.json' || source === 'tags.json') throw new ServiceError('This file stays where it is.');
+      if (runsFolder(source) || runsFolder(dest)) throw new ServiceError('Activities keep their own structure. Create it in another folder.');
+      if (sealedFolder(source) || sealedFolder(dest)) throw new ServiceError('This file stays where it is.');
+      const fromPath = projectPath(project, source);
+      if (!existsSync(fromPath) || !statSync(fromPath).isFile()) throw new ServiceError('File not found.');
+      const parent = source.includes('/') ? source.slice(0, source.lastIndexOf('/')) : '';
+      if (parent === dest) return source;
+      const folder = projectPath(project, dest);
+      if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new ServiceError('Folder not found.');
+      const destRel = uniqueName(folder, dest, basename(source));
+      const tags = fileTags(project, root)[source];
+      renameSync(fromPath, projectPath(project, destRel));
+      if (tags?.length) {
+        setFileTags(project, destRel, tags, root);
+        setFileTags(project, source, [], root);
+      }
+      return destRel;
     },
 
     openRuns: (project: string) => {
@@ -1512,6 +1559,21 @@ export function createService(root: string, deps: Deps) {
       if (existsSync(target)) throw new ServiceError('A file or folder with this name already exists here.');
       if (kind === 'file') writeFileSync(target, BLANK_FILES[extname(entry).toLowerCase()]?.() ?? '', { flag: 'wx' }); else mkdirSync(target);
       return path;
+    },
+
+    // A file or folder goes to the trash. A fixed project folder is emptied and stays (the tree
+    // recreates it if it is missing). project.json and the linked folder itself stay.
+    deleteEntry: async (project: string, rel: unknown) => {
+      const path = String(rel ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
+      if (!path || path === 'project.json' || path === LINKED) throw new ServiceError('This file stays. Delete the project from the project list.');
+      const target = projectPath(project, path);
+      if (!existsSync(target)) throw new ServiceError('File not found.');
+      if (FIXED_FOLDERS.has(path) && statSync(target).isDirectory()) {
+        for (const name of readdirSync(target)) await trash(join(target, name));
+        return true;
+      }
+      await trash(target);
+      return true;
     },
 
     // Where a file or folder of the project is on this computer: shown selected in the file manager, or its full path (to copy).
@@ -1948,6 +2010,8 @@ export function createService(root: string, deps: Deps) {
       const def = listActivities(root, project).find((a) => a.id === activity); // only the activities this project sees
       if (!def) throw new ServiceError('Unknown activity.');
       if (activity === 'talk' && !req.agent) throw new ServiceError('Choose the agent to talk with.');
+      const skillName = activity === 'skill' ? String(req.skill ?? '').trim() : '';
+      if (activity === 'skill' && !isUsable(skillName, root)) throw new ServiceError('Choose a skill that can run.');
       if (def.target.kind === 'operation') throw new ServiceError(`The activity "${def.label}" starts the operation ${def.target.name}: start it from the Operations panel.`);
       if (!activityInfo(def, project, []).available) throw new ServiceError(`The activity "${def.label}" is not available yet.`);
       const tool = String(req.tool ?? '');
@@ -1993,7 +2057,7 @@ export function createService(root: string, deps: Deps) {
       const request = buildPrompt({ project, activity, root, files: readableInputs(files, root), note, run, language, agent, repository: projectRepository(project, root), shared, excluded, workspace: workspaceLabel(root),
         skills: installedSkills(project, root), agents: installedAgents(project, root),
         description: cleanPrompt(projectSummary(project, root).description).slice(0, 2000), globalSkills: linkedGlobalSkills(project),
-        available: activity === 'plan' ? { skills: [...linkableSkills()].sort(), agents: listAgents(root).filter(isUsableAgent).map((a) => a.name) } : undefined });
+        available: activity === 'plan' ? { skills: [...linkableSkills()].sort(), agents: listAgents(root).filter(isUsableAgent).map((a) => a.name) } : undefined, skill: skillName });
       const prompt = trackingId ? `${request} If this request creates a run, use the slug moki-${trackingId} when creating it, so Moki can identify it. Do not create a run solely for tracking; follow the skill's procedure and approval gates.` : request;
       const t = TOOLS[tool];
       if (t.print || t.chat) {

@@ -34,7 +34,7 @@ const text = (fields: Record<string, string>, body = '') => ['---', ...Object.en
 
 test('the app\'s actions and the activities that come with Moki: one list, the same ids as before', () => {
   const ids = listActivities(root).map((a) => `${a.source}:${a.id}`);
-  for (const id of ['open', 'context', 'setup', 'plan', 'resume', 'talk']) assert.ok(ids.includes(`moki:${id}`), id);
+  for (const id of ['open', 'context', 'setup', 'plan', 'resume', 'talk', 'skill']) assert.ok(ids.includes(`moki:${id}`), id);
   for (const id of ['review', 'tests', 'review-then-tests', 'failure', 'evidence', 'automation']) assert.ok(ids.includes(`builtin:${id}`), id);
   assert.ok(!ids.some((i) => i.endsWith(':README')), 'the README of activities/ is not an activity');
   assert.deepEqual(getActivity('review-then-tests', root)?.target, { kind: 'workflow', name: 'requirements-to-tests' });
@@ -130,4 +130,14 @@ test('launching: "talk" is a conversation with one agent, never listed where an 
   assert.doesNotMatch(prompt, /Ask me what I have in mind/);
   svc.launch({ project: 'acme', activity: 'talk', tool: 'claude', files: [], note: '', language: 'English', agent: 'test-designer' } as never);
   assert.match(prompts.at(-1) ?? '', /Ask me what I have in mind\./);
+});
+
+test('launching: "skill" names one usable skill and stays out of the activity list', () => {
+  prompts.length = 0;
+  assert.ok(listActivities(root).some((a) => a.id === 'skill' && a.source === 'moki'));
+  assert.ok(!svc.activities('acme').activities.some((a) => a.id === 'skill'), 'not offered as an activity');
+  assert.throws(() => svc.launch({ project: 'acme', activity: 'skill', tool: 'claude', files: [], note: '', language: 'English' } as never), /Choose a skill/);
+  assert.throws(() => svc.launch({ project: 'acme', activity: 'skill', tool: 'claude', files: [], note: '', language: 'English', skill: 'documentation' } as never), /Choose a skill/);
+  svc.launch({ project: 'acme', activity: 'skill', tool: 'claude', files: [], note: '', language: 'English', skill: 'test-design' } as never);
+  assert.match(prompts.at(-1) ?? '', /Use the test-design skill: read skills\/test-design\/SKILL\.md and follow its procedure and approval gates\./);
 });

@@ -48,10 +48,12 @@ export const MOKI_ACTIVITIES: ActivityDef[] = [
   { id: 'resume', label: 'Resume a run', description: '', target: { kind: 'moki', name: 'qa-orchestrator' }, files: 'none' },
   // "Call an agent" in the project panel: a conversation with one agent, not an activity (never in the activity lists: PICKABLE).
   { id: 'talk', label: 'Talk with an agent', description: 'a conversation about an idea, no activity', target: { kind: 'moki', name: 'project-context' }, files: 'none' },
+  // "Use a skill" in the project panel: the skill and the AI, not an activity in the activity list.
+  { id: 'skill', label: 'Use a skill', description: 'follow one skill', target: { kind: 'moki', name: 'project-context' }, files: 'none' },
 ].map((a) => ({ ...a, category: 'Moki', note: '', tags: [], template: '', source: 'moki' as const })) as ActivityDef[];
 export const isMokiActivity = (id: string): boolean => MOKI_ACTIVITIES.some((a) => a.id === id);
-// Activities offered where one is picked (the app, the IDE, the terminal menu); "talk" starts only from "Call an agent".
-export const isPickable = (a: { id: string }): boolean => a.id !== 'talk';
+// Activities offered where one is picked (the app, the IDE, the terminal menu). "talk" and "skill" start only from the project panel.
+export const isPickable = (a: { id: string }): boolean => a.id !== 'talk' && a.id !== 'skill';
 
 export const builtinDir = (root = ROOT): string => join(root, 'activities');
 export const libraryDir = (root = ROOT): string => join(workspaceDir(root), 'library', 'activities');

@@ -17,6 +17,20 @@ function sceneOf(source: string) {
   return restore({ elements: parsed.elements as never, appState: parsed.appState ?? {}, files: parsed.files ?? ({} as never) }, null, null);
 }
 
+export async function paintDiagram(host: HTMLElement, lang: DiagramLang, source: string) {
+  if (lang === 'excalidraw') {
+    await drawExcalidraw(host, source);
+    return;
+  }
+  const mermaid = (await import('mermaid')).default;
+  const dark = document.documentElement.dataset.theme !== 'light';
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, theme: dark ? 'dark' : 'neutral' });
+  const id = `moki${Math.random().toString(36).slice(2, 10)}`;
+  const { svg } = await mermaid.render(id, source);
+  host.innerHTML = svg;
+  host.querySelectorAll('script').forEach((node) => node.remove());
+}
+
 async function drawExcalidraw(host: HTMLElement, source: string) {
   const restored = sceneOf(source);
   const paper = String(restored.appState.viewBackgroundColor || '');
@@ -56,6 +70,23 @@ function DrawingEditor({ source, onSave, onClose }: { source: string; onSave: (b
       </div>
     </div>
   );
+}
+
+// Ctrl + scroll over the card. The same range as the +/- buttons. A passive
+// listener cannot cancel the browser's own zoom, so this one is not passive.
+export function bindDiagramZoom(host: HTMLElement): () => void {
+  let zoom = 1;
+  host.style.setProperty('--diagram-zoom', '1');
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    const next = Math.min(3, Math.max(0.25, Math.round((zoom + (event.deltaY > 0 ? -0.15 : 0.15)) * 100) / 100));
+    if (next === zoom) return;
+    zoom = next;
+    host.style.setProperty('--diagram-zoom', String(zoom));
+  };
+  host.addEventListener('wheel', onWheel, { passive: false });
+  return () => host.removeEventListener('wheel', onWheel);
 }
 
 export function openDrawing(source: string, onSave: (body: string) => void) {

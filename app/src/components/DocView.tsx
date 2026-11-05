@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { api, type FileContent, type OpenWithApps } from '../api';
 import { t } from '../i18n';
-import { IconChat, IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconMore, IconTag } from './Icons';
+import { IconChat, IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconMore, IconRefresh, IconTag } from './Icons';
 import { FileIcon } from '../icons';
 import { PdfDoc } from './PdfDoc';
 import { useMarkdownEditing } from './useMarkdownEditing';
@@ -9,7 +9,7 @@ import { MarkdownBody } from './MarkdownBody';
 import { MarkdownComments } from './MarkdownComments';
 import { readComments } from '../md-comments';
 import { recall, remember } from '../prefs';
-import { VisualMarkdownEditor } from './VisualMarkdownEditor';
+import { TipTapEditor } from './TipTapEditor';
 import { DiagramSourceEditor } from './DiagramSourceEditor';
 
 interface Props {
@@ -23,6 +23,7 @@ interface Props {
   onMode: (mode: 'preview' | 'edit') => void;
   onSave: () => void;
   onOpenExternal: () => void;
+  onReload: () => void;
   onLink: (href: string) => void;
   onPdfSaved?: (path: string) => void; // a PDF change was saved, to this file (the same one, or its -edited copy)
   onCommit?: (text: string) => void; // a .md file's new text, saved at once (its comments: MarkdownComments)
@@ -153,7 +154,7 @@ function MarkdownEditor({ value, onChange }: { value: string; onChange: (text: s
   );
 }
 
-export function DocView({ content, project, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onLink, onPdfSaved, onCommit, openWith, tags }: Props) {
+export function DocView({ content, project, mode, draft, dirty, saving, onDraft, onMode, onSave, onOpenExternal, onReload, onLink, onPdfSaved, onCommit, openWith, tags }: Props) {
   const editable = (content.kind === 'markdown' || content.kind === 'text') && content.editable;
   const crumbs = content.path.split('/');
   const savedHtml = content.kind === 'markdown' ? content.html : '';
@@ -162,8 +163,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
   const [keep, setKeep] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [sourceMode, setSourceMode] = useState(false);
-  const [visualUnsupported, setVisualUnsupported] = useState(false);
-  useEffect(() => { setTagsOpen(false); setSourceMode(false); setVisualUnsupported(false); }, [content.path]);
+  useEffect(() => { setTagsOpen(false); setSourceMode(false); }, [content.path]);
   // The comment column of a .md file, opened or closed from the bar (remembered), as for a PDF.
   const [commentsOff, setCommentsOffState] = useState(() => recall('qa-md-comments') === 'closed');
   const setCommentsOff = (off: boolean) => { setCommentsOffState(off); remember('qa-md-comments', off ? 'closed' : 'open'); };
@@ -212,7 +212,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
           )}
           {content.kind === 'markdown' && mode === 'edit' && <button type="button" className={`icon-btn${sourceMode ? ' on' : ''}`}
             title={sourceMode ? t('Visual editor') : t('Markdown source')} aria-label={sourceMode ? t('Visual editor') : t('Markdown source')}
-            onClick={() => { setVisualUnsupported(false); setSourceMode((v) => !v); }}><IconCode size={16} /></button>}
+            onClick={() => setSourceMode((v) => !v)}><IconCode size={16} /></button>}
           {commentCount > 0 && mode === 'preview' && (
             <button type="button" className={`btn btn-ghost btn-sm pdf-rail-toggle${commentsOff ? '' : ' on'}`} aria-pressed={!commentsOff}
               title={commentsOff ? t('Show the comments beside the text') : t('Hide the comments: the text gets the room')} aria-label={`${t('Comments')} (${commentCount})`}
@@ -221,6 +221,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
           {editable && (dirty || saving) && (
             <button type="button" className="btn btn-sm" onClick={onSave} disabled={saving}>{saving ? t('Saving…') : t('Save')}</button>
           )}
+          <button type="button" className="icon-btn" onClick={onReload} title={t('Reload this file')} aria-label={t('Reload this file')}><IconRefresh size={16} /></button>
           <button type="button" className="icon-btn" onClick={onOpenExternal} title={openTitle}><IconExternal size={17} /></button>
           {openWith && OPEN_WITH.test(content.path) && (
             <button type="button" className="icon-btn" onClick={showOpenWith} title={t('Open with…')} aria-label={t('Open with…')} aria-haspopup="menu"><IconMore size={17} /></button>
@@ -238,8 +239,8 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
             : <MarkdownBody className="markdown" html={html} text={draft} onChange={content.editable && onCommit ? onCommit : undefined} onClick={onClick} />
         )}
         {content.kind === 'markdown' && mode === 'edit' && (content.editable
-          ? sourceMode ? <>{visualUnsupported && <p className="notice-bar" role="status">{t('This file contains formatting that needs Markdown source to edit safely.')}</p>}<MarkdownEditor value={draft} onChange={onDraft} /></>
-            : <VisualMarkdownEditor key={content.path} text={draft} project={project} path={content.path} onChange={onDraft} onUnsupported={() => { setVisualUnsupported(true); setSourceMode(true); }} />
+          ? sourceMode ? <MarkdownEditor value={draft} onChange={onDraft} />
+            : <TipTapEditor key={content.path} text={draft} path={content.path} onChange={onDraft} />
           : <pre className="plain">{content.text}</pre>)}
         {content.kind === 'text' && (content.editable
           ? <textarea className="editor" spellCheck value={draft} onChange={(e) => onDraft(e.target.value)} />
