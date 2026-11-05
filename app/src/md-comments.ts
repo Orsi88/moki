@@ -40,6 +40,36 @@ function write(body: string, comments: MdComment[]): string {
   return `${base}\n\n<!-- moki-comments\n${json}\n-->\n`;
 }
 
+// The formatted editor cannot keep an HTML comment as itself. These stand in for the
+// marks while it parses, and the serializer writes the HTML comments back.
+export const COMMENT_OPEN = '\uE200';
+export const COMMENT_MID = '\uE201';
+export const COMMENT_CLOSE = '\uE202';
+export const COMMENT_END = '\uE203';
+
+// Marks become editor tokens. A comment that crosses a blank line is one mark per
+// paragraph, still the same comment. Code fences are left untouched.
+export function encodeCommentMarks(body: string): string {
+  const pair = /<!--c:([a-z0-9]+)-->((?:(?!<!--\/?c:)[\s\S])*?)<!--\/c:\1-->/g;
+  const encode = (part: string) => {
+    let current = part;
+    for (let i = 0; i < 20; i++) {
+      const next = current.replace(pair, (_m, id: string, inner: string) => inner.split(/(\n[ \t]*\n)/).map((piece) =>
+        /^\n[ \t]*\n$/.test(piece) || piece.length === 0 ? piece : `${COMMENT_OPEN}${id}${COMMENT_MID}${piece}${COMMENT_CLOSE}${id}${COMMENT_END}`).join(''));
+      if (next === current) break;
+      current = next;
+    }
+    return current;
+  };
+  return body.split(/(```[\s\S]*?```)/g).map((part, i) => (i % 2 === 1 ? part : encode(part))).join('');
+}
+
+// The editor's markdown, plus the comments whose marks are still in it.
+export function restoreComments(markdown: string, comments: MdComment[]): string {
+  if (!comments.length) return markdown;
+  return write(markdown, comments.filter((c) => markdown.includes(open(c.id))));
+}
+
 // A new id, not used in this file.
 export function newId(comments: MdComment[], seed = Date.now()): string {
   let id = seed.toString(36);

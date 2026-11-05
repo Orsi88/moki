@@ -436,5 +436,5 @@ export function describeRun(id: string): { date: string; title: string } {
 
 export const statusLabel = (status: string): string => ({
   'in-progress': t('In progress'), 'awaiting-approval': t('Waiting for your approval'), 'awaiting-input': t('Waiting for input'),
-  blocked: t('Blocked'), paused: t('Paused'), completed: t('Completed'), cancelled: t('Cancelled'),
+  blocked: t('Blocked'), paused: t('Paused'), completed: t('Completed'), cancelled: t('Cancelled'), unreadable: t('Unreadable'),
 } as Record<string, string>)[status] ?? status;

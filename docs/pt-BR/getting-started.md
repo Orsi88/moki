@@ -4,7 +4,7 @@
 
 ### Windows
 
-1. Baixe o [Moki.Setup.0.4.1.exe](https://github.com/Orsi88/moki/releases/download/v0.4.1/Moki.Setup.0.4.1.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/moki/releases)).
+1. Baixe o [Moki.Setup.0.4.2.exe](https://github.com/Orsi88/moki/releases/download/v0.4.2/Moki.Setup.0.4.2.exe) (ou o arquivo mais recente em [Releases](https://github.com/Orsi88/moki/releases)).
 2. Se o Windows disser que protegeu o computador, escolha **Mais informações → Executar assim mesmo**. O instalador ainda não tem assinatura digital.
 3. Conclua. Um atalho **Moki** aparece na área de trabalho e no menu Iniciar.
 

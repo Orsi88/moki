@@ -13,6 +13,8 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
 import { EXCALIDRAW_STARTER, MERMAID_STARTER } from '../diagram-source';
 import { t } from '../i18n';
+import { encodeCommentMarks, readComments, restoreComments, type MdComment } from '../md-comments';
+import { MdCommentMark } from '../md-comment-mark';
 import { DiagramFence } from './DiagramFence';
 import { MokiCodeBlock } from './CodeBlockCard';
 
@@ -288,6 +290,14 @@ const matchesOf = (query: string) => SLASH.filter((c) => fold(`${t(c.label)} ${c
 export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEditor({ text, path, onChange, bar = true }, ref) {
   const change = useRef(onChange);
   change.current = onChange;
+  // The comment list is not part of the editor document. Marks stay in the text;
+  // this puts the list back on every change, and drops a comment whose words were deleted.
+  const comments = useRef<MdComment[]>(readComments(text).comments);
+  const restore = (markdown: string) => {
+    const next = restoreComments(markdown, comments.current);
+    comments.current = readComments(next).comments;
+    return next;
+  };
   const editorRef = useRef<Editor | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const seen = useRef(text);
@@ -341,9 +351,10 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
       TaskList,
       TaskItem.configure({ nested: true, HTMLAttributes: { class: 'task-item' } }),
       DiagramFence,
+      MdCommentMark,
       Markdown,
     ],
-    content: text,
+    content: encodeCommentMarks(readComments(text).body),
     contentType: 'markdown',
     editorProps: {
       attributes: { class: 'tiptap-body', spellcheck: 'true' },
@@ -393,12 +404,12 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
         return false;
       },
     },
-    onCreate: ({ editor: current }) => { seen.current = current.getMarkdown(); },
+    onCreate: ({ editor: current }) => { seen.current = restore(current.getMarkdown()); },
     onSelectionUpdate: ({ editor: current }) => { syncRef.current(current); },
     onUpdate: ({ editor: current, transaction }) => {
       syncRef.current(current);
       if (!transaction.docChanged) return;
-      const next = current.getMarkdown();
+      const next = restore(current.getMarkdown());
       if (next === seen.current) return;
       seen.current = next;
       change.current(next);
@@ -414,8 +425,10 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
   // A reload (or the AI writing the file) replaces the document. Typing already updated `seen`.
   useEffect(() => {
     if (!editor || text === seen.current) return;
+    const read = readComments(text);
+    comments.current = read.comments;
     seen.current = text;
-    editor.commands.setContent(text, { contentType: 'markdown', emitUpdate: false });
+    editor.commands.setContent(encodeCommentMarks(read.body), { contentType: 'markdown', emitUpdate: false });
   }, [editor, text]);
 
   if (!editor) return null;

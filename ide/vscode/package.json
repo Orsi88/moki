@@ -2,7 +2,7 @@
   "name": "moki",
   "displayName": "Moki",
   "description": "Moki light: start QA activities, use your project's agents, choose the context and follow the runs of your Moki project, with Claude Code or the chat of VS Code, and Moki's MCP servers.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "orsi88",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/Orsi88/moki" },

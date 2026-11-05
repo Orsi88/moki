@@ -177,7 +177,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
       ...(agents.length && !fromPanel ? [{ step: 'agent' as StepKey, label: t('Who does it'), value: agentLabel }] : []),
     ]),
     { step: 'details', label: t('Notes'), value: note.trim() || t('None') },
-    { step: 'details', label: t('Conversation language'), value: t(language) },
+    ...(resume ? [] : [{ step: 'details' as StepKey, label: t('Conversation language'), value: t(language) }]),
     ...(fromPanel ? [] : [{ step: 'tool' as StepKey, label: t('AI tool'), value: selectedTool ? t(selectedTool.label) : '—' }]),
   ];
 
@@ -288,10 +288,12 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onAc
           {step === 'details' && (
             <>
               <textarea rows={4} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} placeholder={current?.note || t('e.g. focus on permissions')} autoFocus />
-              <label className="field inline">
-                <span className="label">{t('The AI should talk to me in')}</span>
-                <select value={language} onChange={(e) => setLanguage(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{t(l)}</option>)}</select>
-              </label>
+              {!resume && (
+                <label className="field inline">
+                  <span className="label">{t('The AI should talk to me in')}</span>
+                  <select value={language} onChange={(e) => setLanguage(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{t(l)}</option>)}</select>
+                </label>
+              )}
             </>
           )}
 

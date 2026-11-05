@@ -483,6 +483,7 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .tiptap-wrap .ProseMirror th { background: var(--bg-2); font-weight: 600; text-align: left; }
 .tiptap-wrap .ProseMirror td p, .tiptap-wrap .ProseMirror th p { margin: 0; }
 .tiptap-wrap .ProseMirror a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.tiptap-wrap .ProseMirror span[data-md-comment] { background: color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 2px; }
 .link-bubble { flex-direction: column; align-items: stretch; gap: 4px; }
 .link-bubble .link-row { display: flex; align-items: center; gap: 6px; }
 .link-bubble .link-row > span { flex: 0 0 auto; font-size: 0.75rem; color: var(--muted); }
@@ -1133,10 +1134,15 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .pp-needs h3 { color: var(--warn); }
 .pp-needs .pp-runs li { display: flex; align-items: center; gap: 2px; }
 .pp-needs .pp-runs li > button:first-child { flex: 1; min-width: 0; }
-.pp-runs .pp-resume {
-  display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; border-radius: 5px; color: var(--accent);
+.pp-runs button.pp-resume {
+  display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 26px; margin-right: 2px; padding: 0;
+  border: 0; border-radius: 50%; color: #b79cf0; background: transparent;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
-.pp-runs .pp-resume:hover { background: var(--accent-soft); }
+.pp-runs button.pp-resume:hover,
+.pp-runs button.pp-resume:focus-visible {
+  color: #fff; background: #8d6bc9; box-shadow: 0 0 0 4px rgb(141 107 201 / 0.28); transform: scale(1.08); outline: none;
+}
 
 /* Assistant card: "what to do", then "in" (the tool), then start */
 .pp-field { display: flex; flex-direction: column; gap: 4px; }
