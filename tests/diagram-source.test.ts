@@ -5,7 +5,7 @@ import { joinDiagramFences, joinSource, splitDiagramFences, splitSource, takeDia
 test('a closed drawing or diagram folds out of the text and joins back', () => {
   const md = 'antes\n\n```excalidraw\n{"type":"excalidraw"}\n```\n\ndepois\n```mermaid\nflowchart LR\n  A --> B\n```\n';
   const parts = splitDiagramFences(md);
-  assert.deepEqual(parts.map((part) => part.kind === 'text' ? part.text : part.lang), ['antes\n\n', 'excalidraw', '\n\ndepois\n', 'mermaid', '\n']);
+  assert.deepEqual(parts.map((part) => part.kind === 'text' ? part.text : part.kind === 'diagram' ? part.lang : part.kind), ['antes\n\n', 'excalidraw', '\n\ndepois\n', 'mermaid', '\n']);
   assert.equal(joinDiagramFences(parts), md);
 });
 
