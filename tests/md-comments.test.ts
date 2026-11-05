@@ -1,7 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addComment, colorComment, editComment, findInSource, readComments, removeComment, replyComment } from '../app/src/md-comments.ts';
+import { MarkdownManager } from '@tiptap/markdown';
+import { StarterKit } from '@tiptap/starter-kit';
+import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table';
+import { addComment, colorComment, editComment, encodeCommentMarks, findInSource, readComments, removeComment, replyComment, restoreComments } from '../app/src/md-comments.ts';
+import { MdCommentMark } from '../app/src/md-comment-mark.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
+
+// The same path the formatted editor uses: marks in, markdown out, comment list put back.
+const roundTrip = (fileText: string, edit?: (markdown: string) => string) => {
+  const read = readComments(fileText);
+  const manager = new MarkdownManager({ extensions: [StarterKit, Table, TableRow, TableHeader, TableCell, MdCommentMark] });
+  const markdown = manager.serialize(manager.parse(encodeCommentMarks(read.body)));
+  return restoreComments(edit ? edit(markdown) : markdown, read.comments);
+};
 
 const at = '2026-11-01T10:00:00.000Z';
 
@@ -47,4 +59,20 @@ test('comment colors persist across edits and replies, with old comments unchang
   assert.deepEqual(readComments(text).comments[0], { id: 'a', author: 'ana', at, text: 'updated', replies: [{ author: 'bia', at, text: 'reply' }], color: 'green' });
   assert.equal(markdownToHtml(text), '<p>Hello world.</p>');
   assert.equal(removeComment(text, 'a'), 'Hello world.\n');
+});
+
+test('the formatted editor keeps a comment when the text around it changes', () => {
+  const src = 'The password expires in 30 days.\n';
+  const { text } = addComment(src, 13, 20, { author: 'ana', at, text: 'soon' }, 'k1');
+  const kept = roundTrip(text, (markdown) => markdown.replace('expires', 'expired'));
+  assert.match(kept, /<!--c:k1-->expired<!--\/c:k1-->/);
+  assert.equal(readComments(kept).comments[0].text, 'soon');
+  const gone = roundTrip(text, (markdown) => markdown.replace(/<!--c:k1-->expired<!--\/c:k1-->|<!--c:k1-->expires<!--\/c:k1-->/, 'expires'));
+  assert.equal(readComments(gone).comments.length, 0);
+  const tableSrc = '| A | B |\n| --- | --- |\n| one | two |\n';
+  const one = tableSrc.indexOf('one');
+  const table = addComment(tableSrc, one, one + 3, { author: 'ana', at, text: 'cell' }, 'c1').text;
+  const tableKept = roundTrip(table, (markdown) => markdown.replace('one', 'uno'));
+  assert.match(tableKept, /<!--c:c1-->uno<!--\/c:c1-->/);
+  assert.equal(readComments(tableKept).comments[0].text, 'cell');
 });

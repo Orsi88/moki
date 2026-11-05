@@ -23,6 +23,7 @@
   "Blocked": "Bloqueada",
   "Completed": "Completada",
   "Cancelled": "Cancelada",
+  "Unreadable": "No se pudo leer",
   "give the agent a name": "dale un nombre al agente",
   "describe what it does": "describe lo que hace",
   "choose at least one skill": "elige al menos una skill",
