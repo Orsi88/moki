@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { api, type ActivityInfo, type Tag, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
-import { recall, remember } from '../prefs';
+import { preferredTool } from '../prefs';
 import { isFavorite, looseNotes, noteTitle, removeLooseNote, saveLooseNote, setFavorite, touchNote, type NoteRef } from '../side-menu';
 import { ActivityCatalog } from './ActivityCatalog';
 import { CatIcon } from './CatIcon';
@@ -34,6 +34,7 @@ interface Props {
   onClose: () => void;
   onSaved?: (saved: NoteRef) => void; // after each save: where the note is now (a project note, for a loose one sent there)
   active?: boolean; // in a notebook: only the shown tab takes the keys
+  onMyAis?: () => void; // Settings › My AIs, to install an AI not found here (not in a note window)
 }
 
 const QUICK = ['terminal', 'editor'];
@@ -66,7 +67,7 @@ function imageToDataUrl(file: File): Promise<string> {
   });
 }
 
-export function NoteDialog({ project, path, looseId = null, projects = [], floating = false, embedded = false, onClose, onSaved, active = true }: Props) {
+export function NoteDialog({ project, path, looseId = null, projects = [], floating = false, embedded = false, onClose, onSaved, active = true, onMyAis }: Props) {
   const [title, setTitle] = useState('');
   const [savedTitle, setSavedTitle] = useState('');
   const [destination, setDestination] = useState(''); // '' keeps the note loose
@@ -91,7 +92,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [activityId, setActivityId] = useState('');
-  const [toolId, setToolId] = useState(() => recall('qa-tool') ?? '');
+  const [toolId, setToolId] = useState(''); // '' = the default AI (Settings › My AIs); another choice is for this note only
   const [catalog, setCatalog] = useState<'activity' | 'tool' | null>(null);
   const [launching, setLaunching] = useState(false);
   const [aiMsg, setAiMsg] = useState('');
@@ -324,11 +325,10 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const choices = activities.filter((a) => a.id !== 'resume' && a.available && a.target.kind !== 'operation'); // a note goes to a request, not to an operation
   const activity = choices.find((a) => a.id === activityId);
   const quick = tools.filter((x) => x.available && QUICK.includes(x.kind));
-  const tool = quick.find((x) => x.id === toolId) ?? quick[0];
+  const tool = quick.find((x) => x.id === toolId) ?? preferredTool(quick);
   const startAi = async () => {
     if (!target || !activity || !tool) return;
     setLaunching(true); setAiMsg(''); setError('');
-    remember('qa-tool', tool.id);
     try {
       // A saved project note goes as its path (any length); otherwise its text, on one line.
       let note: string;
@@ -543,7 +543,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
             blocked={(a) => (a.needsFiles ? t('Uses inbox files: start it from the project panel') : null)} />
         )}
         {catalog === 'tool' && (
-          <ToolCatalog tools={tools.filter((x) => QUICK.includes(x.kind))} selected={tool?.id ?? ''} onPick={(id) => { setToolId(id); remember('qa-tool', id); }} onClose={() => setCatalog(null)} />
+          <ToolCatalog tools={tools.filter((x) => QUICK.includes(x.kind))} selected={tool?.id ?? ''} onPick={setToolId} onClose={() => setCatalog(null)} onInstall={onMyAis} />
         )}
       </div>
   );

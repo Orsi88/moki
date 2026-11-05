@@ -5,9 +5,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import { api, type FileContent, type ProjectSummary, type Tag, type TerminalRef, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
-import { recall, remember } from '../prefs';
+import { defaultTool, recall, remember } from '../prefs';
 import { DocView } from '../components/DocView';
-import { FileTree } from '../components/FileTree';
+import { FileTree, OTHER_FILES, friendlyName, groupTree } from '../components/FileTree';
+import { NewMenu } from '../components/NewMenu';
 import { LaunchDialog } from '../components/LaunchDialog';
 import { NoteDialog } from '../components/NoteDialog';
 import { OperationsPanel } from '../components/OperationsPanel';
@@ -19,7 +20,7 @@ import { TerminalView } from '../components/TerminalView';
 import { UsageStatus } from '../components/UsageStatus';
 import { TagPicker } from '../components/TagPicker';
 import { SearchPanel } from '../components/SearchPanel';
-import { IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, IconMore, IconPlay, IconStar, IconTerminal, IconX } from '../components/Icons';
+import { IconCode, IconCopy, IconExternal, IconEyeOff, IconFile, IconFolder, IconGraph, IconMore, IconStar, IconTerminal, IconX } from '../components/Icons';
 import { NewEntryDialog } from '../components/NewEntryDialog';
 import { favoriteNotes, hideProject, isFavorite, setFavorite } from '../side-menu';
 import { AddButton } from '../components/AddButton';
@@ -28,7 +29,7 @@ import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
 
-interface Props { project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void }
+interface Props { project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
 
 interface Tab { path: string; content: FileContent; draft: string; mode: 'preview' | 'edit'; saving: boolean }
 interface TermTab extends TerminalRef { running: boolean }
@@ -54,7 +55,7 @@ export const linkedNotice = (r: ProjectSummary & { backup?: string }): string =>
   ? t('Linked {folder}. Its AI settings were backed up to {backup}', { folder: r.repository, backup: r.backup })
   : t('Linked {folder}. It has no AI settings (.claude, AGENTS.md…) to back up.', { folder: r.repository }));
 
-export function Workspace({ project, tools, onHome, settings, onSettings, onProjectChanged, launchOnOpen = false, startSetup = false, startNotice = '', pendingTerminal = null, onPendingTerminal, pendingPath = null, onPendingPath, search = false, onSearch, onFound }: Props) {
+export function Workspace({ project, tools, onHome, settings, onSettings, onProjectChanged, launchOnOpen = false, startSetup = false, startNotice = '', pendingTerminal = null, onPendingTerminal, pendingPath = null, onPendingPath, search = false, onSearch, onFound, onToolsChanged }: Props) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -73,7 +74,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
     if (docSide) { window.dispatchEvent(new Event('moki:doc-side-close')); setPanelRail(false); return; }
     togglePanel();
   };
-  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean } | null>(launchOnOpen ? { activity: 'open' } : null);
+  const [launch, setLaunch] = useState<{ activity: string; run?: string; skipActivity?: boolean; tool?: string } | null>(launchOnOpen ? { activity: 'open' } : null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(startNotice);
@@ -98,7 +99,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const [craftOpen, setCraftOpen] = useState(false); // download of the ArtCraft apps
   // The tree item menu (right click or ⋯); path '' is the project folder. canCreate: a folder outside runs/.
   const [itemMenu, setItemMenu] = useState<{ path: string; canCreate: boolean; left: number; top: number } | null>(null);
-  const [creating, setCreating] = useState<{ parent: string; kind: 'file' | 'folder' } | null>(null);
+  const [creating, setCreating] = useState<{ parent: string; kind: 'file' | 'folder'; ext?: string } | null>(null); // ext: from New › File, which also lets the folder be chosen
   const [dropping, setDropping] = useState(false);
   const dragDepth = useRef(0);
   const tabsRef = useRef(tabs);
@@ -288,6 +289,29 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const [favTick, setFavTick] = useState(0);
   useEffect(() => api.onNotesChanged(() => setFavTick((n) => n + 1)), []);
   const favorites = useMemo(() => new Set(favoriteNotes().filter((n) => n.project === project.id).map((n) => n.path)), [favTick, project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The sidebar shows the tree in blocks (files on top, the Operations card, Project settings and MCPs at the bottom); each block is a FileTree with the same behavior.
+  const groups = useMemo(() => groupTree(tree), [tree]);
+  const treeProps = {
+    tagColors: colorsOf, activePath: activeTerm || graphFocus ? null : active, onOpen: openPath, expanded,
+    onNewNote: () => setNote({ path: null }), onMenu: openItemMenu, favorites, onIde: openIde,
+    onToggle: (p: string) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; }),
+  };
+  // Where New › File may save: the project's own folders (not the activities), then its root.
+  const folders = useMemo(() => [
+    ...tree.filter((n) => n.type === 'dir' && !n.path.startsWith('.') && n.path !== 'runs').map((n) => ({ path: n.path, label: friendlyName(n.name) })),
+    { path: '', label: t('the project folder') },
+  ], [tree]);
+  // "Open in the IDE" (the linked folder): straight in with one IDE installed, a menu with more (the default AI first).
+  const [ideMenu, setIdeMenu] = useState<{ left: number; top: number } | null>(null);
+  const editors = tools.filter((x) => x.kind === 'editor' && x.available).sort((a, b) => Number(b.id === defaultTool()) - Number(a.id === defaultTool()));
+  const runIde = (tool: string) => {
+    setIdeMenu(null);
+    api.openInEditor(project.id, tool).catch((e: Error) => setError(e.message));
+  };
+  function openIde(at: { left: number; top: number }) {
+    if (!editors.length) { setError(t('No IDE found on this computer: install VS Code or Cursor (Settings › My AIs).')); return; }
+    if (editors.length === 1) runIde(editors[0].id); else setIdeMenu({ left: Math.min(at.left, window.innerWidth - 240), top: at.top });
+  }
   const isNote = (path: string) => /^notes\/[^/]+\.md$/.test(path);
   const toggleFavorite = (path: string) => {
     setItemMenu(null);
@@ -300,8 +324,8 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
   const created = (path: string, kind: 'file' | 'folder') => {
     setCreating(null);
     loadTree();
-    setExpanded((s) => { const n = new Set(s); path.split('/').slice(0, kind === 'folder' ? undefined : -1).reduce((acc, seg) => { const p = acc ? `${acc}/${seg}` : seg; n.add(p); return p; }, ''); return n; });
-    if (kind === 'file') openPath(path, 'edit');
+    setExpanded((s) => { const n = new Set(s); if (kind === 'file' && !path.includes('/')) n.add(OTHER_FILES); path.split('/').slice(0, kind === 'folder' ? undefined : -1).reduce((acc, seg) => { const p = acc ? `${acc}/${seg}` : seg; n.add(p); return p; }, ''); return n; });
+    if (kind === 'file') openPath(path, /\.(md|txt)$/i.test(path) ? 'edit' : 'preview'); // a new spreadsheet or Word file is shown, not edited here
   };
   const revealItem = (path: string) => {
     setItemMenu(null);
@@ -355,10 +379,6 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
       setNotice(linkedNotice(r));
       setShowSetup(true);
     }).catch((e: Error) => setError(e.message));
-  };
-  const myFolder = () => {
-    if (!project.repository) { linkFolder(); return; }
-    api.openLinkedFolder(project.id).catch((e: Error) => setError(e.message));
   };
 
   const tab = activeTerm || graphFocus ? null : tabs.find((t) => t.path === active) ?? null;
@@ -430,7 +450,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
 
       {settings ? (
         <main className="main">
-          <Settings tab={settings} onTab={onSettings} onClose={() => onSettings(null)} project={project} projects={[project]} tools={tools} onTerminal={(term) => { onSettings(null); addTerminal(term); }} />
+          <Settings tab={settings} onTab={onSettings} onClose={() => onSettings(null)} project={project} projects={[project]} tools={tools} onTerminal={(term) => { onSettings(null); addTerminal(term); }} onToolsChanged={onToolsChanged} />
         </main>
       ) : <>
       <aside className="sidebar">
@@ -445,21 +465,10 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           <TagPicker catalog={catalog} value={project.tags} onChange={tagProject} onCatalog={setCatalog} compact />
         </div>
         <div className="sidebar-scroll" onContextMenu={(e) => { e.preventDefault(); openItemMenu(null, { left: e.clientX, top: e.clientY }); }}>
-          <FileTree
-            tagColors={colorsOf}
-            nodes={tree}
-            activePath={activeTerm || graphFocus ? null : active}
-            onOpen={openPath}
-            expanded={expanded}
-            onNewNote={() => setNote({ path: null })}
-            onMenu={openItemMenu}
-            favorites={favorites}
-            onToggle={(p) => setExpanded((s) => { const n = new Set(s); if (n.has(p)) n.delete(p); else n.add(p); return n; })}
-          />
-          <OperationsPanel project={project.id} tick={opsTick} active={opView?.id ?? null}
-            onStart={(id) => { setNote(null); setOpView({ kind: 'launch', id }); }}
-            onRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} />
+          <FileTree {...treeProps} nodes={groups.main} />
         </div>
+        {/* Fixed at the bottom of the sidebar, whatever the scroll: Project settings and the MCP servers. */}
+        <div className="sidebar-foot"><FileTree {...treeProps} nodes={groups.settings} /></div>
         </>}
       </aside>
 
@@ -477,7 +486,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
         )}
         {note && (
           <div className="note-host">
-            <NoteDialog key={note.path ?? 'new'} embedded project={project.id} path={note.path}
+            <NoteDialog key={note.path ?? 'new'} embedded project={project.id} path={note.path} onMyAis={() => onSettings('ai')}
               onSaved={(saved) => { if ('path' in saved && saved.path !== note.path) loadTree(); }} onClose={() => { setNote(null); loadTree(); }} />
           </div>
         )}
@@ -509,7 +518,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
               <button type="button" className="tab-close" onClick={(e) => { e.stopPropagation(); closeTerm(term.id); }} title={t('Close the terminal')}><IconX size={13} /></button>
             </div>
           ))}
-          <AddButton size="sm" variant="ghost" title={t('New terminal')} onClick={openTermMenu} />
+          <AddButton size="sm" variant="ghost" title={t('New: terminal, AI or file')} onClick={openTermMenu} />
         </div>
         {notice && <div className="error-bar info-bar" role="status">{notice}<button type="button" className="icon-btn" onClick={() => setNotice('')}><IconX size={14} /></button></div>}
         {error && <div className="error-bar">{error}<button type="button" className="icon-btn" onClick={() => setError('')}><IconX size={14} /></button></div>}
@@ -522,7 +531,7 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
             <p className="muted">{t('Under construction.')}</p>
           </div>
         ) : activeTerm ? null : tab ? (<>
-          {tab.path !== 'project.json' && tab.path !== 'tags.json' && (
+          {tab.path !== 'project.json' && tab.path !== 'tags.json' && !tab.path.startsWith('@folder') && (
             <div className="file-tags-bar">
               <span className="label">{t('Tags')}</span>
               <TagPicker catalog={catalog} value={fileTags[tab.path] ?? []} onChange={(ids) => tagFile(tab.path, ids)} onCatalog={setCatalog} compact />
@@ -569,7 +578,12 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
         )}
       </main>
 
-      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onTerminal={addTerminal} onMyFolder={myFolder} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} />
+      <SidePanel project={project} runId={runId} refreshKey={refreshKey} tools={tools} onOpenPath={openPath} onLaunch={(p) => setLaunch(p ?? { activity: 'open' })} onOperation={startOperationForm} onTerminal={addTerminal} onSetup={() => setShowSetup(true)} collapsed={panelRail || docSide} onToggle={toggleSide} graphOn={graphFocus} onGraph={toggleGraph} onMyAis={() => onSettings('ai')}
+        operations={(
+          <OperationsPanel project={project.id} tick={opsTick} active={opView?.id ?? null}
+            onStart={(id) => { setNote(null); setOpView({ kind: 'launch', id }); }}
+            onRun={(id) => { setNote(null); setOpView({ kind: 'run', id }); }} />
+        )} />
       </>}
 
       {dropping && <div className="drop-veil" role="status">{t('Drop to keep the files in this project')}</div>}
@@ -584,18 +598,16 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
       </footer>
 
       {termMenu && (
-        <div className="menu-backdrop" onMouseDown={() => setTermMenu(null)}>
-          <ul className="term-menu" role="menu" style={termMenu} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') setTermMenu(null); }}>
-            <li><button type="button" role="menuitem" autoFocus onClick={() => newTerminal('')}><IconTerminal size={15} /> {t('Terminal')} <span className="muted small">{t('your shell')}</span></button></li>
-            {tools.filter((ai) => ai.kind === 'terminal').map((ai) => (
-              <li key={ai.id}>
-                <button type="button" role="menuitem" disabled={!ai.available && !ai.installable} onClick={() => newTerminal(ai.id)}>
-                  <IconPlay size={15} /> {ai.label} <span className="muted small">{ai.available ? ai.command : ai.installable ? t('not installed · click to install') : t('not installed')}</span>
-                </button>
-              </li>
+        <NewMenu at={termMenu} tools={tools} onTerminal={newTerminal} onClose={() => setTermMenu(null)}
+          onFile={(ext) => { setTermMenu(null); setCreating({ parent: tree.some((n) => n.path === 'inbox') ? 'inbox' : '', kind: 'file', ext }); }}
+          onCraft={() => { setTermMenu(null); setCraftOpen(true); }} />
+      )}
+      {ideMenu && (
+        <div className="menu-backdrop" onMouseDown={() => setIdeMenu(null)}>
+          <ul className="term-menu" role="menu" aria-label={t('Open in the IDE')} style={ideMenu} onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === 'Escape') setIdeMenu(null); }}>
+            {editors.map((ed, i) => (
+              <li key={ed.id}><button type="button" role="menuitem" autoFocus={i === 0} onClick={() => runIde(ed.id)}><IconCode size={15} /> {ed.label.replace(/ \(.*\)$/, '')}</button></li>
             ))}
-            <li className="ws-menu-sep" />
-            <li><button type="button" role="menuitem" onClick={() => { setTermMenu(null); setCraftOpen(true); }}><IconExternal size={15} /> {t('Download ArtCraft apps…')}</button></li>
           </ul>
         </div>
       )}
@@ -622,10 +634,10 @@ export function Workspace({ project, tools, onHome, settings, onSettings, onProj
           </ul>
         </div>
       )}
-      {creating && <NewEntryDialog project={project.id} parent={creating.parent} kind={creating.kind} onClose={() => setCreating(null)} onCreated={(path) => created(path, creating.kind)} />}
+      {creating && <NewEntryDialog project={project.id} parent={creating.parent} kind={creating.kind} ext={creating.ext} folders={creating.ext ? folders : undefined} onClose={() => setCreating(null)} onCreated={(path) => created(path, creating.kind)} />}
       {showSetup && <SetupDialog project={project} onClose={() => setShowSetup(false)}
         onSaved={(activity) => { setShowSetup(false); onProjectChanged(); if (activity) setLaunch({ activity }); }} />}
-      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} onOperation={startOperationForm} />}
+      {launch && <LaunchDialog project={project} tools={tools} preset={launch} onClose={() => setLaunch(null)} onTerminal={(t) => { setLaunch(null); addTerminal(t); }} onOperation={startOperationForm} onMyAis={() => { setLaunch(null); onSettings('ai'); }} />}
     </div>
   );
 }

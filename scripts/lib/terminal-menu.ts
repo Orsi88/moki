@@ -11,7 +11,7 @@ import {
   launchTool, listProjects, loadPrefs, openRuns, projectsDir, savePrefs,
 } from './core.ts';
 import { createUI, CancelError, c, type UI } from './tui.ts';
-import { getActivity, listActivities } from './activities.ts';
+import { getActivity, isPickable, listActivities } from './activities.ts';
 import { readableInputs } from './docx.ts';
 
 export interface MenuArgs {
@@ -104,7 +104,7 @@ async function interactive(args: MenuArgs, ui: UI): Promise<number> {
   const runs = openRuns(project);
   const activity: ActivityKey = args.activity ?? await ui.select<ActivityKey>({
     message: 'What do you want to do?',
-    options: listActivities(undefined, project).map((a) => ({
+    options: listActivities(undefined, project).filter(isPickable).map((a) => ({
       value: a.id,
       label: a.label,
       hint: a.id === 'resume' ? `${runs.length} open` : a.description,

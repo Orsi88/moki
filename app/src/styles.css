@@ -16,6 +16,7 @@
   --ok: #8fbf7f;
   --plugin: #c79be0; /* plugins (packages of skills and hooks), set apart from skills */
   --plugin-soft: rgb(199 155 224 / 0.14);
+  --running: #b9a2ec; /* operation runs under way: lilac */
   --warn: #e8935a;
   --err: #e5675b;
   --star: #f2c230; /* favorite notes: golden yellow */
@@ -48,6 +49,7 @@
     --ok: #4f8a3f;
     --plugin: #8a4fb8;
     --plugin-soft: rgb(138 79 184 / 0.12);
+    --running: #7353c2;
     --warn: #c46a2f;
     --err: #c2453a;
     --star: #d9a406;
@@ -195,6 +197,13 @@ textarea { width: 100%; resize: vertical; }
 }
 button.home-action-icon:hover, button.home-action-icon:focus-visible { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .home-action.create { flex-direction: column; align-items: stretch; }
+.home-error { margin-top: 10px; }
+/* Create and customize: how the context starts, as two cards. */
+.model-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.model-card { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.model-card:hover { border-color: var(--muted); }
+.model-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.modal.new-project { width: min(560px, 100%); }
 .home-tools { margin-top: 26px; max-width: 520px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field.inline { flex-direction: row; align-items: center; gap: 10px; margin-top: 10px; }
@@ -223,6 +232,7 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .project-switch { width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; font-weight: 700; font-size: 0.95rem; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-switch:hover { background: var(--bg-3); }
 .sidebar-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 16px; }
+.sidebar-foot { flex-shrink: 0; max-height: 45%; overflow: auto; padding: 4px 6px 8px; border-top: 1px solid var(--border); }
 
 .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
 .tree-row {
@@ -248,6 +258,13 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .tree-line:hover .tree-more, .tree-more:focus-visible { opacity: 1; }
 .tree-more:hover { color: var(--text); background: var(--bg-2); }
 .tree-line:hover .tree-row { padding-right: 28px; }
+/* "Open in the IDE" on the linked folder's row: always shown, left of the ⋯. */
+.tree-ide {
+  position: absolute; top: 4px; right: 26px; width: 20px; height: 20px; padding: 0;
+  display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.tree-ide:hover, .tree-ide:focus-visible { color: var(--accent); background: var(--bg-2); outline: none; }
+.tree-line:has(.tree-ide) .tree-row { padding-right: 52px; }
 .sidebar-more { flex-shrink: 0; }
 .note-dialog .modal-head { cursor: move; user-select: none; align-items: center; }
 .note-tools { display: flex; align-items: center; gap: 2px; padding: 6px 20px; border-bottom: 1px solid var(--border); }
@@ -306,6 +323,11 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .term-menu button svg { color: var(--accent); flex-shrink: 0; }
 .term-menu button:disabled svg { color: var(--faint); }
 .term-menu .small { margin-left: auto; }
+/* New (the + of the tabs): categories with a › that open in place, and a Back row. */
+.new-menu .new-menu-more { display: grid; margin-left: auto; color: var(--faint); }
+.new-menu .new-menu-more svg { color: inherit; }
+.new-menu .new-menu-back { color: var(--muted); }
+.new-menu .new-menu-back svg { color: var(--muted); }
 .item-menu { min-width: 200px; }
 .term-menu .menu-note { padding: 7px 10px; font-size: 0.82rem; }
 .term-menu .menu-note:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); }
@@ -691,15 +713,35 @@ body.resizing-rows, body.resizing-rows * { cursor: row-resize !important; user-s
 .ops-initial-agent { font-size: 0.82rem; font-weight: 600; }
 
 /* Operations in a project: side panel (OperationsPanel), start screen (OperationLaunch) and run (OperationRunView). */
-.ops-side { margin: 14px 2px 0; padding-top: 10px; border-top: 1px solid var(--border); }
+/* A card fixed between the files (which scroll) and the settings at the bottom: room to breathe, its own scroll when the runs are many. */
+.ops-side { display: flex; flex-direction: column; flex-shrink: 0; height: 220px; max-height: 40%; margin: 10px 8px 12px; padding: 12px 8px 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.ops-side-body { flex: 1; min-height: 0; overflow: auto; padding-top: 4px; }
 .ops-side ul { list-style: none; margin: 0; padding: 0; }
 .ops-side-head { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 6px 8px; font-weight: 600; color: var(--muted); font-size: 0.9rem; }
 .ops-side-sub { padding: 8px 8px 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--faint); cursor: default; }
-.ops-side-ended summary { cursor: pointer; }
-.ops-side-ended summary::-webkit-details-marker { display: none; }
+/* The operation tabs, compact for the sidebar (the Settings list tabs, smaller). */
+.ops-side .list-tabs { gap: 2px; padding: 0 2px; margin-bottom: 4px; }
+.ops-side .list-tabs { justify-content: space-around; }
+.ops-side .dialog-tab { display: flex; align-items: center; padding: 4px 10px; font-size: 0.8rem; }
+.list-tab-icon { display: grid; place-items: center; }
+/* The sidebar's own groups (Tracking, Other files, Configuration): a line icon where folders have their picture. */
+.tree-group-icon { color: var(--faint); }
 .ops-side-empty { padding: 0 8px; }
 .ops-side-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 5px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 0.88rem; text-align: left; cursor: pointer; }
 .ops-side-row:hover { background: var(--bg-3); }
+/* Each row marked with its status color: a bar on the left, a light tint, the pill in the same color.
+   To start: yellow; under way: lilac; waiting for you: orange; blocked: red; paused or cancelled: gray; completed: green. */
+.ops-side li + li { margin-top: 4px; }
+.ops-side-row[data-status] { --st: var(--faint); border-left: 3px solid var(--st); background: color-mix(in srgb, var(--st) 9%, transparent); }
+.ops-side-row[data-status]:hover { background: color-mix(in srgb, var(--st) 16%, transparent); }
+.ops-side-row[data-status].active { background: color-mix(in srgb, var(--st) 22%, transparent); }
+.ops-side-row[data-status="start"] { --st: var(--accent); }
+.ops-side-row[data-status="in-progress"] { --st: var(--running); }
+.ops-side-row[data-status="awaiting-approval"], .ops-side-row[data-status="awaiting-input"] { --st: var(--warn); }
+.ops-side-row[data-status="blocked"] { --st: var(--err); }
+.ops-side-row[data-status="completed"] { --st: var(--ok); }
+.ops-side-row[data-status] .pill { color: var(--st); background: color-mix(in srgb, var(--st) 18%, transparent); }
+.ops-side-row[data-status="paused"] .pill, .ops-side-row[data-status="cancelled"] .pill { color: var(--muted); }
 .ops-side-row.active { background: var(--accent-soft); }
 .ops-side-name { display: flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ops-side-name svg { color: var(--accent); flex-shrink: 0; }
@@ -844,6 +886,8 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 /* ---------- Right panel: project overview (SidePanel) ---------- */
 .pp { display: flex; flex-direction: column; gap: 14px; }
 .pp .panel-section { margin-top: 0; }
+/* The Operations card at the bottom of the right panel grows into the room left (it scrolls inside). */
+.panel > .ops-side { flex: 1 1 auto; height: auto; max-height: none; min-height: 240px; margin: 0; }
 .pp-head { display: flex; flex-direction: column; gap: 4px; }
 .pp-title-row { display: flex; align-items: flex-start; gap: 6px; }
 .pp-title-row .panel-title { flex: 1; min-width: 0; }
@@ -863,19 +907,6 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .pp-hint { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--muted); }
 .pp-more { color: var(--muted); }
 .pp-msg { margin: 0; padding: 7px 9px; border-radius: 6px; background: var(--bg-3); font-size: 0.8rem; line-height: 1.4; }
-.pp-stats { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.pp-stats li { display: flex; align-items: center; gap: 10px; height: 32px; min-width: 0; }
-.pp-stat-glyph { width: 18px; flex-shrink: 0; text-align: center; font-size: 0.74rem; font-weight: 700; color: var(--qi-body); }
-.pp-stat-label { flex: 1; font-size: 0.86rem; color: var(--muted); white-space: nowrap; }
-.pp-stat-value { font-size: 0.86rem; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pp-folder {
-  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; width: 100%;
-  padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
-}
-.pp-folder:hover { background: var(--bg-3); }
-.pp-folder > svg { grid-row: 1 / 3; color: var(--muted); }
-.pp-folder-name { font-size: 0.86rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pp-folder-path { font-size: 0.74rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .pp-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .pp-runs button {
   display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: 5px;
@@ -884,19 +915,6 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 .pp-runs button:hover { background: var(--bg-3); }
 .pp-run-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-run-status { font-size: 0.74rem; color: var(--faint); white-space: nowrap; }
-.pp-agents summary { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 600; color: var(--muted); cursor: pointer; list-style: none; padding: 2px 0; }
-.pp-agents summary::-webkit-details-marker { display: none; }
-.pp-agents summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); transform: rotate(-45deg); transition: transform 0.12s; margin-right: 2px; }
-.pp-agents[open] summary::before { transform: rotate(45deg); }
-.pp-agents summary span:first-of-type { flex: 1; }
-.pp-agents .agent-toggles { margin-top: 6px; }
-.pp-count { font-size: 0.74rem; font-weight: 400; color: var(--faint); white-space: nowrap; }
-.pp-setup {
-  display: flex; align-items: center; gap: 8px; width: 100%; margin-top: auto; padding: 10px 2px 0; border: 0; border-top: 1px solid var(--border);
-  background: transparent; color: var(--muted); font: inherit; font-size: 0.84rem; text-align: left; cursor: pointer;
-}
-.pp-setup span:first-child { flex: 1; }
-.pp-setup:hover { color: var(--text); }
 
 /* ---------- Add button (components/AddButton.tsx): every icon-only "new / create" ---------- */
 .add-btn {
@@ -976,12 +994,36 @@ kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font:
 }
 .catalog-tag.muted-tag { color: var(--faint); }
 
+/* "Call an agent" (AgentCatalog): what about, then the search; descriptions in three lines (all of it in the tooltip). */
+.agent-catalog-tools { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 10px; margin-bottom: 14px; }
+.agent-catalog-tools input { width: 100%; }
+.agent-catalog-hint { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Settings › My AIs (AiToolsPage): one row per AI, its main action as an icon, the rest in "…". */
+.ai-grid { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, min(380px, 100%)); gap: 12px; }
+.ai-card { display: flex; align-items: center; gap: 14px; height: 96px; box-sizing: border-box; padding: 0 10px 0 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+.ai-card.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.ai-card.missing .ai-emblem, .ai-card.missing .ai-name { opacity: 0.55; }
+.ai-emblem { display: grid; place-items: center; flex-shrink: 0; width: 56px; height: 56px; }
+.ai-body { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.ai-name { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1rem; line-height: 1.3; }
+.ai-meta, .ai-ext { font-size: 0.85rem; line-height: 1.4; color: var(--muted); }
+.ai-meta, .ai-ext span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-ext { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ai-ext svg { color: var(--accent); flex-shrink: 0; }
+.ai-ext.pending { color: var(--accent); }
+.ai-side { display: flex; align-items: center; gap: 2px; align-self: flex-start; margin-top: 10px; }
+.ai-main { color: var(--accent); }
+
 /* ---------- Cat library (icons/cats.ts, CatIcon, CatPicker, SkillCat) ---------- */
 .cat-icon { display: block; flex-shrink: 0; object-fit: contain; user-select: none; }
 .pp-pick .cat-icon { margin: -4px 0 -4px -4px; }
 .pp-pick-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-pick-kind { display: grid; place-items: center; width: 18px; color: var(--muted); flex-shrink: 0; }
 .catalog-card:disabled .catalog-num { background: var(--bg-3); color: var(--faint); }
+.catalog-card.missing { opacity: 0.6; }
+.catalog-card.missing:hover { opacity: 1; }
+.catalog-card.missing .catalog-num { background: var(--bg-3); color: var(--faint); }
 .modal.cat-picker { width: min(760px, 100%); }
 .cat-picker input[type="search"] { width: 100%; }
 .cat-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }

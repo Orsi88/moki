@@ -34,6 +34,8 @@ Cadastrar uma ferramenta no Moki, em vez de direto na IDE, faz com que os agente
 
 ## Instalação
 
+**Pelo app desktop.** **Configurações › Minhas IAs › Instalar a extensão do Moki e abrir**, no cartão do VS Code, instala a extensão da versão do app (baixada da release e conferida por SHA-256) e abre o VS Code na pasta ligada do projeto. O cartão do Cursor faz o mesmo, marcado como *Não verificado*.
+
 **Pela release.** Baixe o [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) da [release mais recente](https://github.com/Orsi88/moki/releases/latest) e rode:
 
 ```bash
@@ -67,7 +69,7 @@ A extensão encontra o projeto da pasta aberta no VS Code:
 | Está ligada a mais de um | Barra de status: **Moki: choose a project** |
 | Não está ligada a nenhum | Barra de status: **Moki: no project** |
 
-Para ligar uma pasta de vez, abra o projeto no app desktop e use **Escolher minha pasta**: toda janela do VS Code nessa pasta passa a abrir o projeto sozinha. Para escolher um projeto só para este workspace do VS Code, clique na barra de status, no seletor no topo do painel, ou rode **Moki: Choose Project**. A pasta ligada pelo app aparece primeiro, como *Linked to this folder*.
+Para ligar uma pasta de vez, abra o projeto no app desktop e use o botão de **vincular** da barra lateral (a corrente): toda janela do VS Code nessa pasta passa a abrir o projeto sozinha. Para escolher um projeto só para este workspace do VS Code, clique na barra de status, no seletor no topo do painel, ou rode **Moki: Choose Project**. A pasta ligada pelo app aparece primeiro, como *Linked to this folder*.
 
 ### 2. Conectar a IA aos servidores MCP do Moki
 
@@ -180,9 +182,9 @@ As mensagens da extensão aparecem em inglês.
 | O chat do Claude Code não enxerga o Moki | O `.mcp.json` nunca foi gravado, ou foi gravado antes de os servidores mudarem | **Conectar ao Claude Code** e abrir uma sessão nova do Claude Code |
 | O Copilot não lista um servidor | A `${VARIAVEL}` dele não existe neste computador (ele fica de fora), ou ele está desligado ou não vale para este projeto no app | Defina a variável e reinicie o VS Code; confira o servidor no app |
 | **MCPs: 0 ligados** | Nenhum servidor cadastrado no app vale para este projeto e está ligado | Esperado quando você usa só o servidor do Moki; senão, cadastre ou ligue servidores no app |
-| *This project has no linked folder on this computer* (Sync to Cursor) | A pasta do projeto nunca foi ligada neste computador | Ligue no app (**Escolher minha pasta**) |
+| *This project has no linked folder on this computer* (Sync to Cursor) | A pasta do projeto nunca foi ligada neste computador | Ligue no app (botão de **vincular** da barra lateral) |
 | *project.json does not allow writing to …* | O projeto define `writeAllowed: false` para a pasta | Grave o arquivo você mesmo, ou permita a escrita no `project.json` |
-| *… is not installed on this computer (command "…" not found).* | A IA escolhida (para o pedido ou para um passo) não está instalada ou não está no PATH | Instale, ou escolha outra IA (no app desktop, uma aba de terminal de Claude Code ou Codex ausente oferece instalar depois que você digita `y`). Um passo que não consegue abrir falha uma vez e espera: **Tentar de novo** oferece as IAs instaladas |
+| *… is not installed on this computer (command "…" not found).* | A IA escolhida (para o pedido ou para um passo) não está instalada ou não está no PATH | Instale, ou escolha outra IA (no app desktop, **Configurações › Minhas IAs › Instalar**, ou uma aba de terminal da IA ausente, instala depois que você digita `y`). Um passo que não consegue abrir falha uma vez e espera: **Tentar de novo** oferece as IAs instaladas |
 | *The terminal of this step is not open in VS Code.* | O terminal do passo foi fechado, ou o VS Code foi reiniciado | Responda o passo no painel (ele reabre com a resposta) ou use **Reabrir o passo** |
 | Um passo aparece como **Falhou** | O terminal fechou antes do resumo, ou a IA dele não abriu | **Tentar de novo**, com a mesma IA ou outra; o que ele entregou fica na pasta dele |
 | *No AI tool that runs in a terminal is installed* | As operações precisam de uma IA de terminal (Claude Code, Codex, Gemini CLI, Antigravity CLI, Cursor Agent) | Instale uma |

@@ -31,15 +31,16 @@ Switch workspaces at the bottom of the project list, or go back to the list with
 
 **Search** (the magnifier, or **Ctrl+Shift+F**) takes the place of the list and looks through the active workspace: project names and descriptions, and the names and text of the project files (Markdown, text, JSON, CSV and the text of Word files). Tags appear there as filters; text and tags combine. A result opens the project with the file.
 
-**Create a project** by typing a name, and optionally its tags:
+**Create a new project** (the +) asks only the name:
 
-| Start with | What you get |
+| You press | What happens |
 |---|---|
-| **QA context files** | Glossary, business rules, modules, flows, permissions and the rest, for a system you test. |
-| **A blank project** | No context yet. You describe the goal; the AI asks what it needs and writes a plan. Context files appear only after you approve it. |
-| **An existing folder** | *Open a project* picks a folder. The project takes its name (you can edit it), links that folder, and opens *Set up &lt;name&gt;*. AI settings in the folder are copied to `.moki-backup/` inside it. Nothing else there changes. |
+| **Enter** (*Create project*) | The project opens right away with the standard folders (`context/` empty, `inbox/`, `runs/`, `temporary/`) and nothing to set up. Context files appear as activities need them. |
+| **Create and customize…** | One window: the name, optional tags and how the context starts: **Empty** (as above) or **Planned with the AI** (the AI asks what it needs and writes a plan; context files appear only after you approve it). The project opens in *Set up &lt;name&gt;* (description, skills, agents). |
 
-The create form still says "one project per system you test". A blank project and a linked folder use the same form.
+**Open a project**: choose one on the left, or pick a folder in the system dialog. A folder already linked to a project opens that project. A new folder asks the project's name (the folder's is the suggestion), then the project is created with the standard folders and linked to it. AI settings in the folder are copied to `.moki-backup/` inside it. Nothing else there changes.
+
+**The linked folder in the tree.** It comes first in the project's sidebar, under its own name, live: its files are the originals (nothing is copied), they open and preview in the app, and `.md`/`.txt` are edited in place. `.git`, `node_modules`, build folders and hidden files are left out. The `</>` button on its row opens the folder in your IDE (VS Code or Cursor; with both installed, you choose).
 
 ## From the source
 

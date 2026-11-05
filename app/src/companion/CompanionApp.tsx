@@ -113,7 +113,7 @@ export function CompanionApp() {
           <CatIcon id="question" size={72} />
           <p><strong>{t('This folder is not linked to a Moki project.')}</strong></p>
           <p className="muted small">{state.projects.length
-            ? t('Choose a project above. To link this folder for good, use Choose my folder in the Moki app.')
+            ? t('Choose a project above. To link this folder for good, use the link button of the ribbon in the Moki app.')
             : t('There are no projects in the active workspace yet. Create one in the Moki app.')}</p>
         </div>
       </div>

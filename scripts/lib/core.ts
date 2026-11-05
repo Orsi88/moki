@@ -13,9 +13,11 @@ import { activityRequest, getActivity, listActivities, type ActivityDef } from '
 
 // Activities are scripts/lib/activities.ts: the app's own actions in code, the others in activities/ and the workspace library.
 export type ActivityKey = string;
-// How a new project starts: 'qa' copies the QA context files; 'blank' leaves context/ out and plans it with the AI.
-export type Starter = 'qa' | 'blank';
-export const STARTERS: Starter[] = ['qa', 'blank'];
+// How a new project starts: 'qa' copies the QA context files; 'blank' leaves context/ out and plans it with the AI;
+// 'minimal' keeps only the standard folders (context/ empty, inbox/, runs/, temporary/): context files are
+// created as activities need them (project-context's progressive onboarding).
+export type Starter = 'qa' | 'blank' | 'minimal';
+export const STARTERS: Starter[] = ['qa', 'blank', 'minimal'];
 // App plugins a project turns on itself (adapters/app-plugins/README.md); ponytail and rtk are always on.
 export const PROJECT_PLUGINS = ['caveman', 'superpowers'];
 export type ToolKey = 'claude' | 'codex' | 'cursor-agent' | 'gemini' | 'antigravity' | 'cursor' | 'vscode' | 'chat' | 'print';
@@ -32,7 +34,12 @@ export interface Tool {
   // Fixed here, never from user text. Run only after the user types y in the terminal tab (desktop/run-tool.ts);
   // a tool without a command for the system gets the instructions link only.
   install?: { docs: string; posix?: string; windows?: string };
+  download?: string; // editors: where to get the editor itself
+  mokiExtension?: 'supported' | 'unverified'; // editors that take the Moki extension (ide/vscode); 'unverified': not tested there
 }
+
+// The Moki extension's id (publisher.name in ide/vscode/package.json), as `--list-extensions` prints it.
+export const MOKI_EXTENSION_ID = 'orsi88.moki';
 
 
 export const TOOLS: Record<ToolKey, Tool> = {
@@ -45,12 +52,21 @@ export const TOOLS: Record<ToolKey, Tool> = {
     label: 'OpenAI Codex CLI', command: 'codex', args: (p) => [p],
     install: { docs: 'https://github.com/openai/codex', posix: 'npm install -g @openai/codex', windows: 'npm install -g @openai/codex' }, // needs Node/npm
   },
-  // Install command pending: the docs name the binary "agent".
-  'cursor-agent': { label: 'Cursor Agent CLI', command: 'cursor-agent', args: (p) => [p], install: { docs: 'https://cursor.com/docs/cli/installation' } },
-  gemini: { label: 'Gemini CLI', command: 'gemini', args: (p) => ['-i', p] },
-  antigravity: { label: 'Antigravity CLI', command: 'agy', args: (p) => ['-i', p], install: { docs: 'https://antigravity.google' } },
-  cursor: { label: 'Cursor editor', hint: 'opens the folder, request copied to clipboard', command: 'cursor', args: () => [ROOT], clipboard: true },
-  vscode: { label: 'VS Code (Claude Code / Codex extensions)', hint: 'opens the folder, request copied to clipboard', command: 'code', args: () => [ROOT], clipboard: true },
+  // The installer creates "agent" and the legacy "cursor-agent" on every system (cursor.com/install).
+  'cursor-agent': {
+    label: 'Cursor Agent CLI', command: 'cursor-agent', args: (p) => [p],
+    install: { docs: 'https://cursor.com/docs/cli/installation', posix: 'curl https://cursor.com/install -fsS | bash', windows: "irm 'https://cursor.com/install?win32=true' | iex" },
+  },
+  gemini: {
+    label: 'Gemini CLI', command: 'gemini', args: (p) => ['-i', p],
+    install: { docs: 'https://geminicli.com/docs/get-started/installation', posix: 'npm install -g @google/gemini-cli', windows: 'npm install -g @google/gemini-cli' }, // needs Node 20+
+  },
+  antigravity: {
+    label: 'Antigravity CLI', command: 'agy', args: (p) => ['-i', p],
+    install: { docs: 'https://antigravity.google/docs/getting-started?tab=cli', posix: 'curl -fsSL https://antigravity.google/cli/install.sh | bash', windows: 'irm https://antigravity.google/cli/install.ps1 | iex' },
+  },
+  cursor: { label: 'Cursor editor', hint: 'opens the folder, request copied to clipboard', command: 'cursor', args: () => [ROOT], clipboard: true, download: 'https://cursor.com/download', mokiExtension: 'unverified' },
+  vscode: { label: 'VS Code (Claude Code / Codex extensions)', hint: 'opens the folder, request copied to clipboard', command: 'code', args: () => [ROOT], clipboard: true, download: 'https://code.visualstudio.com/Download', mokiExtension: 'supported' },
   chat: { label: 'ChatGPT / claude.ai / Gemini web', hint: 'request copied, files listed', chat: true },
   print: { label: 'Just show the request', print: true },
 };
@@ -199,7 +215,7 @@ export function projectSummary(id: string, root = ROOT): ProjectSummary {
     openRuns: runs.filter((r) => !['completed', 'cancelled'].includes(r.status)).length,
     repository: linkedOf(data)?.path ?? '',
     linkedSkills: Array.isArray(data.linkedSkills) ? data.linkedSkills.filter((s): s is string => typeof s === 'string') : [],
-    starter: data.starter === 'blank' ? 'blank' : 'qa',
+    starter: data.starter === 'blank' || data.starter === 'minimal' ? data.starter : 'qa',
     tags: Array.isArray(data.tags) ? [...new Set(data.tags.filter((s): s is string => typeof s === 'string'))] : [],
     plugins: Array.isArray(data.plugins) ? PROJECT_PLUGINS.filter((p) => (data.plugins as unknown[]).includes(p)) : [],
   };
@@ -274,11 +290,11 @@ export function createProject(id: string, name: string, root = ROOT, starter: St
   if (existsSync(target)) throw new Error(`Project "${id}" already exists.`);
   cpSync(join(root, 'templates', 'project-context'), target, { recursive: true });
   renameSync(join(target, 'gitignore.txt'), join(target, '.gitignore'));
-  if (starter === 'blank') rmSync(join(target, 'context'), { recursive: true, force: true });
-  for (const dir of ['inbox', 'runs', 'temporary']) mkdirSync(join(target, dir), { recursive: true });
+  if (starter !== 'qa') rmSync(join(target, 'context'), { recursive: true, force: true });
+  for (const dir of [...(starter === 'minimal' ? ['context'] : []), 'inbox', 'runs', 'temporary']) mkdirSync(join(target, dir), { recursive: true });
   const file = join(target, 'project.json');
   const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  const blank = starter === 'blank' ? { starter, contextFiles: [] } : {};
+  const blank = starter !== 'qa' ? { starter, contextFiles: [] } : {};
   writeFileSync(file, `${JSON.stringify({ ...data, project: id, name: name.trim() || id, ...blank }, null, 2)}\n`);
   return projectSummary(id, root);
 }
@@ -495,6 +511,12 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
       if (list) parts.push(`Documents to use: ${list}.`);
       break;
     }
+    case 'talk':
+      // Only with an agent (the "Act as" line above): a conversation, so nothing runs or is written on its own.
+      if (!agent) throw new Error('Talking needs an agent: choose one.');
+      parts.push('I want to talk an idea through with you: this is a conversation, not an activity. Do not start a run, follow a skill procedure or write files unless I ask.'
+        + ' Read only the project context you need to answer.' + (note.trim() ? '' : ' Ask me what I have in mind.'));
+      break;
     case 'resume':
       parts.push(`Resume run ${run}: read ${workspace}/projects/${project}/runs/${run}/state.json first, summarize where we stopped and continue from the current step.`);
       break;

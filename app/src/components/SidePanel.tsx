@@ -1,17 +1,17 @@
-// Right panel: details of the activity the open file belongs to, or an overview
-// of the project. It complements the file tree on the left and never repeats it:
-// the tree shows WHAT is there (files, counts, every activity); this panel shows what
-// to DO and what the tree cannot show (the AI tool, context state, what needs you,
-// the linked folder, agents). It can be collapsed to a thin rail.
+// Right panel: details of the activity the open file belongs to, or what to DO in the
+// project: start an activity in an AI, call an agent to talk an idea through (no activity),
+// the runs that need you and, filling the rest, the project's operations (OperationsPanel). Everything else is in the tree (context/, files), the ribbon
+// (linked folder), Set up project (the pencil) or Settings (agents per project, by their
+// tags). It can be collapsed to a thin rail.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, describeRun, statusLabel, type ActivityInfo, type AgentInfo, type OpenRun, type ProjectSummary, type RunState, type TerminalRef, type ToolInfo, type ToolKind } from '../api';
 import { conversationLanguage, t } from '../i18n';
-import { recall, remember } from '../prefs';
-import { IconChevron, IconCode, IconEdit, IconFolder, IconGraph, IconPanel, IconPlay, IconTerminal } from './Icons';
-import { SectionIcon, type SectionIconName } from '../icons';
+import { preferredTool } from '../prefs';
+import { IconChevron, IconCode, IconEdit, IconGraph, IconPanel, IconPlay, IconTerminal, IconUsers } from './Icons';
 import { ActivityCatalog } from './ActivityCatalog';
 import { ToolCatalog } from './ToolCatalog';
+import { AgentCatalog } from './AgentCatalog';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
 
@@ -21,15 +21,16 @@ interface Props {
   refreshKey: number;
   tools: ToolInfo[];
   onOpenPath: (path: string) => void;
-  onLaunch: (preset?: { activity: string; run?: string; skipActivity?: boolean }) => void;
+  onLaunch: (preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string }) => void;
   onTerminal: (terminal: TerminalRef) => void; // a terminal tool opened in a tab of the app
   onOperation?: (operation: string) => void; // an activity of an operation opens its start form
-  onMyFolder: () => void; // opens the linked folder, or links one first
   onSetup: () => void; // description and the global skills the project uses
   collapsed: boolean; // shown as a thin rail
   onToggle: () => void; // collapse / expand
   graphOn: boolean;
   onGraph: () => void;
+  onMyAis: () => void; // Settings › My AIs
+  operations?: ReactNode; // the Operations card (OperationsPanel), below everything, taking the room left
 }
 
 // Tools that open in one click with the project loaded. Web chat and "just show the
@@ -40,20 +41,17 @@ const toolName = (tool: ToolInfo) => t(tool.label).replace(/ \(.*\)$/, '');
 const statusDot = (s: string): string => (s === 'completed' ? 'dot-ok' : s === 'cancelled' ? 'dot-muted' : s === 'blocked' ? 'dot-err' : 'dot-warn');
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 const NEEDS_YOU = ['awaiting-approval', 'awaiting-input', 'blocked'];
-const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 
-const onboarding = (status: string): string => ({ 'not-started': t('Not started'), partial: t('In progress'), complete: t('Complete') } as Record<string, string>)[status] ?? status;
-
-export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onTerminal, onMyFolder, onSetup, collapsed, onToggle, graphOn, onGraph }: Props) {
+export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onTerminal, onSetup, collapsed, onToggle, graphOn, onGraph, onMyAis, operations }: Props) {
   const [run, setRun] = useState<RunState | null>(null);
   const [runs, setRuns] = useState<OpenRun[]>([]);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [enabled, setEnabled] = useState<string[]>([]);
-  const [agentError, setAgentError] = useState('');
+  const [agents, setAgents] = useState<AgentInfo[]>([]); // usable and on in this project, for "Call an agent"
+  const [agentCatalog, setAgentCatalog] = useState(false);
   const [planPending, setPlanPending] = useState(false); // the AI left a plan.json to review
   const quick = tools.filter((x) => x.available && QUICK.includes(x.kind));
-  const [toolId, setToolId] = useState(() => recall('qa-tool') ?? '');
-  const tool = quick.find((x) => x.id === toolId) ?? quick[0];
+  // Starts on the default AI (Settings › My AIs); another choice here is for this panel only.
+  const [toolId, setToolId] = useState('');
+  const tool = quick.find((x) => x.id === toolId) ?? preferredTool(quick);
   const [launching, setLaunching] = useState(false);
   const [launchMsg, setLaunchMsg] = useState('');
   // What to do first (picked in the activity catalog, nothing chosen at first), then where.
@@ -73,18 +71,13 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
 
   useEffect(() => {
     api.openRuns(project.id).then(setRuns).catch(() => setRuns([]));
-    api.agents().then((list) => setAgents(list.filter((a) => a.usable))).catch(() => setAgents([]));
-    api.projectAgents(project.id).then(setEnabled).catch(() => setEnabled([]));
+    Promise.all([api.agents(), api.projectAgents(project.id)])
+      .then(([list, on]) => setAgents(list.filter((a) => a.usable && on.includes(a.name))))
+      .catch(() => setAgents([]));
     api.readPlan(project.id).then((p) => setPlanPending(Boolean(p && !p.approved))).catch(() => setPlanPending(false));
   }, [project.id, refreshKey]);
 
-  const toggleAgent = (name: string) => {
-    const next = enabled.includes(name) ? enabled.filter((n) => n !== name) : [...enabled, name];
-    setAgentError('');
-    api.setProjectAgents(project.id, next).then(setEnabled).catch((e: Error) => setAgentError(e.message));
-  };
-
-  const pickTool = (id: string) => { setToolId(id); setLaunchMsg(''); remember('qa-tool', id); };
+  const pickTool = (id: string) => { setToolId(id); setLaunchMsg(''); };
   const pickActivity = (id: string) => { setActivityId(id); setLaunchMsg(''); };
 
   // Activities that need inbox files go through the dialog (already past "what to do");
@@ -93,17 +86,16 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
     if (!activity) { setCatalog(true); return; }
     const id = activity.id;
     if (activity.target.kind === 'operation') { onOperation?.(activity.target.name); return; }
-    if (activity.needsFiles) { if (tool) remember('qa-tool', tool.id); onLaunch({ activity: id, skipActivity: true }); return; }
+    if (activity.needsFiles) { onLaunch({ activity: id, skipActivity: true, tool: tool?.id }); return; }
     void quickOpen(id);
   };
 
-  // One click: the chosen activity, no files, in the chosen tool.
-  const quickOpen = async (id = 'open') => {
+  // One click: the chosen activity, no files, in the chosen tool. With an agent and "talk": a conversation with it.
+  const quickOpen = async (id = 'open', agent?: string, note = '') => {
     if (!tool) return;
     setLaunching(true); setLaunchMsg('');
-    remember('qa-tool', tool.id);
     try {
-      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note: '', language: conversationLanguage() });
+      const r = await api.launch({ project: project.id, activity: id, tool: tool.id, files: [], note, language: conversationLanguage(), ...(agent ? { agent } : {}) });
       if (r.terminal) { onTerminal(r.terminal); return; }
       if (!r.opened) setLaunchMsg(r.message || t('Could not open the tool.'));
       else setLaunchMsg(r.copied ? t('Request copied. Paste it in the AI chat of {tool}.', { tool: toolName(tool) }) : (r.message || ''));
@@ -178,15 +170,10 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
             </ul>
           </section>
         )}
+        {operations}
       </aside>
     );
   }
-
-  // Only what the tree cannot show: inbox and activity counts live on the tree's folders.
-  const stats: { icon: SectionIconName; label: string; value: string }[] = [
-    { icon: 'context', label: t('Context'), value: onboarding(project.onboardingStatus) },
-  ];
-  const activeAgents = agents.filter((a) => enabled.includes(a.name)).length;
 
   return (
     <aside className="panel pp">
@@ -229,39 +216,22 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
             <button type="button" className="btn btn-block" disabled={launching || !activity} onClick={start}>
               <IconPlay size={15} /> {launching ? t('Starting…') : t('Start activity')}
             </button>
+            <button type="button" className="btn btn-ghost btn-block pp-talk" disabled={launching} onClick={() => setAgentCatalog(true)} aria-haspopup="dialog"
+              title={t('Talk an idea through with an agent, without an activity')}>
+              <IconUsers size={15} /> {t('Call an agent')}
+            </button>
             {launchMsg && <p className="pp-msg" role="status">{launchMsg}</p>}
           </>
         ) : (
           <>
-            <p className="pp-hint">{t('No AI tool found on this computer.')}</p>
+            <p className="pp-hint">{t('No AI tool found on this computer.')} <button type="button" className="link" onClick={onMyAis}>{t('Install in Settings › My AIs')}</button></p>
             <button type="button" className="btn btn-block" onClick={() => onLaunch()}><IconPlay size={15} /> {t('Open in your AI tool')}</button>
           </>
         )}
       </section>
       {catalog && <ActivityCatalog activities={activities} selected={activity?.id ?? ''} onPick={pickActivity} onClose={() => setCatalog(false)} />}
-      {toolCatalog && <ToolCatalog tools={tools.filter((x) => QUICK.includes(x.kind))} selected={tool?.id ?? ''} onPick={pickTool} onClose={() => setToolCatalog(false)} />}
-
-      <ul className="pp-stats">
-        {stats.map((s) => (
-          <li key={s.icon}>
-            <SectionIcon name={s.icon} size={18} />
-            <span className="pp-stat-label">{s.label}</span>
-            <span className="pp-stat-value">{s.value}</span>
-          </li>
-        ))}
-        <li>
-          <span className="pp-stat-glyph" aria-hidden="true">Aa</span>
-          <span className="pp-stat-label">{t('Deliverables')}</span>
-          <span className="pp-stat-value">{t(project.deliverableLanguage)}</span>
-        </li>
-      </ul>
-
-      <section className="panel-section">
-        <h3>{t('My folder')}</h3>
-        {project.repository
-          ? <button type="button" className="pp-folder" onClick={onMyFolder} title={project.repository}><IconFolder size={15} /><span className="pp-folder-name">{folderName(project.repository)}</span><span className="pp-folder-path">{project.repository}</span></button>
-          : <button type="button" className="btn btn-ghost btn-sm" onClick={onMyFolder} title={t('Link a folder of this computer to the project')}><IconFolder size={15} /> {t('Choose my folder')}</button>}
-      </section>
+      {agentCatalog && tool && <AgentCatalog agents={agents} tool={toolName(tool)} onPick={(agent, note) => { void quickOpen('talk', agent, note); }} onClose={() => setAgentCatalog(false)} />}
+      {toolCatalog && <ToolCatalog tools={tools.filter((x) => QUICK.includes(x.kind))} selected={tool?.id ?? ''} onPick={pickTool} onClose={() => setToolCatalog(false)} onInstall={onMyAis} />}
 
       {needsYou.length > 0 && (
         <section className="panel-section pp-needs">
@@ -282,30 +252,7 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
           </ul>
         </section>
       )}
-
-      {agents.length > 0 && (
-        <details className="pp-agents panel-section">
-          <summary><span>{t('Agents in this project')}</span><span className="pp-count">{t('{n} of {total}', { n: activeAgents, total: agents.length })}</span></summary>
-          <ul className="agent-toggles">
-            {agents.map((a) => (
-              <li key={a.name}>
-                <label title={a.description}>
-                  <input type="checkbox" checked={enabled.includes(a.name)} onChange={() => toggleAgent(a.name)} />
-                  <span>{a.name}</span>
-                  {a.source === 'custom' && <span className="chip">{t('yours')}</span>}
-                </label>
-              </li>
-            ))}
-          </ul>
-          {agentError && <p className="error small">{agentError}</p>}
-        </details>
-      )}
-
-      <button type="button" className="pp-setup" onClick={onSetup} title={t('Description and the global skills this project uses')}>
-        <span>{t('Set up project')}</span>
-        {project.linkedSkills.length > 0 && <span className="pp-count">{project.linkedSkills.length === 1 ? t('1 linked skill') : t('{n} linked skills', { n: project.linkedSkills.length })}</span>}
-        <IconChevron size={14} />
-      </button>
+      {operations}
     </aside>
   );
 }

@@ -46,8 +46,12 @@ export const MOKI_ACTIVITIES: ActivityDef[] = [
   { id: 'setup', label: 'Prepare the project', description: 'adapts the context to the project description', target: { kind: 'moki', name: 'project-context' }, files: 'optional' },
   { id: 'plan', label: 'Plan the project with the AI', description: 'interview, then a plan you review in the app', target: { kind: 'moki', name: 'project-context' }, files: 'optional' },
   { id: 'resume', label: 'Resume a run', description: '', target: { kind: 'moki', name: 'qa-orchestrator' }, files: 'none' },
+  // "Call an agent" in the project panel: a conversation with one agent, not an activity (never in the activity lists: PICKABLE).
+  { id: 'talk', label: 'Talk with an agent', description: 'a conversation about an idea, no activity', target: { kind: 'moki', name: 'project-context' }, files: 'none' },
 ].map((a) => ({ ...a, category: 'Moki', note: '', tags: [], template: '', source: 'moki' as const })) as ActivityDef[];
 export const isMokiActivity = (id: string): boolean => MOKI_ACTIVITIES.some((a) => a.id === id);
+// Activities offered where one is picked (the app, the IDE, the terminal menu); "talk" starts only from "Call an agent".
+export const isPickable = (a: { id: string }): boolean => a.id !== 'talk';
 
 export const builtinDir = (root = ROOT): string => join(root, 'activities');
 export const libraryDir = (root = ROOT): string => join(workspaceDir(root), 'library', 'activities');

@@ -35,7 +35,7 @@ const RULES = {
     [/^operations/, 'Multi-agent operations', I],
     [/^agent library|^agents in operations|^agents per project|^agents created/, 'Agents', I],
     [/^skill registry|^create skill|^global tab|^set up:|^blank project|^upload of skills and agents|^upload from a zip/, 'Skills and set up', I],
-    [/^linked folder|^repository tab/, 'Linked folder', I],
+    [/^linked folder|^open a folder|^repository tab/, 'Linked folder', I],
     [/^markdown|^docx extraction|^spreadsheet number/, 'Rendering', U],
     [/^installer|^installed copies/, 'Installer', I],
     [/^UI requests/, 'App bridge (IPC)', I],
@@ -43,6 +43,7 @@ const RULES = {
     [/^search/, 'Search', I],
     [/^craft apps:/, 'ArtCraft apps download', U],
     [/^craft download:/, 'ArtCraft apps download', I],
+    [/^my AIs:/, 'Finding the AI tools', I],
   ],
   'framework.test.mjs': [
     [/^real repository|^fixture passes|^qa assistant/, 'Framework', I],
@@ -70,7 +71,7 @@ const unescape = (s) => s.replace(/\\(['"`\\])/g, '$1');
 const cell = (s) => s.replace(/\|/g, '\\|');
 
 function scan(rel) {
-  const lines = readFileSync(join(root, rel), 'utf8').split('\n');
+  const lines = readFileSync(join(root, rel), 'utf8').split(/\r?\n/); // a checkout or an editor on Windows may leave CRLF
   const out = [];
   let block = '';
   lines.forEach((line, i) => {
@@ -135,6 +136,7 @@ const TEXT = {
       'Operations in a project (UI)': 'Operações num projeto (UI)', 'Terminals outlive the project screen (UI)': 'Terminais que continuam fora do projeto (UI)',
       'MCP servers list (UI)': 'Lista de servidores MCP (UI)', 'PDF comments (UI)': 'Comentários em PDF (UI)',
       'Finding the AI tools': 'Encontrar as ferramentas de IA', Activities: 'Atividades', 'Activities (UI)': 'Atividades (UI)', Favorites: 'Favoritos', 'Favorites (UI)': 'Favoritos (UI)', 'Settings without a project (UI)': 'Configurações sem projeto (UI)',
+      'My AIs and the project panel (UI)': 'Minhas IAs e o painel do projeto (UI)',
     },
   },
 };

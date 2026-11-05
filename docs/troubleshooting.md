@@ -14,7 +14,7 @@ Common problems, why they happen and what to do. Problems specific to the VS Cod
 
 | What you see | Why | What to do |
 |---|---|---|
-| *… is not installed on this computer (command "…" not found).* | The tool is not installed, or its command is not on the PATH | Install it, or pick another tool. In the app, a terminal tab (the **+** menu) of a missing Claude Code or Codex asks `Install …? [y/N]` and installs only when you type `y`, running the fixed vendor command it shows; the other AIs show the instructions link. Steps of an operation still need an installed AI |
+| *… is not installed on this computer (command "…" not found).* | The tool is not installed, or its command is not on the PATH | Install it, or pick another tool. In the app, **Settings › My AIs › Install** (or a terminal tab of the **+** menu) of a missing Claude Code, Codex, Gemini CLI, Antigravity CLI or Cursor Agent asks `Install …? [y/N]` and installs only when you type `y`, running the fixed vendor command it shows. Then **Check again** in My AIs; if it is still missing, restart Moki. Steps of an operation still need an installed AI |
 | The wizard says opening is still running | The tool takes more than about 20 seconds to start | Wait, or look at the tool's own window or terminal |
 | A chat tool (ChatGPT, claude.ai, Gemini web) does not open by itself | These tools get the request as text to copy | Copy the request shown on screen and paste it in the chat |
 

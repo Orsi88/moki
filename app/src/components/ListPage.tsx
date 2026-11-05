@@ -19,14 +19,16 @@ export function ListHead({ title, intro, action }: { title: string; intro: strin
   );
 }
 
-export interface ListTab<T extends string> { id: T; label: string; count?: number }
+// icon: shown in place of the label where space is short (the sidebar); the label stays as the tab's name and tooltip.
+export interface ListTab<T extends string> { id: T; label: string; count?: number; icon?: ReactNode }
 
 export function ListTabs<T extends string>({ tabs, value, onChange, label }: { tabs: ListTab<T>[]; value: T; onChange: (id: T) => void; label: string }) {
   return (
     <div className="dialog-tabs list-tabs" role="tablist" aria-label={label}>
       {tabs.map((tb) => (
-        <button key={tb.id} type="button" role="tab" aria-selected={value === tb.id} className={`dialog-tab${value === tb.id ? ' on' : ''}`} onClick={() => onChange(tb.id)}>
-          {tb.label}{tb.count !== undefined && <span className="list-tab-count">{tb.count}</span>}
+        <button key={tb.id} type="button" role="tab" aria-selected={value === tb.id} className={`dialog-tab${value === tb.id ? ' on' : ''}`} onClick={() => onChange(tb.id)}
+          {...(tb.icon ? { 'aria-label': tb.label, title: tb.label } : {})}>
+          {tb.icon ? <span className="list-tab-icon" aria-hidden="true">{tb.icon}</span> : tb.label}{tb.count !== undefined && <span className="list-tab-count">{tb.count}</span>}
         </button>
       ))}
     </div>

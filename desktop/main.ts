@@ -8,7 +8,7 @@ import { existsSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { TOOLS, isTool, listProjects, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
+import { TOOLS, isTool, listProjects, projectRepository, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
 import { callService, createService } from './service.ts';
 import { launchInTerminal, launchTool, openFolder } from './launcher.ts';
 import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './notes.ts';
@@ -18,6 +18,7 @@ import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
 import { runPdfLocal } from './pdf-local.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
 import { memoryUsage, planUsage } from './usage.ts';
+import { fixToolPath } from './tool-path.ts';
 
 const DIST = dirname(fileURLToPath(import.meta.url)); // app/dist-electron
 const UI = join(DIST, '..', 'dist'); // app/dist, inside the app (not the framework folder)
@@ -39,7 +40,11 @@ const service = createService(ROOT, {
   // Terminal tools open in a tab of the app; editors, or no node-pty, use the external launcher.
   launch: (tool, prompt, root, plugins = [], extra = []) => (fakeTools ? { opened: true, message: 'fake' }
     : terminals.available() && !TOOLS[tool].clipboard ? launchInTerminal(tool, prompt, root, terminals.prepare, plugins, extra) : launchTool(tool, prompt, root, plugins, extra)),
-  ...(fakeTools ? { detectTools: () => Object.fromEntries(Object.keys(TOOLS).map((k) => [k, true])) as Record<ToolKey, boolean> } : {}),
+  ...(fakeTools ? {
+    detectTools: () => Object.fromEntries(Object.keys(TOOLS).map((k) => [k, true])) as Record<ToolKey, boolean>,
+    which: (command: string) => command,
+    runCommand: async (_command: string, args: string[]) => (args[0] === '--version' ? '1.0.0 (fake)' : ''),
+  } : { fixPath: () => fixToolPath() }),
   openFolder,
   openPath: (file) => { void shell.openPath(file); },
   reveal: (path) => shell.showItemInFolder(path),
@@ -72,6 +77,7 @@ const service = createService(ROOT, {
 
 let win: BrowserWindow | null = null;
 let watcher: FSWatcher | null = null;
+let linkedWatcher: FSWatcher | null = null; // the open project's linked folder
 const noteWindows = new Map<string, BrowserWindow>();
 
 function isNoteWindow(contents: WebContents): boolean {
@@ -183,6 +189,8 @@ function createWindow(): void {
     noteWindows.clear();
     watcher?.close();
     watcher = null;
+    linkedWatcher?.close();
+    linkedWatcher = null;
     terminals.killAll();
   });
 }
@@ -214,14 +222,27 @@ if (!app.requestSingleInstanceLock()) {
       if (!trusted(event)) return false;
       watcher?.close();
       watcher = null;
+      linkedWatcher?.close();
+      linkedWatcher = null;
       if (typeof project !== 'string' || !listProjects(ROOT).includes(project)) return false;
       let timer: NodeJS.Timeout | null = null;
+      const changed = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => win?.webContents.send('qa:changed', project), 400);
+      };
       try {
-        watcher = watch(join(projectsDir(ROOT), project), { recursive: true }, () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => win?.webContents.send('qa:changed', project), 400);
-        });
+        watcher = watch(join(projectsDir(ROOT), project), { recursive: true }, changed);
       } catch { return false; }
+      // The linked folder shows live in the tree too; changes in its build and dependency folders are not news.
+      const linked = projectRepository(project, ROOT);
+      if (linked) {
+        try {
+          linkedWatcher = watch(linked, { recursive: true }, (_e, name) => {
+            if (name && /(^|[\\/])(node_modules|\.git|dist|build|__pycache__)([\\/]|$)/.test(String(name))) return;
+            changed();
+          });
+        } catch { /* a folder that cannot be watched still lists; it just does not refresh by itself */ }
+      }
       return true;
     });
 

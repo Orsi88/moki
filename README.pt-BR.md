@@ -31,7 +31,7 @@ Os seus projetos ficam em **Documentos\Moki**, e um instalador mais novo nunca m
 ## Primeiros passos
 
 1. Abra o Moki e escolha um **workspace** (uma pasta de projetos, como um cofre do Obsidian).
-2. Crie um **projeto**: arquivos de contexto de QA para um sistema que você testa, um projeto em branco que a IA planeja com você, ou uma pasta que você já tem.
+2. Crie um **projeto** (só com o nome, ou personalizado com tags e configuração) ou abra como projeto uma pasta que você já tem.
 3. Solte as histórias, os logs ou os documentos sobre a janela: eles vão para a entrada (inbox) do projeto.
 4. Aperte o **play**, escolha a atividade e a sua ferramenta de IA. O pedido abre lá, pronto.
 5. Converse com a IA como de costume. Cada atividade registra onde parou, então dá para voltar depois, na mesma ferramenta ou em outra.

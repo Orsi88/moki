@@ -31,7 +31,7 @@ Your projects live in **Documents\Moki**, and a newer installer never touches th
 ## First steps
 
 1. Open Moki and choose a **workspace** (a folder of projects, like an Obsidian vault).
-2. Create a **project**: QA context files for a system you test, a blank project the AI plans with you, or a folder you already have.
+2. Create a **project** (only a name, or customized with tags and setup) or open a folder you already have as one.
 3. Drop the stories, logs or documents onto the window: they go to the project's inbox.
 4. Press **play**, choose the activity and your AI tool. The request opens there, ready.
 5. Talk to the AI as usual. Each activity records where it stopped, so you can come back later, in the same tool or another.

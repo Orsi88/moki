@@ -14,6 +14,7 @@ import {
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
 import { checksum, chooseAsset, chooseAssets, download, latestRelease, systemFamily } from './craft-download.ts';
+import { extensionVersion, installExtension, mokiVsix, runCommand, toolVersion, type RunCommand } from './editor-extension.ts';
 import { LIMITS, readFolder, readZip, scan, type Scan } from './claude-import.ts';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
 import { setWorkspaceDir, workspaceDir, workspaceLabel } from '../scripts/lib/repo.mjs';
@@ -24,11 +25,12 @@ import { checkOperation, cleanOperation, formatMessage, listOperations, removeOp
 import { advance, answered, approve, canRedo, cancel, createOperationRun, decide, isOperationRun, markStarted, missingOutputs, readRun, reject, resume, retry, runEvents, startFailed, setPaused, stepExited, stepPrompt, type RunRequest } from '../scripts/lib/operation-runs.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
 import { allFavorites, isFavoriteKind, setFavoriteOf } from '../scripts/lib/favorites.ts';
-import { FILES_RULES, ID as ACTIVITY_ID, TARGET_KINDS, activityId, activityMarkdown, favorites, getActivity, listActivities, removeLibraryActivity, saveLibraryActivity, setFavorite, type ActivityDef, type FilesRule, type TargetKind } from '../scripts/lib/activities.ts';
+import { FILES_RULES, ID as ACTIVITY_ID, TARGET_KINDS, activityId, activityMarkdown, favorites, getActivity, isPickable, listActivities, removeLibraryActivity, saveLibraryActivity, setFavorite, type ActivityDef, type FilesRule, type TargetKind } from '../scripts/lib/activities.ts';
 import { listTemplates, removeTemplate, saveTemplate, setProjectTemplate, templateFor } from '../scripts/lib/doc-style.mjs';
 import { agentTags, agentsOfProject, setAgentTags, setAgentsOfProject } from '../scripts/lib/agent-tags.ts';
 import { appliesTo as reaches, projectTag } from '../scripts/lib/tags.mjs';
-import { xlsxSheets } from '../scripts/xlsx.mjs';
+import { blankXlsx, xlsxSheets } from '../scripts/xlsx.mjs';
+import { buildDocx } from '../scripts/docx.mjs';
 import { cleanPrompt, type LaunchResult } from './launcher.ts';
 import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
@@ -57,6 +59,9 @@ export interface Deps {
   trash?: (path: string) => Promise<void>; // removing skills/agents moves them to the trash (tests delete)
   onWorkspace?: (dir: string) => void; // the active workspace changed (the app passes it to the tools it starts)
   detectTools?: () => Record<ToolKey, boolean>; // AI tools installed (tests fake it)
+  fixPath?: () => void; // reads the PATH again, so a tool installed after the app started is found (desktop/tool-path.ts)
+  runCommand?: RunCommand; // versions and the Moki extension of the AI tools (desktop/editor-extension.ts); tests fake it
+  which?: (command: string) => string | null; // where a tool's command is (tests fake it)
   killTerminal?: (id: string) => void; // stops what runs in a terminal tab of the app (cancelling an operation)
   terminalAlive?: (id: string) => boolean; // whether a terminal tab exists in this session (a step's terminal is gone after a restart)
   writeTerminal?: (id: string, data: string) => void; // types into a terminal tab (an answer to the agent waiting there)
@@ -69,6 +74,7 @@ export interface TreeNode {
   type: 'dir' | 'file';
   size?: number;
   children?: TreeNode[];
+  linked?: string; // the linked folder's node (path "@folder"): its full path on this computer
   run?: { status: string; skill: string; currentStep: string };
   mcp?: string; // MCP server row: where it is configured
 }
@@ -123,6 +129,10 @@ const OFFICE_TYPES: Record<string, 'docx' | 'xlsx'> = { '.docx': 'docx', '.docm'
 const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
 const TEXT_TYPES = new Set(['.txt', '.log', '.csv', '.xml', '.yaml', '.yml', '.html', '.htm', '.feature', '.ts', '.js']);
 const PROPOSALS = 'skill-proposals'; // skills drafted by the AI tool from "Create skill", waiting for review
+// Office files "New" can create, empty (the app shows them; they are edited in Excel, Word or a Craft app).
+const BLANK_FILES: Record<string, () => Uint8Array> = { '.xlsx': () => blankXlsx(), '.docx': () => buildDocx({ blocks: [] }).buffer };
+export const LINKED = '@folder'; // the linked folder in the paths of a project (see projectPath)
+const SKIP_LINKED = new Set(['node_modules', '.git', '.moki-backup', 'dist', 'build', '__pycache__']); // not listed from a linked folder
 const TOP_ORDER = ['context', 'inbox', 'runs', 'notes', PROPOSALS, 'proposed-updates.md', 'activity-log.md', 'project.json', 'README.md', 'temporary'];
 
 const posix = (p: string): string => p.split(sep).join('/');
@@ -158,10 +168,19 @@ export function createService(root: string, deps: Deps) {
       throw e;
     }
   };
+  // Every path of a project the UI sends: "@folder/…" is inside the folder linked to it (shown live in the tree,
+  // never copied), anything else inside the project folder. Both stay confined by resolveInside.
+  const projectPath = (project: string, rel: unknown): string => {
+    const r = String(rel ?? '');
+    if (r !== LINKED && !r.startsWith(`${LINKED}/`)) return inside(projectDir(project), r);
+    const folder = projectRepository(project, root);
+    if (!folder || !existsSync(folder)) throw new ServiceError('This project has no linked folder.');
+    return inside(folder, r.slice(LINKED.length + 1));
+  };
 
   // An Excel, Word or PDF file of the project, and the system's "Open with".
   const openWithTarget = (project: string, rel: unknown): [AppChooser, string] => {
-    const file = inside(projectDir(project), rel);
+    const file = projectPath(project, rel);
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
     if (!openWithType(file)) throw new ServiceError('"Open with" is only for Excel, Word and PDF files.');
     if (!deps.appChooser) throw new ServiceError('"Open with" is not available here.');
@@ -291,6 +310,8 @@ export function createService(root: string, deps: Deps) {
   };
   const trash = deps.trash ?? (async (p: string) => rmSync(p, { recursive: true, force: true }));
   const doFetch = deps.fetch ?? fetch;
+  const runCmd = deps.runCommand ?? runCommand;
+  const appVersion = () => (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string }).version;
   const craftSystem = () => {
     const { platform, arch, family } = deps.craftSystem ?? { platform: process.platform, arch: process.arch };
     return { platform, arch, family: family ?? systemFamily(platform) };
@@ -385,17 +406,17 @@ export function createService(root: string, deps: Deps) {
     const base = projectDir(project);
     const runs = new Map(listRuns(project, root).map((r) => [r.id, r]));
     let count = 0;
-    const walk = (dir: string, depth: number): TreeNode[] => {
+    const walk = (dir: string, depth: number, from = base, prefix = ''): TreeNode[] => {
       const entries = readdirSync(dir, { withFileTypes: true })
-        .filter((e) => !e.name.startsWith('.'))
+        .filter((e) => !e.name.startsWith('.') && !(prefix && SKIP_LINKED.has(e.name)))
         .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
       const nodes: TreeNode[] = [];
       for (const e of entries) {
         if (++count > MAX_TREE_ENTRIES) break;
         const full = join(dir, e.name);
-        const path = posix(relative(base, full));
+        const path = prefix + posix(relative(from, full));
         if (e.isDirectory()) {
-          const node: TreeNode = { name: e.name, path, type: 'dir', children: depth < 8 ? walk(full, depth + 1) : [] };
+          const node: TreeNode = { name: e.name, path, type: 'dir', children: depth < 8 ? walk(full, depth + 1, from, prefix) : [] };
           const run = path.startsWith('runs/') && path.split('/').length === 2 ? runs.get(e.name) : undefined;
           if (run) node.run = { status: run.status, skill: String(run.skill ?? run.workflow ?? ''), currentStep: String(run.currentStep ?? '') };
           nodes.push(node);
@@ -411,7 +432,12 @@ export function createService(root: string, deps: Deps) {
     top.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
     const managed = enabledServers(project, root)
       .map((s): TreeNode => ({ name: s.name, path: `.mcps/Moki/${s.id}`, type: 'file', mcp: s.projects.length ? 'Moki (this project)' : 'Moki (global)' }));
-    return [...top, { name: 'MCPs', path: '.mcps', type: 'dir', children: [...managed, ...mcpServers(project)] }]; // last; ".mcps" never clashes with a real folder
+    // The linked folder, first and live (not copied): its own files, without .git, node_modules and the like.
+    const folder = projectRepository(project, root);
+    const linked: TreeNode[] = folder && existsSync(folder)
+      ? [{ name: basename(folder), path: LINKED, type: 'dir', linked: folder, children: walk(folder, 0, folder, `${LINKED}/`) }]
+      : [];
+    return [...linked, ...top, { name: 'MCPs', path: '.mcps', type: 'dir', children: [...managed, ...mcpServers(project)] }]; // last; ".mcps" never clashes with a real folder
   }
 
   // MCP servers the AI tools see in the project's repository (the linked folder, or the framework root where they start).
@@ -583,7 +609,7 @@ export function createService(root: string, deps: Deps) {
       const type = IMAGE_TYPES[extname(src).toLowerCase()];
       if (!type || type === 'image/svg+xml' || src.startsWith('/') || src.startsWith('\\')) return null;
       try {
-        const file = inside(projectDir(project), join(dirname(from), decodeURIComponent(src)));
+        const file = projectPath(project, posix(join(dirname(from), decodeURIComponent(src))));
         const stat = statSync(file);
         if (!stat.isFile() || stat.size > IMAGE_LIMIT || stat.size > budget) return null;
         budget -= stat.size;
@@ -593,7 +619,7 @@ export function createService(root: string, deps: Deps) {
   }
 
   function readFile(project: string, rel: string): FileContent {
-    const file = inside(projectDir(project), rel);
+    const file = projectPath(project, rel);
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
     const path = posix(String(rel));
     const ext = extname(file).toLowerCase();
@@ -649,7 +675,7 @@ export function createService(root: string, deps: Deps) {
   }
 
   return {
-    session: () => ({ version: (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string }).version, platform: process.platform }),
+    session: () => ({ version: appVersion(), platform: process.platform }),
 
     projects: () => listProjects(root).map((id) => projectSummary(id, root)),
 
@@ -706,13 +732,27 @@ export function createService(root: string, deps: Deps) {
       return true;
     },
 
-    // "Link an existing folder" (start screen): the folder chosen in the native dialog, and a project name from it.
-    pickFolder: async () => {
+    // "Open a project" (start screen): the folder chosen in the native dialog. A folder already linked to a project
+    // returns that project (it just opens); otherwise the folder and a suggested name, for createProject to link it.
+    pickFolder: async (): Promise<{ folder: string; name: string; project?: ProjectSummary } | null> => {
       if (!deps.pickFolder) throw new ServiceError('Choosing a folder is not available here.');
       const chosen = await deps.pickFolder();
       if (!chosen) return null;
-      picked = checkFolder(chosen);
-      return { folder: picked, name: basename(picked) };
+      const folder = checkFolder(chosen);
+      const known = listProjects(root).map((id) => projectSummary(id, root)).find((p) => p.repository && resolve(p.repository) === folder);
+      if (known) return { folder, name: known.name, project: known };
+      picked = folder;
+      return { folder, name: basename(folder) };
+    },
+
+    // "Open in the IDE" (the linked folder in the tree): that folder in an editor Moki knows (VS Code, Cursor).
+    openInEditor: async (project: string, tool: unknown) => {
+      if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].clipboard || !TOOLS[tool].command) throw new ServiceError('Choose an IDE (VS Code or Cursor).');
+      const folder = projectRepository(project, root);
+      if (!folder || !existsSync(folder)) throw new ServiceError('This project has no linked folder.');
+      if (!(deps.detectTools ?? detectTools)()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
+      await failingAsync(() => runCmd(TOOLS[tool].command!, [folder], 15_000));
+      return true;
     },
 
     // Tags share context between projects (see contextChoice in scripts/lib/core.ts).
@@ -745,6 +785,7 @@ export function createService(root: string, deps: Deps) {
     },
     fileTags: (project: string) => { projectDir(project); return fileTags(project, root); },
     setFileTags: (project: string, rel: unknown, ids: unknown) => {
+      if (String(rel ?? '').startsWith(LINKED)) throw new ServiceError('Tags are for the files of the project, not of its linked folder.');
       inside(projectDir(project), rel);
       try { return setFileTags(project, String(rel), ids, root); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); }
     },
@@ -758,7 +799,7 @@ export function createService(root: string, deps: Deps) {
     activities: (project?: unknown) => {
       const id = typeof project === 'string' && listProjects(root).includes(project) ? project : undefined;
       const stars = favorites(root);
-      return { activities: listActivities(root, id).map((a) => activityInfo(a, id, stars)), languages: LANGUAGES };
+      return { activities: listActivities(root, id).filter(isPickable).map((a) => activityInfo(a, id, stars)), languages: LANGUAGES };
     },
     // Favorites of every kind (activities, agents, operations, templates, skills): they come first in their lists.
     favorites: () => allFavorites(root),
@@ -816,7 +857,37 @@ export function createService(root: string, deps: Deps) {
         id: k, label: TOOLS[k].label, hint: TOOLS[k].hint ?? '', command: TOOLS[k].command ?? '',
         kind: TOOLS[k].chat ? 'chat' : TOOLS[k].print ? 'print' : TOOLS[k].clipboard ? 'editor' : 'terminal',
         available: available[k], installable: Boolean(TOOLS[k].install),
+        docs: TOOLS[k].install?.docs ?? '', download: TOOLS[k].download ?? '', mokiExtension: TOOLS[k].mokiExtension ?? '',
       }));
+    },
+
+    // Settings › My AIs: the PATH read again, then where each terminal tool and editor is, its version
+    // and, in the editors that take it, the Moki extension's version ('' = unknown or not installed).
+    aiTools: async () => {
+      deps.fixPath?.();
+      const available = (deps.detectTools ?? detectTools)();
+      const keys = (Object.keys(TOOLS) as ToolKey[]).filter((k) => TOOLS[k].command);
+      return Promise.all(keys.map(async (k) => {
+        const found = available[k];
+        return {
+          id: k, available: found, path: found ? (deps.which ?? which)(TOOLS[k].command!) ?? '' : '',
+          version: found ? await toolVersion(k, runCmd) : '',
+          extension: found && TOOLS[k].mokiExtension ? await extensionVersion(k, runCmd) : '',
+        };
+      }));
+    },
+
+    // Installs the Moki extension of this app's version in the editor, then opens the editor on the project's
+    // linked folder (or Moki's folder), where the extension finds the project.
+    installMokiExtension: async (tool: unknown, project?: unknown) => {
+      if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].mokiExtension) throw new ServiceError('This tool does not take the Moki extension.');
+      if (!(deps.detectTools ?? detectTools)()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
+      const linked = typeof project === 'string' && project ? (projectDir(project), projectRepository(project, root)) : null;
+      const folder = linked && existsSync(linked) ? linked : root;
+      const vsix = await failingAsync(() => mokiVsix(root, appVersion(), tmpdir(), doFetch));
+      await failingAsync(() => installExtension(tool, vsix, runCmd));
+      await runCmd(TOOLS[tool].command!, [folder], 15_000);
+      return { version: await extensionVersion(tool, runCmd), folder };
     },
 
     tree: (project: string) => tree(project),
@@ -824,7 +895,7 @@ export function createService(root: string, deps: Deps) {
     readFile: (project: string, rel: string) => readFile(project, rel),
 
     writeFile: (project: string, rel: string, text: unknown) => {
-      const file = inside(projectDir(project), rel);
+      const file = projectPath(project, rel);
       if (!isEditable(file)) throw new ServiceError('Only Markdown and text files can be edited here.');
       if (!existsSync(file)) throw new ServiceError('File not found.');
       if (typeof text !== 'string' || text.length > TEXT_LIMIT) throw new ServiceError('Invalid content.');
@@ -1352,7 +1423,7 @@ export function createService(root: string, deps: Deps) {
       const rel = String(parent ?? '').replace(/\/+$/, '');
       if (rel === 'runs' || rel.startsWith('runs/')) throw new ServiceError('Activities keep their own structure. Create it in another folder.');
       if (rel === 'notes') mkdirSync(inside(dir, 'notes'), { recursive: true }); // listed before the first note exists
-      const folder = inside(dir, rel);
+      const folder = projectPath(project, rel);
       if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new ServiceError('Folder not found.');
       let entry = String(name ?? '').trim();
       if (!entry || entry.length > 120 || /[<>:"/\\|?*\u0000-\u001f]/.test(entry) || entry.startsWith('.') || /[. ]$/.test(entry)
@@ -1361,24 +1432,24 @@ export function createService(root: string, deps: Deps) {
       }
       if (kind === 'file') {
         if (!extname(entry)) entry += '.md';
-        if (!isEditable(entry)) throw new ServiceError('Only Markdown (.md) and text (.txt) files can be created here.');
+        if (!isEditable(entry) && !BLANK_FILES[extname(entry).toLowerCase()]) throw new ServiceError('Only Markdown (.md), text (.txt), spreadsheet (.xlsx) and Word (.docx) files can be created here.');
       } else if (kind !== 'folder') throw new ServiceError('Unknown kind.');
       const path = rel ? `${rel}/${entry}` : entry;
-      const target = inside(dir, path);
+      const target = projectPath(project, path);
       if (existsSync(target)) throw new ServiceError('A file or folder with this name already exists here.');
-      if (kind === 'file') writeFileSync(target, '', { encoding: 'utf8', flag: 'wx' }); else mkdirSync(target);
+      if (kind === 'file') writeFileSync(target, BLANK_FILES[extname(entry).toLowerCase()]?.() ?? '', { flag: 'wx' }); else mkdirSync(target);
       return path;
     },
 
     // Where a file or folder of the project is on this computer: shown selected in the file manager, or its full path (to copy).
     revealPath: (project: string, rel: unknown) => {
-      const path = inside(projectDir(project), rel);
+      const path = projectPath(project, rel);
       if (!existsSync(path)) throw new ServiceError('File not found.');
       if (deps.reveal) deps.reveal(path); else deps.openFolder(statSync(path).isDirectory() ? path : dirname(path));
       return true;
     },
     copyPath: (project: string, rel: unknown) => {
-      const path = inside(projectDir(project), rel);
+      const path = projectPath(project, rel);
       if (!existsSync(path)) throw new ServiceError('File not found.');
       if (!deps.copy) throw new ServiceError('Copying is not available here.');
       deps.copy(path);
@@ -1405,7 +1476,7 @@ export function createService(root: string, deps: Deps) {
     },
 
     openExternal: (project: string, rel: string) => {
-      const file = inside(projectDir(project), rel);
+      const file = projectPath(project, rel);
       if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
       if (!isOpenable(file)) throw new ServiceError('This type of file is not opened from the app.');
       deps.openPath(file);
@@ -1780,6 +1851,7 @@ export function createService(root: string, deps: Deps) {
       const activity = String(req.activity ?? '');
       const def = listActivities(root, project).find((a) => a.id === activity); // only the activities this project sees
       if (!def) throw new ServiceError('Unknown activity.');
+      if (activity === 'talk' && !req.agent) throw new ServiceError('Choose the agent to talk with.');
       if (def.target.kind === 'operation') throw new ServiceError(`The activity "${def.label}" starts the operation ${def.target.name}: start it from the Operations panel.`);
       if (!activityInfo(def, project, []).available) throw new ServiceError(`The activity "${def.label}" is not available yet.`);
       const tool = String(req.tool ?? '');

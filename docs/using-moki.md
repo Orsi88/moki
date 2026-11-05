@@ -8,18 +8,21 @@
 
 1. Choose the activity.
 2. Optionally choose which inbox files to include, which shared context to keep (when the project has tags, see [Tags](#tags)) and who should do it (an agent).
-3. Add a note and pick the tool.
+3. Add a note and pick the tool. It starts on your default AI (**Settings › My AIs**); picking another one here is for this request only.
 
 Claude Code, Codex, Gemini CLI, Antigravity CLI and Cursor Agent open in a terminal tab of the app. Cursor and VS Code open the folder with the request copied. ChatGPT, claude.ai, Gemini web, and *Just show the request*, leave the text on the screen ready to copy. If opening is still running after about 20 seconds, the wizard says so.
 
+To talk an idea through without an activity, the project panel's **Call an agent** picks one of the project's agents (and, optionally, what about) and opens your AI as that agent, for a conversation: no run starts and nothing is written unless you ask.
+
 Then you talk in that tool as usual. The request names the project, the linked folder, and the skills and agents installed for it.
 
-**Settings** (the gear) has six tabs, each one a list with filters and a search field:
+**Settings** (the gear) has seven tabs; besides My AIs, each one is a list with filters and a search field:
 
 | Tab | What you do there |
 |---|---|
 | **Agents** | Roles that use one or more skills. Duplicate a built-in one, or create your own; tags say which projects it reaches. |
 | **Activities** | The ready-made requests you pick in "Open in your AI tool": the ones of Moki, and your own (what to ask, of which skill, agent, workflow or operation, with which files). See [Activities](activities.md). |
+| **My AIs** | The AI tools Moki opens (terminal and editor), each with its version (the path in its tooltip). The card's icon does its main action (install, or install or update the Moki extension) and its **…** menu has the others, such as **Make default**, the one activities start in. **Install** a missing terminal AI: a terminal tab shows the official command and runs it only after you type `y`; then **Check again**. For VS Code and Cursor, **Install the Moki extension and open** installs the extension of this app's version (from its release, checked by SHA-256) and opens the editor on the project's linked folder; a missing editor gets **Download**. In Cursor the extension is marked *Not verified*. An AI not found here, chosen while starting an activity, brings you to this tab. |
 | **Operations** | Agents linked by arrows into a multi-agent operation. See [Agents and operations](agents.md). |
 | **Skills** | What is already installed, what ships with Moki, the app plugins (in purple), and **Add a skill**: search the public [SkillMD](https://skillmd.com) registry, describe one for your AI tool to draft, or **Upload** skills and agents from a `.claude` folder (or a `.zip`) on your computer. The same upload is in **Set up project** (for the project or for every project) and on the start screen without a project open (for every project). You choose the items and confirm before anything is installed. |
 | **MCP servers** | The tools the AI gets, global or for chosen projects. See [MCP servers](mcp-servers.md). |

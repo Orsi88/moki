@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
-import { recall, remember } from '../prefs';
+import { preferredTool } from '../prefs';
 import { conversationLanguage, t } from '../i18n';
 import { IconCheck, IconInfo } from './Icons';
 import { DEFAULT_SKILL_CAT, setSkillCat } from '../icons/cats';
@@ -22,7 +22,7 @@ export function SkillForm({ project, scope, tools, onTerminal }: Props) {
   const [prompt, setPrompt] = useState('');
   const [cat, setCat] = useState(DEFAULT_SKILL_CAT); // its icon in the cat library
   const [picking, setPicking] = useState(false);
-  const [tool, setTool] = useState(() => usable.find((t) => t.id === recall('qa-tool'))?.id ?? usable[0]?.id ?? '');
+  const [tool, setTool] = useState(() => preferredTool(usable)?.id ?? '');
   const [proposals, setProposals] = useState<{ name: string; description: string }[]>([]);
   const [busy, setBusy] = useState('');
   const [info, setInfo] = useState('');
@@ -33,7 +33,6 @@ export function SkillForm({ project, scope, tools, onTerminal }: Props) {
 
   const create = async () => {
     setBusy('create'); setError(''); setInfo('');
-    remember('qa-tool', tool);
     setSkillCat(name, cat);
     try {
       const r = await api.proposeSkill(project.id, { name, prompt, tool, language: conversationLanguage() });

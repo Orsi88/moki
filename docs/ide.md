@@ -32,6 +32,8 @@ Registering a tool in Moki instead of directly in the IDE means the agents, the 
 
 ## Install
 
+**From the desktop app.** **Settings › My AIs › Install the Moki extension and open** on the VS Code card installs the extension of the app's version (downloaded from its release and checked by SHA-256) and opens VS Code on the project's linked folder. The Cursor card does the same, marked *Not verified*.
+
 **From the release.** Download [moki-0.3.0.vsix](https://github.com/Orsi88/moki/releases/download/v0.3.0/moki-0.3.0.vsix) from the [latest release](https://github.com/Orsi88/moki/releases/latest), then:
 
 ```bash
@@ -65,7 +67,7 @@ The extension finds the project of the folder open in VS Code:
 | It is linked to more than one | Status bar: **Moki: choose a project** |
 | It is linked to none | Status bar: **Moki: no project** |
 
-To link a folder for good, open the project in the desktop app and use **Choose my folder**: every VS Code window on that folder then opens the project by itself. To pick a project for this VS Code workspace only, click the status bar item, the project selector at the top of the panel, or run **Moki: Choose Project**. A folder linked from the app is listed first, as *Linked to this folder*.
+To link a folder for good, open the project in the desktop app and use the **link** button of the ribbon (the chain): every VS Code window on that folder then opens the project by itself. To pick a project for this VS Code workspace only, click the status bar item, the project selector at the top of the panel, or run **Moki: Choose Project**. A folder linked from the app is listed first, as *Linked to this folder*.
 
 ### 2. Connect the AI to Moki's MCP servers
 
@@ -176,9 +178,9 @@ Any tool that speaks MCP over stdio can use Moki's server: `npm run mcp -- --pro
 | The Claude Code chat does not see Moki | `.mcp.json` was never written, or was written before the servers changed | **Connect Claude Code**, then start a new Claude Code session |
 | Copilot does not list a server | Its `${VARIABLE}` is not set on this computer (it is left out), or it is off or not for this project in the app | Set the variable and restart VS Code; check the server in the app |
 | **MCPs: 0 on** | No server registered in the app applies to this project and is on | Expected when you use only Moki's server; otherwise register or enable servers in the app |
-| *This project has no linked folder on this computer* (Sync to Cursor) | The project's folder was never linked on this computer | Link it in the app (**Choose my folder**) |
+| *This project has no linked folder on this computer* (Sync to Cursor) | The project's folder was never linked on this computer | Link it in the app (the **link** button of the ribbon) |
 | *project.json does not allow writing to …* | The project sets `writeAllowed: false` for its folder | Write the file yourself, or allow writing in `project.json` |
-| *… is not installed on this computer (command "…" not found).* | The AI tool chosen (for the request or for a step) is not installed or not on the PATH | Install it, or choose another AI (in the desktop app, a terminal tab of a missing Claude Code or Codex offers to install it after you type `y`). A step that cannot start fails once and waits: **Try again** offers the installed AIs |
+| *… is not installed on this computer (command "…" not found).* | The AI tool chosen (for the request or for a step) is not installed or not on the PATH | Install it, or choose another AI (in the desktop app, **Settings › My AIs › Install**, or a terminal tab of the missing AI, installs it after you type `y`). A step that cannot start fails once and waits: **Try again** offers the installed AIs |
 | *The terminal of this step is not open in VS Code.* | The step's terminal was closed, or VS Code was restarted | Answer the step in the panel (it reopens with your answer) or **Reopen the step** |
 | A step shows **Failed** | Its terminal closed before it wrote its summary, or its AI could not open | **Try again**, with the same or another AI; what it delivered stays in its folder |
 | *No AI tool that runs in a terminal is installed* | Operations need a terminal AI (Claude Code, Codex, Gemini CLI, Antigravity CLI, Cursor Agent) | Install one |
