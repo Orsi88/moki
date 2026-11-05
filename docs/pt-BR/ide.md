@@ -36,10 +36,10 @@ Cadastrar uma ferramenta no Moki, em vez de direto na IDE, faz com que os agente
 
 **Pelo app desktop.** **Configurações › Minhas IAs › Instalar a extensão do Moki e abrir**, no cartão do VS Code, instala a extensão da versão do app (baixada da release e conferida por SHA-256) e abre o VS Code na pasta ligada do projeto. O cartão do Cursor faz o mesmo, marcado como *Não verificado*.
 
-**Pela release.** Baixe o [moki-0.4.1.vsix](https://github.com/Orsi88/moki/releases/download/v0.4.1/moki-0.4.1.vsix) da [release mais recente](https://github.com/Orsi88/moki/releases/latest) e rode:
+**Pela release.** Baixe o [moki-0.4.2.vsix](https://github.com/Orsi88/moki/releases/download/v0.4.2/moki-0.4.2.vsix) da [release mais recente](https://github.com/Orsi88/moki/releases/latest) e rode:
 
 ```bash
-code --install-extension moki-0.4.1.vsix --force
+code --install-extension moki-0.4.2.vsix --force
 ```
 
 **A partir do código.** Na raiz do repositório:
