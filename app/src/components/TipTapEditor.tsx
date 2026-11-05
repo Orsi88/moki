@@ -118,40 +118,99 @@ const alignImage = (editor: Editor, align: 'center' | 'right' | null) => {
   editor.chain().focus().updateAttributes('image', { align }).run();
 };
 
-// The address of the link under the caret. Typing here replaces it; clearing the field removes the link.
+// The words of the link under the caret, and where they sit in the document.
+const linkSpan = (editor: Editor): { from: number; to: number; text: string } | null => {
+  const type = editor.schema.marks.link;
+  if (!type || !editor.isActive('link')) return null;
+  const pos = editor.state.selection.from;
+  let from = -1;
+  let to = -1;
+  const touch = (start: number, end: number) => from >= 0 && end >= from && start <= to;
+  for (let pass = 0; pass < 3; pass++) {
+    editor.state.doc.nodesBetween(0, editor.state.doc.content.size, (node, nodePos) => {
+      if (!node.isText || !type.isInSet(node.marks)) return;
+      const start = nodePos;
+      const end = nodePos + node.nodeSize;
+      if ((pos < start || pos > end) && !touch(start, end)) return;
+      from = from < 0 ? start : Math.min(from, start);
+      to = to < 0 ? end : Math.max(to, end);
+    });
+  }
+  if (from < 0) return null;
+  return { from, to, text: editor.state.doc.textBetween(from, to, '') };
+};
+
+const openLink = (href: string) => {
+  const url = href.trim();
+  if (!/^https?:\/\/\S+$/i.test(url) || url.length < 10) return;
+  window.open(url, '_blank', 'noopener');
+};
+
+// Shown on the link: the visible words, the address, and a button that opens it.
+// A click on the link itself also opens it; these fields are how the words and the address change.
 function LinkBubble({ editor }: { editor: Editor }) {
   const [href, setHref] = useState('');
-  const [value, setValue] = useState('');
-  const editing = useRef(false);
+  const [url, setUrl] = useState('');
+  const [label, setLabel] = useState('');
+  const editing = useRef<'url' | 'text' | null>(null);
   useEffect(() => {
     const sync = () => {
       const next = String(editor.getAttributes('link').href ?? '');
       setHref(next);
-      if (!editing.current) setValue(next);
+      if (editing.current !== 'url') setUrl(next);
+      if (editing.current !== 'text') setLabel(linkSpan(editor)?.text ?? '');
     };
     sync();
     editor.on('selectionUpdate', sync);
     return () => { editor.off('selectionUpdate', sync); };
   }, [editor]);
-  const apply = (next: string) => {
-    const url = next.trim();
+  const applyUrl = (next: string) => {
+    const value = next.trim();
     const chain = editor.chain().focus().extendMarkRange('link');
-    if (!url) chain.unsetLink().run();
-    else chain.setLink({ href: url }).run();
-    setHref(url);
+    if (!value) chain.unsetLink().run();
+    else chain.setLink({ href: value }).run();
+    setHref(value);
   };
-  const onKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+  const applyText = (next: string) => {
+    const span = linkSpan(editor);
+    const text = next.trim();
+    const type = editor.schema.marks.link;
+    if (!span || !type || text === span.text) return;
+    if (!text) {
+      editor.chain().focus().deleteRange({ from: span.from, to: span.to }).run();
+      return;
+    }
+    const mark = type.create({ href: String(editor.getAttributes('link').href ?? '') });
+    editor.chain().focus().command(({ tr }) => {
+      tr.insertText(text, span.from, span.to);
+      tr.addMark(span.from, span.from + text.length, mark);
+      return true;
+    }).run();
+  };
+  const onKey = (apply: (value: string) => void, value: string) => (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') { event.preventDefault(); apply(value); }
     event.stopPropagation();
   };
   return (
     <BubbleMenu editor={editor} pluginKey="linkMenu" shouldShow={() => editor.isActive('link')} options={{ placement: 'bottom', offset: 8 }}>
       <div className="image-bubble link-bubble" role="toolbar" aria-label={t('Link')}>
-        <input value={value} aria-label={t('Link')} spellCheck={false} placeholder="https://"
-          onFocus={() => { editing.current = true; }}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => { editing.current = false; if (value.trim() !== href) apply(value); }}
-          onKeyDown={onKey} />
+        <label className="link-row">
+          <span>{t('Text')}</span>
+          <input value={label} aria-label={t('Text')}
+            onFocus={() => { editing.current = 'text'; }}
+            onChange={(event) => setLabel(event.target.value)}
+            onBlur={() => { editing.current = null; applyText(label); }}
+            onKeyDown={onKey(applyText, label)} />
+        </label>
+        <label className="link-row">
+          <span>{t('Link')}</span>
+          <input value={url} aria-label={t('Link')} spellCheck={false} placeholder="https://"
+            onFocus={() => { editing.current = 'url'; }}
+            onChange={(event) => setUrl(event.target.value)}
+            onBlur={() => { editing.current = null; if (url.trim() !== href) applyUrl(url); }}
+            onKeyDown={onKey(applyUrl, url)} />
+          <button type="button" className="btn btn-sm" onMouseDown={(event) => event.preventDefault()} onClick={() => openLink(url || href)}>{t('Open')}</button>
+        </label>
       </div>
     </BubbleMenu>
   );
@@ -189,8 +248,12 @@ const applyCommand = (editor: Editor, name: TipTapCommand) => {
     case 'codeBlock': return chain.toggleCodeBlock().run();
     case 'divider': return chain.setHorizontalRule().run();
     case 'link': {
-      const { empty } = editor.state.selection;
-      if (empty) return chain.insertContent({ type: 'text', text: t('Link'), marks: [{ type: 'link', attrs: { href: 'https://' } }] }).run();
+      const { empty, from } = editor.state.selection;
+      const label = t('Link');
+      if (empty) {
+        return chain.insertContent({ type: 'text', text: label, marks: [{ type: 'link', attrs: { href: 'https://' } }] })
+          .setTextSelection({ from, to: from + label.length }).run();
+      }
       return chain.setLink({ href: editor.getAttributes('link').href || 'https://' }).run();
     }
     case 'table': return chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
@@ -284,6 +347,14 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
     contentType: 'markdown',
     editorProps: {
       attributes: { class: 'tiptap-body', spellcheck: 'true' },
+      handleClick(view, pos, event) {
+        const el = event.target instanceof Element ? event.target.closest('a') : null;
+        if (!el || !view.dom.contains(el)) return false;
+        event.preventDefault();
+        editorRef.current?.commands.setTextSelection(pos);
+        openLink(el.getAttribute('href') ?? '');
+        return true;
+      },
       handlePaste(_view, event) {
         const images = imageFiles(event.clipboardData?.files);
         if (!images.length || !editorRef.current) return false;

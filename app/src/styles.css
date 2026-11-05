@@ -482,8 +482,12 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .tiptap-wrap .ProseMirror th { background: var(--bg-2); font-weight: 600; text-align: left; }
 .tiptap-wrap .ProseMirror td p, .tiptap-wrap .ProseMirror th p { margin: 0; }
+.tiptap-wrap .ProseMirror a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.link-bubble { flex-direction: column; align-items: stretch; gap: 4px; }
+.link-bubble .link-row { display: flex; align-items: center; gap: 6px; }
+.link-bubble .link-row > span { flex: 0 0 auto; font-size: 0.75rem; color: var(--muted); }
 .link-bubble input {
-  width: min(280px, 70vw); border: 0; background: transparent; color: inherit; font: inherit; font-size: 0.85rem; outline: none; padding: 2px 6px;
+  width: min(240px, 60vw); border: 0; background: transparent; color: inherit; font: inherit; font-size: 0.85rem; outline: none; padding: 2px 4px;
 }
 .tiptap-wrap .code-embed {
   margin: 8px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); overflow: hidden;
