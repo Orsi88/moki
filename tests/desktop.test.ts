@@ -1789,7 +1789,10 @@ test('a missing installable tool opens run-tool in the tab; the request carries 
     assert.equal(req.tool, 'claude');
     assert.equal(req.command, 'claude');
     assert.equal(req.args.at(-1), 'olá mundo');
-    assert.equal(launchInTerminal('gemini', 'x', root, () => 'never').opened, false); // no install option: refused as before
+    // Every terminal AI has an install plan now: a missing Gemini opens run-tool too, with its own request.
+    const gemini: TermSpec[] = [];
+    assert.equal(launchInTerminal('gemini', 'x', root, (spec) => { gemini.push(spec); return 't2'; }).opened, true);
+    assert.equal(JSON.parse(readFileSync(gemini[0].args[1], 'utf8')).tool, 'gemini');
   } finally {
     for (const [k, v] of Object.entries(env)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     for (const d of [bin, home, root]) rmSync(d, { recursive: true, force: true });
