@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type OperationAnswer, type OperationPlan, type OperationRun, type ToolInfo } from '../api';
 import { t } from '../i18n';
-import { recall, remember } from '../prefs';
+import { defaultTool, recall, remember } from '../prefs';
 import { IconPlay, IconPlus, IconX } from './Icons';
 
 interface Props {
@@ -22,7 +22,7 @@ const AIS = ['claude', 'codex', 'cursor-agent', 'gemini', 'antigravity'];
 export function OperationLaunch({ project, operation, tools, onClose, onStarted }: Props) {
   const [plan, setPlan] = useState<OperationPlan | null>(null);
   const [mode, setMode] = useState<'agents' | 'single'>(() => (recall('qa-ops-ai-mode') === 'single' ? 'single' : 'agents'));
-  const [single, setSingle] = useState(() => recall('qa-tool') ?? '');
+  const [single, setSingle] = useState(defaultTool);
   const [chosen, setChosen] = useState<Record<string, string>>({}); // steps whose agent has no AI of its own
   const [answers, setAnswers] = useState<Record<string, OperationAnswer>>({});
   const [context, setContext] = useState('');
@@ -67,7 +67,6 @@ export function OperationLaunch({ project, operation, tools, onClose, onStarted 
     if (!plan) return;
     setBusy(true); setError('');
     remember('qa-ops-ai-mode', mode);
-    if (mode === 'single' && fallback) remember('qa-tool', fallback);
     try {
       const run = await api.startOperation(project, operation, {
         tools: Object.fromEntries(plan.steps.map((s) => [s.id, toolOf(s)])),

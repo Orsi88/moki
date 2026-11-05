@@ -27,8 +27,8 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [created, setCreated] = useState<string | null>(null); // a new project opens with "Set up"
-  const [createdNotice, setCreatedNotice] = useState(''); // what linking its folder did
+  // A project just made: the structured one opens with "Set up"; one opened from a folder says what linking it did.
+  const [created, setCreated] = useState<{ id: string; setup: boolean; notice: string } | null>(null);
   const [settings, setSettings] = useState<SettingsTab | null>(null);
   const [launchOnOpen, setLaunchOnOpen] = useState(false);
   const [pendingTerm, setPendingTerm] = useState<TerminalRef | null>(null);
@@ -53,6 +53,7 @@ export function App() {
   }, []);
 
   const loadProjects = useCallback(() => api.projects().then(setProjects), []);
+  const loadTools = useCallback(() => { api.integrations().then(setTools).catch(() => { /* keeps the list it has */ }); }, []);
 
   useEffect(() => {
     if (!hasBridge()) { setError(t('Moki must be opened with the qa command.')); return; }
@@ -80,12 +81,13 @@ export function App() {
 
   const open = (id: string) => { setSettings(null); setProjectId(id); setCreated(null); remember(id); };
   const home = () => { setSettings(null); setProjectId(null); setCreated(null); remember(null); void loadProjects(); };
-  const create = async (name: string, starter: Starter, folder?: string, tags: string[] = []) => {
+  // New project: Enter on the name (setup false) opens it as is; "Create and customize" opens it with "Set up".
+  // With a folder (from "Open a project"), the project is linked to it and says what linking did.
+  const create = async (name: string, starter: Starter, tags: string[] = [], setup = true, folder?: string) => {
     const project = await api.createProject(name, starter, folder, tags);
     await loadProjects();
     open(project.id);
-    setCreated(project.id);
-    setCreatedNotice(folder ? linkedNotice(project) : '');
+    setCreated({ id: project.id, setup, notice: folder ? linkedNotice(project) : '' });
   };
   const onProjectChanged = useCallback(() => { void loadProjects(); }, [loadProjects]);
   // A workspace was opened (picker or switcher): its projects, on the start screen. null goes back to the picker.
@@ -129,10 +131,10 @@ export function App() {
     return (
       <div className="shell">
         <Ribbon settingsOn={settings !== null} onHome={home} onSettings={() => setSettings(settings ? null : 'agents')} searchOn={search} onSearch={toggleSearch} />
-        <Home projects={projects} tools={tools} version={version} onOpen={open} onCreate={create} settings={settings} onSettings={setSettings} project={null} onTerminal={openTerminal} workspace={workspace} onWorkspace={openWorkspace} search={search} onSearch={toggleSearch} onFound={openFound} onDeleted={() => { void loadProjects(); }} />
+        <Home projects={projects} tools={tools} version={version} onOpen={open} onCreate={create} settings={settings} onSettings={setSettings} project={null} onTerminal={openTerminal} workspace={workspace} onWorkspace={openWorkspace} search={search} onSearch={toggleSearch} onFound={openFound} onDeleted={() => { void loadProjects(); }} onToolsChanged={loadTools} />
         <footer className="statusbar"><span className="statusbar-spacer" /><UsageStatus names={Object.fromEntries(projects.map((p) => [p.id, p.name]))} /></footer>
       </div>
     );
   }
-  return <Workspace key={project.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created === project.id} startNotice={created === project.id ? createdNotice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} />;
+  return <Workspace key={project.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created?.id === project.id && created.setup} startNotice={created?.id === project.id ? created.notice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} onToolsChanged={loadTools} />;
 }

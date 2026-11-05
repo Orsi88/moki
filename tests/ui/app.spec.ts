@@ -6,7 +6,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { ROOT } from '../../scripts/lib/repo.mjs';
 
 const require = createRequire(import.meta.url);
@@ -81,8 +81,8 @@ test.describe.serial('Moki settings', () => {
     mkdirSync(scratch, { recursive: true });
     writeFileSync(join(scratch, 'root.txt'), `${root}\n${userData}\n`);
     ({ app, page } = await openApp(root, userData));
-    await expect(page.getByRole('button', { name: 'Configurações' })).toBeVisible();
-    await page.getByRole('button', { name: 'Configurações' }).click();
+    await expect(page.getByRole('button', { name: 'Configurações', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Configurações', exact: true }).click();
     await expect(page.getByRole('tab', { name: 'Templates' })).toBeVisible();
   });
 
@@ -494,6 +494,31 @@ test.describe.serial('Moki workspaces', () => {
     expect(existsSync(join(dirs[0], 'workspace', 'projects', 'old-portal'))).toBe(false);
   });
 
+  test('creating a project: Enter on the name opens it with the standard folders; Create and customize opens with Set up', async () => {
+    await wsPage.getByRole('button', { name: 'Criar', exact: true }).click(); // the + of "Create a new project"
+    await wsPage.getByRole('textbox', { name: /Nome do projeto/ }).fill('Rapido');
+    await wsPage.keyboard.press('Enter');
+    await expect(wsPage.locator('.project-switch')).toHaveText('Rapido');
+    await expect(wsPage.getByRole('dialog')).toHaveCount(0); // nothing to set up
+    const quick = join(dirs[0], 'workspace', 'projects', 'rapido');
+    for (const sub of ['context', 'inbox', 'runs', 'temporary']) expect(existsSync(join(quick, sub))).toBe(true);
+    expect(readdirSync(join(quick, 'context'))).toEqual([]);
+
+    await wsPage.locator('.project-switch').click(); // back to the start screen
+    await wsPage.getByRole('button', { name: 'Criar', exact: true }).click();
+    await wsPage.getByRole('textbox', { name: /Nome do projeto/ }).fill('Personalizado');
+    await wsPage.getByRole('button', { name: 'Criar e personalizar…' }).click();
+    const dialog = wsPage.getByRole('dialog', { name: 'Personalizar o projeto' });
+    await expect(dialog.getByLabel('Nome do projeto')).toHaveValue('Personalizado');
+    await expect(dialog.getByRole('radio')).toHaveText([/Vazio/, /Planejado pela IA/]); // nothing specific to QA
+    await dialog.getByRole('button', { name: 'Criar e configurar' }).click();
+    await expect(wsPage.locator('.project-switch')).toHaveText('Personalizado');
+    await expect(wsPage.getByRole('dialog')).toBeVisible(); // Set up the project
+    expect(readdirSync(join(dirs[0], 'workspace', 'projects', 'personalizado', 'context'))).toEqual([]);
+    await wsPage.keyboard.press('Escape');
+    await wsPage.locator('.project-switch').click();
+  });
+
   test('a loose note opens inside the app; its notebook window lists the loose notes opened, as tabs', async () => {
     await wsPage.getByRole('button', { name: 'Nova nota' }).click();
     const note = wsPage.locator('.home-main .note-dialog'); // in the main area of the start screen, not a popup
@@ -574,6 +599,10 @@ test.describe.serial('Moki project tree', () => {
     await md.click();
     await md.pressSequentially('/tab');
     await expect(treePage.getByRole('listbox', { name: 'Comandos' })).toContainText('Tabela');
+    // It opens at the caret, as in a note: just under the first line, not at the bottom of the editor.
+    const mdBox = await md.boundingBox();
+    const listBox = await treePage.getByRole('listbox', { name: 'Comandos' }).boundingBox();
+    expect(listBox!.y - mdBox!.y).toBeLessThan(80);
     await md.press('Enter');
     await expect(md).toHaveValue(/\| Coluna 1 \| Coluna 2 \| Coluna 3 \|/);
     await treePage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
@@ -593,6 +622,70 @@ test.describe.serial('Moki project tree', () => {
     await treePage.keyboard.press('Escape');
   });
 
+  test('the sidebar is in blocks: folders, Tracking and Other files, then Project settings and MCPs; the Operations card is in the project panel', async () => {
+    const project = join(dirs[0], 'workspace', 'projects', 'acme');
+    writeFileSync(join(project, 'rascunho.md'), 'x');
+    const other = treePage.locator('.tree-row[title=".other"]');
+    await expect(other).toContainText('Outros arquivos');
+    await expect(treePage.locator('.tree-row[title="rascunho.md"]')).toHaveCount(0);
+    await other.click();
+    await expect(treePage.locator('.tree-row[title="rascunho.md"]')).toBeVisible();
+    // A group of the sidebar is not a folder: no menu to create, reveal or copy.
+    await expect(treePage.locator('.tree-line', { has: other }).getByRole('button', { name: 'Mais opções' })).toHaveCount(0);
+
+    // The files Moki keeps up to date are grouped too, with their friendly names.
+    await treePage.locator('.tree-row[title=".tracking"]').click();
+    await expect(treePage.locator('.tree-row[title="activity-log.md"]')).toContainText('Registro de atividades');
+
+    // Project settings opens like a folder: README.md and project.json; the MCP servers stay apart, below it.
+    const config = treePage.locator('.tree-row[title=".settings"]');
+    await expect(config).toContainText('Configurações do projeto');
+    await expect(treePage.locator('.tree-row[title="project.json"]')).toHaveCount(0);
+    await expect(treePage.locator('.tree-row[title=".mcps"]')).toBeVisible();
+    await config.click();
+    await expect(treePage.locator('.tree-row[title="project.json"]')).toBeVisible();
+    // Operations is the last card of the project panel, below the AI assistant; with nothing under way it opens on the operations to start.
+    const ops = treePage.locator('.panel').getByRole('region', { name: 'Operações' });
+    await expect(ops.getByRole('tab', { name: 'Iniciar' })).toHaveAttribute('aria-selected', 'true');
+    const order = await treePage.locator('.sidebar-scroll > *').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.className));
+    expect(order).toEqual(['tree']); // only the files scroll
+    // The sidebar keeps only the files and, fixed below them, the settings.
+    const blocks = await treePage.locator('.sidebar > *').evaluateAll((els) => els.map((e) => e.className.split(' ')[0]));
+    expect(blocks.slice(-2)).toEqual(['sidebar-scroll', 'sidebar-foot']);
+    await expect(treePage.locator('.sidebar .ops-side')).toHaveCount(0);
+    // Project settings and the MCP servers stay fixed at the bottom of the sidebar.
+    await expect(treePage.locator('.sidebar-foot .tree-row[title=".settings"]')).toBeVisible();
+    await expect(treePage.locator('.sidebar-foot .tree-row[title=".mcps"]')).toBeVisible();
+  });
+
+  test('a linked folder shows first in the tree, live, with Open in the IDE; its files open in the app', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'moki-linked-'));
+    dirs.push(folder);
+    mkdirSync(join(folder, 'docs'));
+    writeFileSync(join(folder, 'docs', 'us-1.md'), '# US-1 da pasta');
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'project.json');
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...data, repositories: [{ name: 'app', localPath: folder, linkedFolder: true }] }, null, 2));
+    // Opened again, as after creating it from the folder: the folder is listed and watched.
+    await treePage.locator('.project-switch').click();
+    await treePage.locator('.home-project', { hasText: 'Acme Library' }).first().click();
+
+    const linked = treePage.locator('.tree-row[title="' + folder.replace(/\\/g, '\\\\') + '"]');
+    await expect(linked).toContainText(basename(folder));
+    await expect(treePage.locator('.sidebar-scroll .tree-row.top').first()).toHaveAttribute('title', folder);
+    await expect(treePage.locator('.tree-line', { has: linked }).getByRole('button', { name: 'Abrir na IDE' })).toBeVisible();
+    await linked.click();
+    await treePage.locator('.tree-row[title="@folder/docs"]').click();
+    await treePage.locator('.tree-row[title="@folder/docs/us-1.md"]').click();
+    await expect(treePage.locator('.markdown h1', { hasText: 'US-1 da pasta' })).toBeVisible();
+    await expect(treePage.locator('.file-tags-bar')).toHaveCount(0); // tags are for the project's own files
+
+    // Changes in the folder show by themselves.
+    writeFileSync(join(folder, 'docs', 'us-2.md'), '# US-2');
+    await expect(treePage.locator('.tree-row[title="@folder/docs/us-2.md"]')).toBeVisible();
+    writeFileSync(file, JSON.stringify(data, null, 2));
+  });
+
   test('typing / in a note lists the formatting commands; a checklist continues on Enter', async () => {
     await treePage.locator('.tree-row[title="notes"]').click();
     await treePage.getByRole('button', { name: 'Nova nota' }).click();
@@ -605,6 +698,8 @@ test.describe.serial('Moki project tree', () => {
     await editor.pressSequentially('/tare');
     await expect(commands.getByRole('option')).toHaveCount(1);
     await expect(commands.getByRole('option', { name: 'Checklist' })).toBeVisible();
+    const editorBox = await editor.boundingBox();
+    expect((await commands.boundingBox())!.y - editorBox!.y).toBeLessThan(80); // at the caret, under the first line
     await editor.press('Enter');
     await expect(commands).toBeHidden();
     await expect(editor).toHaveValue('- [ ] ');
@@ -762,7 +857,11 @@ test.describe.serial('Moki operations in a project', () => {
     // The step's panel takes the right side of the screen: the project panel steps aside while the board shows.
     await expect(opsPage.locator('.workspace.panel-rail')).toHaveCount(1);
     await expect(runView.locator('.ops-run-panel')).toHaveCSS('position', 'absolute');
-    await expect(side.locator('.ops-side-row', { hasText: 'Em andamento' })).toBeVisible();
+    // The Operations card lives in that project panel: it steps aside with it, and is back in the list view.
+    await expect(side).toHaveCount(0);
+    await runView.getByRole('button', { name: 'Lista', exact: true }).click();
+    await expect(side.locator('.ops-side-row', { hasText: 'Em andamento' })).toHaveAttribute('data-status', 'in-progress'); // its color: lilac
+    await runView.getByRole('button', { name: 'Quadro', exact: true }).click();
     const runs = join(dirs[0], 'workspace', 'projects', 'acme', 'runs');
     const runId = readdirSync(runs).find((d) => d.includes('-op-fluxo-qa')) as string;
     const run = join(runs, runId);
@@ -829,7 +928,7 @@ test.describe.serial('Moki operations in a project', () => {
     await delivered.locator('.run-file').first().click();
     await expect(delivered.locator('.run-preview')).toBeVisible();
     // Closed, the run stays in the side panel, among the finished ones.
-    await side.getByText('Concluídas (1)').click();
+    await side.getByRole('tab', { name: /Concluídas/ }).click();
     await expect(side.locator('.ops-side-ended .ops-side-row')).toContainText('Fluxo QA');
   });
 
@@ -868,7 +967,7 @@ test.describe.serial('Moki operations in a project', () => {
     await expect(runView.locator('.pill-outcome')).toHaveText(['rejected', 'approved']);
 
     // In the editor, the reviewer's card has a dot per result (and "otherwise"); the arrow shows its result; the loop curves back.
-    await opsPage.getByRole('button', { name: 'Configurações' }).click();
+    await opsPage.getByRole('button', { name: 'Configurações', exact: true }).click();
     await opsPage.getByRole('tab', { name: 'Operações' }).click();
     await opsPage.locator('.library-item', { hasText: 'Revisa até aprovar' }).click();
     await expect(opsPage.locator('[data-step="s1"] .ops-dot-label')).toHaveText(['approved', 'rejected', 'senão']);
@@ -897,7 +996,8 @@ test.describe.serial('Moki terminals outlive the project screen', () => {
 
   test('leaving the project does not close its terminal; opening it again brings the tab back', async () => {
     await termPage.getByTitle('Novo terminal').first().click();
-    await termPage.getByRole('menuitem', { name: /Terminal/ }).first().click();
+    await termPage.getByRole('menuitem', { name: 'Terminal' }).click(); // the category, then its option
+    await termPage.getByRole('menuitem', { name: /seu shell/ }).click();
     const pane = termPage.locator('.term-pane:not([hidden])');
     await expect(pane).toBeVisible();
     await pane.click();
@@ -917,9 +1017,32 @@ test.describe.serial('Moki terminals outlive the project screen', () => {
     await expect(termPage.locator('.term-pane')).toHaveCount(0);
   });
 
+  test('the + of the tabs opens categories in place; File creates an empty spreadsheet in Inbox and shows it', async () => {
+    await termPage.getByTitle('Novo: terminal, IA ou arquivo').click();
+    const menu = termPage.getByRole('menu');
+    await expect(menu.getByRole('menuitem')).toHaveText(['Terminal', 'IA', 'Arquivo', 'Apps ArtCraft']);
+    await menu.getByRole('menuitem', { name: 'Arquivo' }).click();
+    await expect(menu.getByRole('menuitem')).toHaveText(['Voltar', 'Nota (.md)', 'Texto (.txt)', 'Planilha (.xlsx)', 'Documento Word (.docx)']);
+    await termPage.keyboard.press('Escape'); // back to the categories
+    await expect(menu.getByRole('menuitem').first()).toHaveText('Terminal');
+    await menu.getByRole('menuitem', { name: 'Arquivo' }).click();
+    await menu.getByRole('menuitem', { name: 'Planilha (.xlsx)' }).click();
+
+    const dialog = termPage.getByRole('dialog', { name: 'Nova planilha' });
+    await expect(dialog.getByLabel('Pasta')).toHaveValue('inbox');
+    await dialog.getByLabel('Nome').fill('casos');
+    await expect(dialog).toContainText('Será salvo como casos.xlsx.');
+    await dialog.getByRole('button', { name: 'Criar' }).click();
+    await expect(dialog).toBeHidden();
+    const file = join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'casos.xlsx');
+    expect(existsSync(file)).toBe(true);
+    await expect(termPage.locator('.tree-row[title="inbox/casos.xlsx"]')).toBeVisible();
+  });
+
   // The download itself needs GitHub (main-process fetch is not faked here); the unit tests cover it.
   test('the + menu offers the ArtCraft apps: 16 apps, launcher first, and a Download button for each', async () => {
     await termPage.getByTitle('Novo terminal').first().click();
+    await termPage.getByRole('menuitem', { name: 'Apps ArtCraft' }).click();
     await termPage.getByRole('menuitem', { name: /Baixar apps ArtCraft/ }).click();
     const dialog = termPage.getByRole('dialog', { name: 'Baixar apps ArtCraft' });
     await expect(dialog.locator('.skill-row')).toHaveCount(16);
@@ -955,7 +1078,7 @@ test.describe.serial('Moki MCP servers list', () => {
 
   test('a server is made global or given to chosen projects from its row', async () => {
     const saved = () => (JSON.parse(readFileSync(catalog, 'utf8')) as { servers: { projects: string[] }[] }).servers[0].projects;
-    await mcpPage.getByRole('button', { name: 'Configurações' }).click();
+    await mcpPage.getByRole('button', { name: 'Configurações', exact: true }).click();
     await mcpPage.getByRole('tab', { name: 'Servidores MCP' }).click();
     await expect(mcpPage.getByText('Usar nas IAs')).toHaveCount(0);
     const global = mcpPage.getByRole('switch', { name: 'Global: Playwright em todos os projetos' });
@@ -1035,6 +1158,7 @@ test.describe.serial('Moki PDF comments', () => {
   });
 
   test('a selection is commented right on the page; the comment stays beside it, joined by a line', async () => {
+    await pdfPage.locator('.tree-row[title=".other"]').click(); // files loose in the project root are grouped in the sidebar
     await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
     const span = pdfPage.locator('.pdf-page .textLayer span', { hasText: 'Requisito' }).first();
     await expect(span).toBeVisible();
@@ -1151,7 +1275,7 @@ test.describe.serial('Moki activities', () => {
   });
 
   test('a new activity is created in Settings, starred, and comes first when opening the AI tool', async () => {
-    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('button', { name: 'Configurações', exact: true }).click();
     await actPage.getByRole('tab', { name: 'Atividades' }).click();
     await expect(actPage.locator('.activity-item .list-card-title').getByText('Desenhar testes', { exact: true })).toBeVisible(); // one that comes with Moki
     await actPage.getByRole('button', { name: 'Nova atividade' }).click();
@@ -1170,7 +1294,7 @@ test.describe.serial('Moki activities', () => {
     await expect(actPage.locator('.activity-item .list-card-title')).toHaveText(['Checar smoke']);
 
     // In the project, the starred activity is the first one offered.
-    await actPage.getByRole('button', { name: 'Configurações' }).click();
+    await actPage.getByRole('button', { name: 'Configurações', exact: true }).click();
     await actPage.getByRole('button', { name: 'Abrir na sua ferramenta de IA' }).click();
     await expect(actPage.locator('.answer-list .answer').first()).toContainText('Checar smoke');
   });
@@ -1199,7 +1323,7 @@ test.describe.serial('Moki settings without a project', () => {
     await emptyPage.getByPlaceholder('ex.: Cliente X').fill('Vazio');
     await emptyPage.getByRole('button', { name: 'Criar workspace' }).click();
     await expect(emptyPage.getByText('Nenhum projeto ainda.')).toBeVisible();
-    await emptyPage.getByRole('button', { name: 'Configurações' }).click();
+    await emptyPage.getByRole('button', { name: 'Configurações', exact: true }).click();
     await emptyPage.getByRole('tab', { name: 'Skills' }).click();
     await expect(emptyPage.getByRole('heading', { name: 'Skills', level: 1 })).toBeVisible();
     await expect(emptyPage.locator('.list-card-title').getByText('test-design', { exact: true })).toBeVisible();
@@ -1242,7 +1366,7 @@ test.describe.serial('Moki favorites', () => {
 
   test('agents, operations, templates and skills are starred from their cards and come first', async () => {
     const saved = () => { try { return JSON.parse(readFileSync(favFile, 'utf8')) as Record<string, string[]>; } catch { return {}; } };
-    await favPage.getByRole('button', { name: 'Configurações' }).click();
+    await favPage.getByRole('button', { name: 'Configurações', exact: true }).click();
 
     await favPage.getByRole('tab', { name: 'Agentes' }).click();
     await favPage.getByRole('button', { name: 'Favorita: test-designer' }).click();
@@ -1264,5 +1388,67 @@ test.describe.serial('Moki favorites', () => {
 
     await expect.poll(() => saved().skills).toEqual(['test-design']);
     expect(saved()).toMatchObject({ agents: ['test-designer'], operations: ['beta'], templates: ['default'] });
+  });
+});
+
+// Settings › My AIs: the default AI is chosen there; an activity starts in it and choosing another one there does not change it.
+// AI tools are faked (QA_FAKE_TOOLS): every one looks installed and reports version 1.0.0 (fake).
+test.describe.serial('Moki my AIs and the project panel', () => {
+  let aiApp: ElectronApplication;
+  let aiPage: Page;
+  const dirs: string[] = [];
+
+  test.beforeAll(async () => {
+    const root = fixture();
+    const userData = mkdtempSync(join(tmpdir(), 'moki-profile-'));
+    dirs.push(root, userData);
+    ({ app: aiApp, page: aiPage } = await openApp(root, userData, 'acme', { QA_FAKE_TOOLS: '1' }));
+  });
+
+  test.afterAll(async () => {
+    await aiApp?.close();
+    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  test('the default AI is set in My AIs and an activity choosing another one keeps it', async () => {
+    await aiPage.getByRole('button', { name: 'Configurações', exact: true }).click();
+    await aiPage.getByRole('tab', { name: 'Minhas IAs' }).click();
+    const gemini = aiPage.locator('.ai-card').filter({ hasText: 'Gemini CLI' });
+    await expect(gemini).toContainText('1.0.0 (fake)');
+    await expect(aiPage.locator('.ai-card.on')).toHaveCount(1);
+    await expect(aiPage.locator('.ai-card').filter({ hasText: 'VS Code' })).toContainText('Extensão do Moki não instalada');
+    await expect(aiPage.locator('.ai-card').filter({ hasText: 'Editor Cursor' }).getByText('Não verificado')).toBeVisible();
+    // VS Code shows the extension as not installed, so its card offers installing it as its icon.
+    await expect(aiPage.locator('.ai-card').filter({ hasText: 'VS Code' }).getByRole('button', { name: 'Instalar a extensão do Moki e abrir' })).toBeVisible();
+    await gemini.getByRole('button', { name: 'Mais opções de Gemini CLI' }).click();
+    await aiPage.getByRole('menuitem', { name: 'Tornar padrão' }).click();
+    await expect(gemini).toHaveClass(/\bon\b/);
+    await expect(gemini.getByText('Padrão', { exact: true })).toBeVisible();
+    expect(await aiPage.evaluate(() => localStorage.getItem('qa-tool'))).toBe('gemini');
+    // The default AI has nothing more to offer: no "…" that would open an empty menu.
+    await expect(gemini.getByRole('button', { name: 'Mais opções de Gemini CLI' })).toHaveCount(0);
+
+    await aiPage.keyboard.press('Escape');
+    const where = aiPage.locator('.pp-field').filter({ has: aiPage.locator('.pp-field-label', { hasText: /^Onde$/ }) }).locator('.pp-pick');
+    await expect(where).toContainText('Gemini CLI');
+    await where.click();
+    await aiPage.locator('.catalog-card').filter({ hasText: 'OpenAI Codex CLI' }).click();
+    await expect(where).toContainText('OpenAI Codex CLI');
+    expect(await aiPage.evaluate(() => localStorage.getItem('qa-tool'))).toBe('gemini');
+  });
+
+  test('the project panel only acts: an activity, or a conversation with an agent', async () => {
+    const panel = aiPage.locator('.pp');
+    await expect(panel.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
+    for (const gone of ['Minha pasta', 'Agentes deste projeto', 'Entregáveis']) await expect(panel.getByText(gone)).toHaveCount(0);
+    await panel.getByRole('button', { name: 'Chamar agente' }).click();
+    const dialog = aiPage.getByRole('dialog', { name: 'Com quem você quer conversar?' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('textbox', { name: 'Sobre o quê? (opcional)' }).fill('Uma regra de cupom');
+    await dialog.getByRole('searchbox', { name: 'Buscar agentes' }).fill('test-designer');
+    await expect(dialog.locator('.catalog-card')).toHaveCount(1);
+    await dialog.locator('.catalog-card').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(panel.locator('.pp-msg')).toHaveText('fake'); // QA_FAKE_TOOLS: started, nothing opened
   });
 });

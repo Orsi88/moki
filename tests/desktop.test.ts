@@ -258,7 +258,7 @@ test('open folder / open with default program are confined and filtered', () => 
   assert.throws(() => service.openExternal('acme', 'inbox/tool.exe'), /not opened from the app/);
 });
 
-test('new files and folders: Markdown/text only, safe names, never inside activities', () => {
+test('new files and folders: Markdown, text, empty spreadsheet and Word files, safe names, never inside activities', () => {
   const project = join(root, 'workspace', 'projects', 'acme');
   assert.equal(service.createEntry('acme', 'inbox', 'cenarios login', 'file'), 'inbox/cenarios login.md');
   assert.equal(readFileSync(join(project, 'inbox', 'cenarios login.md'), 'utf8'), '');
@@ -267,7 +267,15 @@ test('new files and folders: Markdown/text only, safe names, never inside activi
   assert.equal(service.createEntry('acme', 'sprint-12', 'casos', 'file'), 'sprint-12/casos.md');
   assert.ok(existsSync(join(project, 'sprint-12', 'casos.md')));
   assert.throws(() => service.createEntry('acme', 'inbox', 'cenarios login.md', 'file'), /already exists/);
-  assert.throws(() => service.createEntry('acme', 'inbox', 'planilha.xlsx', 'file'), /Only Markdown/);
+  // Spreadsheets and Word documents are created empty and valid: the app reads them back.
+  assert.equal(service.createEntry('acme', 'inbox', 'planilha.xlsx', 'file'), 'inbox/planilha.xlsx');
+  const sheet = service.readFile('acme', 'inbox/planilha.xlsx');
+  assert.equal(sheet.kind, 'xlsx');
+  if (sheet.kind === 'xlsx') assert.deepEqual(sheet.sheets.map((x) => [x.name, x.rows.length]), [['Sheet1', 0]]);
+  assert.equal(service.createEntry('acme', 'inbox', 'relatorio.docx', 'file'), 'inbox/relatorio.docx');
+  assert.equal(service.readFile('acme', 'inbox/relatorio.docx').kind, 'docx');
+  rmSync(join(project, 'inbox', 'planilha.xlsx')); rmSync(join(project, 'inbox', 'relatorio.docx'));
+  assert.throws(() => service.createEntry('acme', 'inbox', 'imagem.png', 'file'), /Only Markdown/);
   for (const bad of ['', '../fora', 'a/b', 'a\\b', '.oculto', 'nome.', 'con', 'x:y', 'a*b']) {
     assert.throws(() => service.createEntry('acme', 'inbox', bad, 'file'), ServiceError, bad);
   }
@@ -1181,6 +1189,57 @@ test('linked folder: linking records it and backs up its AI settings inside it',
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });
 
+test('open a folder: the name is yours, the folder shows live in the tree as @folder, and opens in an IDE', async () => {
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), 'qa-open-')));
+  const folder = join(repo, 'loja');
+  mkdirSync(join(folder, 'docs'), { recursive: true });
+  mkdirSync(join(folder, 'node_modules', 'x'), { recursive: true });
+  writeFileSync(join(folder, 'docs', 'us-1.md'), '# US-1');
+  writeFileSync(join(repo, 'fora.md'), 'secret');
+  let pick: string | null = null;
+  const ran: [string, string[]][] = [];
+  const svc = createService(root, {
+    launch: () => ({ opened: true, message: '' }), openFolder: () => {}, openPath: () => {}, pickFolder: async () => pick,
+    detectTools: () => ({ vscode: true }) as Record<string, boolean>,
+    runCommand: async (cmd, args) => { ran.push([cmd, args]); return ''; },
+  });
+  try {
+    assert.equal(await svc.pickFolder(), null, 'cancelled dialog');
+    pick = folder;
+    assert.deepEqual(await svc.pickFolder(), { folder, name: 'loja' }, 'a suggestion only: the UI asks the name');
+    const made = svc.createProject('Loja Virtual', 'minimal', folder, []);
+    assert.equal(made.id, 'loja-virtual');
+    assert.equal(made.repository, folder);
+    const again = await svc.pickFolder();
+    assert.equal(again?.project?.id, 'loja-virtual', 'the same folder opens its project');
+
+    // The tree starts with the linked folder, live, without node_modules.
+    const top = svc.tree('loja-virtual')[0];
+    assert.deepEqual([top.name, top.path, top.linked], ['loja', '@folder', folder]);
+    assert.deepEqual(top.children?.map((n) => n.path), ['@folder/docs']);
+    assert.deepEqual(top.children?.[0].children?.map((n) => n.path), ['@folder/docs/us-1.md']);
+    // Its files are read, edited and created in place; nothing outside it is reachable.
+    assert.equal(svc.readFile('loja-virtual', '@folder/docs/us-1.md').kind, 'markdown');
+    svc.writeFile('loja-virtual', '@folder/docs/us-1.md', '# US-1 v2');
+    assert.equal(readFileSync(join(folder, 'docs', 'us-1.md'), 'utf8'), '# US-1 v2');
+    assert.equal(svc.createEntry('loja-virtual', '@folder/docs', 'us-2', 'file'), '@folder/docs/us-2.md');
+    assert.ok(existsSync(join(folder, 'docs', 'us-2.md')));
+    for (const bad of ['@folder/../fora.md', '@folder/../../x']) assert.throws(() => svc.readFile('loja-virtual', bad), ServiceError, bad);
+    assert.throws(() => svc.setFileTags('loja-virtual', '@folder/docs/us-1.md', []), /linked folder/);
+    assert.throws(() => svc.readFile('acme', '@folder/x.md'), /no linked folder/);
+
+    // Open in the IDE: only an editor, installed, on the linked folder.
+    assert.equal(await svc.openInEditor('loja-virtual', 'vscode'), true);
+    assert.deepEqual(ran, [['code', [folder]]]);
+    await assert.rejects(svc.openInEditor('loja-virtual', 'claude'), /IDE/);
+    await assert.rejects(svc.openInEditor('loja-virtual', 'cursor'), /not installed/);
+    await assert.rejects(svc.openInEditor('acme', 'vscode'), /no linked folder/);
+    rmSync(join(root, 'workspace', 'projects', 'loja-virtual'), { recursive: true, force: true });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('linked folder: a project can be created from an existing folder chosen in the dialog', async () => {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), 'qa-repo-')));
   writeFileSync(join(repo, 'CLAUDE.md'), '# repo');
@@ -1204,7 +1263,10 @@ test('linked folder: a project can be created from an existing folder chosen in 
     const exclude = () => readFileSync(join(repo, '.git', 'info', 'exclude'), 'utf8');
     assert.equal(exclude(), '# git ls-files --others --exclude-from=.git/info/exclude\n.moki-backup/\n');
     pick = repo;
-    await svc.pickFolder();
+    assert.equal((await svc.pickFolder())?.project?.id, 'from-folder', 'a linked folder opens its project');
+    assert.throws(() => svc.createProject('Twice', 'qa', repo), /Choose the folder again/, 'no second project for it');
+    rmSync(join(root, 'workspace', 'projects', 'from-folder'), { recursive: true });
+    await svc.pickFolder(); // no project has it now
     svc.createProject('Twice', 'qa', repo);
     assert.equal(exclude().match(/\.moki-backup\//g)?.length, 1, 'added once');
     assert.throws(() => svc.createProject('Again', 'qa', repo), /Choose the folder again/, 'a pick is used once');
@@ -1694,14 +1756,21 @@ test('launcher keeps user text out of any shell command line', () => {
   assert.equal(win, '/d /s /c "start "Moki - X" "C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Júlia\\qa\\run-tool.mjs" "C:\\t\\open.json""');
 });
 
-test('install plans: fixed vendor commands per system; link-only tools and gemini have none', () => {
+test('install plans: fixed vendor commands per system for every terminal AI; editors are downloaded, not installed', () => {
   assert.deepEqual(installPlan('claude', 'linux'), { file: '/bin/sh', args: ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], shown: 'curl -fsSL https://claude.ai/install.sh | bash' });
   assert.equal(installPlan('claude', 'win32')?.file, 'powershell.exe');
   assert.equal(installPlan('claude', 'win32')?.shown, 'irm https://claude.ai/install.ps1 | iex');
   assert.equal(installPlan('codex', 'darwin')?.shown, 'npm install -g @openai/codex');
-  for (const t of ['cursor-agent', 'antigravity', 'gemini'] as ToolKey[]) { assert.equal(installPlan(t, 'linux'), null); assert.equal(installPlan(t, 'win32'), null); }
-  assert.equal(TOOLS.gemini.install, undefined);
+  assert.equal(installPlan('gemini', 'win32')?.shown, 'npm install -g @google/gemini-cli');
+  assert.equal(installPlan('cursor-agent', 'linux')?.shown, 'curl https://cursor.com/install -fsS | bash');
+  assert.equal(installPlan('cursor-agent', 'win32')?.shown, "irm 'https://cursor.com/install?win32=true' | iex");
+  assert.equal(installPlan('antigravity', 'darwin')?.shown, 'curl -fsSL https://antigravity.google/cli/install.sh | bash');
+  assert.equal(installPlan('antigravity', 'win32')?.shown, 'irm https://antigravity.google/cli/install.ps1 | iex');
+  for (const t of ['cursor', 'vscode', 'chat', 'print'] as ToolKey[]) assert.equal(installPlan(t, 'linux'), null);
   for (const t of Object.values(TOOLS)) if (t.install) assert.match(t.install.docs, /^https:\/\//);
+  for (const t of [TOOLS.cursor, TOOLS.vscode]) assert.match(t.download ?? '', /^https:\/\//);
+  assert.equal(TOOLS.vscode.mokiExtension, 'supported');
+  assert.equal(TOOLS.cursor.mokiExtension, 'unverified');
 });
 
 test('a missing installable tool opens run-tool in the tab; the request carries the tool and one prompt argument', { skip: process.platform === 'win32' }, () => {
@@ -2206,5 +2275,93 @@ test('craft apps: the files for each system, recommended first, and exact names 
     rmSync(join(dir, 'chosen.AppImage'));
     await assert.rejects(mk({}, join(dir, 'missing', NAME)).svc.craftDownload('wordcraft', 'v1.2.3', NAME), /Could not save in .*missing: the folder does not exist/);
     assert.deepEqual(readdirSync(dir), []);
+  });
+}
+
+// Settings › My AIs: where each AI is and its version, and the Moki extension of the app's version in the editors.
+{
+  const BODY = Buffer.from('pretend vsix');
+  const SHA = createHash('sha256').update(BODY).digest('hex');
+  const NAME = 'moki-9.9.9.vsix'; // the fixture's package.json is 9.9.9
+  const found = { claude: true, codex: false, 'cursor-agent': false, gemini: false, antigravity: false, cursor: false, vscode: true, chat: true, print: true };
+  const mk = (digest: string | null = SHA) => {
+    const runs: string[][] = [];
+    const urls: string[] = [];
+    let extension = '';
+    const svc = createService(root, {
+      ...noLaunch,
+      detectTools: () => found as Record<ToolKey, boolean>,
+      which: (command) => `/bin/${command}`,
+      fetch: (async (url: string | URL | Request) => {
+        const u = String(url);
+        urls.push(u);
+        if (u.endsWith('/releases/tags/v9.9.9')) return Response.json({ tag_name: 'v9.9.9', assets: [{ name: NAME, size: BODY.length, ...(digest ? { digest: `sha256:${digest}` } : {}) }] });
+        return new Response(BODY);
+      }) as typeof fetch,
+      runCommand: async (command, args) => {
+        runs.push([command, ...args]);
+        if (args[0] === '--version') return command === 'claude' ? '2.1.0 (Claude Code)\n' : '1.99.0\nabc123\n';
+        if (args[0] === '--list-extensions') return `ms-python.python@2026.1.0\n${extension}`;
+        if (args[0] === '--install-extension') {
+          if (!readFileSync(args[1]).equals(BODY)) return null;
+          extension = 'orsi88.moki@9.9.9';
+          return 'Extension installed.';
+        }
+        return '';
+      },
+    });
+    return { svc, runs, urls };
+  };
+
+  test('my AIs: path and version of the installed tools, nothing run for the missing ones', async () => {
+    const { svc, runs } = mk();
+    const list = await svc.aiTools();
+    assert.deepEqual(list.map((s) => s.id), ['claude', 'codex', 'cursor-agent', 'gemini', 'antigravity', 'cursor', 'vscode']);
+    assert.deepEqual(list.find((s) => s.id === 'claude'), { id: 'claude', available: true, path: '/bin/claude', version: '2.1.0 (Claude Code)', extension: '' });
+    assert.deepEqual(list.find((s) => s.id === 'codex'), { id: 'codex', available: false, path: '', version: '', extension: '' });
+    assert.deepEqual(list.find((s) => s.id === 'vscode'), { id: 'vscode', available: true, path: '/bin/code', version: '1.99.0', extension: '' });
+    assert.ok(runs.every(([command]) => command === 'claude' || command === 'code'));
+    const info = svc.integrations().find((t) => t.id === 'vscode');
+    assert.equal(info?.download, 'https://code.visualstudio.com/Download');
+    assert.equal(info?.mokiExtension, 'supported');
+  });
+
+  test('my AIs: the Moki extension of the app version is downloaded, verified, installed and the editor opens', async () => {
+    const { svc, runs, urls } = mk();
+    const r = await svc.installMokiExtension('vscode', 'acme');
+    assert.deepEqual(r, { version: '9.9.9', folder: root });
+    assert.ok(urls[0].endsWith('/repos/Orsi88/moki/releases/tags/v9.9.9'));
+    assert.ok(urls.includes(`https://github.com/Orsi88/moki/releases/download/v9.9.9/${NAME}`));
+    const install = runs.find((a) => a[1] === '--install-extension');
+    assert.deepEqual(install?.slice(0, 2), ['code', '--install-extension']);
+    assert.equal(install?.[3], '--force');
+    assert.equal(existsSync(install![2]), false); // the download is removed
+    assert.ok(runs.some((a) => a[0] === 'code' && a[1] === root));
+    assert.equal((await svc.aiTools()).find((s) => s.id === 'vscode')?.extension, '9.9.9');
+  });
+
+  test('my AIs: only installed editors that take the extension, and only a vsix GitHub vouches for', async () => {
+    const { svc, runs } = mk();
+    await assert.rejects(svc.installMokiExtension('claude'), /does not take the Moki extension/);
+    await assert.rejects(svc.installMokiExtension('../x'), /does not take the Moki extension/);
+    await assert.rejects(svc.installMokiExtension('cursor'), /not installed on this computer/);
+    await assert.rejects(svc.installMokiExtension('vscode', 'nope'));
+    const bad = mk(null);
+    await assert.rejects(bad.svc.installMokiExtension('vscode'), /publishes no SHA-256 for moki-9\.9\.9\.vsix/);
+    const wrong = mk('0'.repeat(64));
+    await assert.rejects(wrong.svc.installMokiExtension('vscode'), /Integrity check failed/);
+    assert.deepEqual([...runs, ...bad.runs, ...wrong.runs].filter((a) => a[1] === '--install-extension'), []);
+  });
+
+  test('my AIs: in a checkout, the vsix built in release/ is installed without downloading', async () => {
+    mkdirSync(join(root, 'release'), { recursive: true });
+    writeFileSync(join(root, 'release', NAME), BODY);
+    try {
+      const { svc, urls, runs } = mk();
+      await svc.installMokiExtension('vscode');
+      assert.deepEqual(urls, []);
+      assert.ok(runs.some((a) => a[1] === '--install-extension' && a[2] === join(root, 'release', NAME)));
+      assert.ok(existsSync(join(root, 'release', NAME))); // the built one stays
+    } finally { rmSync(join(root, 'release'), { recursive: true, force: true }); }
   });
 }

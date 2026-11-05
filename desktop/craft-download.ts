@@ -38,8 +38,17 @@ async function get(url: string, doFetch: Fetch, onMissing: string, timeout = API
 }
 
 export async function latestRelease(app: CraftApp, doFetch: Fetch = fetch): Promise<CraftRelease> {
-  const none = `${app.label} has no published release yet. See ${releasesPage(app)}.`;
-  const data = await (await get(`https://api.github.com/repos/${app.repo}/releases/latest`, doFetch, none)).json() as { tag_name?: unknown; assets?: Record<string, unknown>[] };
+  return readRelease(app, 'latest', `${app.label} has no published release yet. See ${releasesPage(app)}.`, doFetch);
+}
+
+// One release by its tag (the Moki extension of the app's own version, desktop/editor-extension.ts).
+export async function releaseByTag(app: CraftApp, tag: string, doFetch: Fetch = fetch): Promise<CraftRelease> {
+  if (!SAFE.test(tag)) throw new Error(`Invalid release tag: ${tag}.`);
+  return readRelease(app, `tags/${tag}`, `${app.label} ${tag} is not published. See ${releasesPage(app)}.`, doFetch);
+}
+
+async function readRelease(app: CraftApp, which: string, none: string, doFetch: Fetch): Promise<CraftRelease> {
+  const data = await (await get(`https://api.github.com/repos/${app.repo}/releases/${which}`, doFetch, none)).json() as { tag_name?: unknown; assets?: Record<string, unknown>[] };
   const tag = typeof data.tag_name === 'string' ? data.tag_name : '';
   if (!SAFE.test(tag) || !Array.isArray(data.assets)) throw new Error(none);
   const assets = data.assets.filter((a) => typeof a.name === 'string' && SAFE.test(a.name)).map((a) => ({

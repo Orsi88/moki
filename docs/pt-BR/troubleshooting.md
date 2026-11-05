@@ -14,7 +14,7 @@ Problemas comuns, por que acontecem e o que fazer. Os problemas específicos da 
 
 | O que aparece | Por quê | O que fazer |
 |---|---|---|
-| *… is not installed on this computer (command "…" not found).* | A ferramenta não está instalada, ou o comando dela não está no PATH | Instale, ou escolha outra ferramenta. No app, uma aba de terminal (menu **+**) de Claude Code ou Codex ausente pergunta `Install …? [y/N]` e só instala quando você digita `y`, executando o comando fixo do fabricante mostrado na tela; as outras IAs mostram o link das instruções. Os passos de uma operação ainda exigem uma IA instalada |
+| *… is not installed on this computer (command "…" not found).* | A ferramenta não está instalada, ou o comando dela não está no PATH | Instale, ou escolha outra ferramenta. No app, **Configurações › Minhas IAs › Instalar** (ou uma aba de terminal do menu **+**) de Claude Code, Codex, Gemini CLI, Antigravity CLI ou Cursor Agent ausente pergunta `Install …? [y/N]` e só instala quando você digita `y`, executando o comando fixo do fabricante mostrado na tela. Depois, **Verificar de novo** em Minhas IAs; se ainda faltar, reinicie o Moki. Os passos de uma operação ainda exigem uma IA instalada |
 | O assistente avisa que a abertura ainda está rodando | A ferramenta leva mais de uns 20 segundos para iniciar | Espere, ou olhe a janela ou o terminal da própria ferramenta |
 | Uma ferramenta de chat (ChatGPT, claude.ai, Gemini web) não abre sozinha | Essas ferramentas recebem o pedido como texto para copiar | Copie o pedido que aparece na tela e cole no chat |
 

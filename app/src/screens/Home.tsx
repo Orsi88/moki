@@ -3,14 +3,13 @@
 
 import { useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { api, type ProjectSummary, type Starter, type Tag, type TerminalRef, type ToolInfo, type WorkspaceInfo } from '../api';
-import { recall, remember } from '../prefs';
 import { t } from '../i18n';
 import { StartPrefs } from '../components/PrefsCorner';
 import { AddButton } from '../components/AddButton';
-import { TagPicker } from '../components/TagPicker';
 import { SearchPanel } from '../components/SearchPanel';
 import { DeleteProjectDialog } from '../components/DeleteProjectDialog';
-import { IconCheck, IconChevron, IconExternal, IconEye, IconEyeOff, IconOpenProject, IconPin, IconStar, IconTrash, IconX } from '../components/Icons';
+import { IconCheck, IconChevron, IconExternal, IconEye, IconEyeOff, IconOpenProject, IconPin, IconStar, IconTrash } from '../components/Icons';
+import { NewProjectDialog } from '../components/NewProjectDialog';
 import { NoteDialog } from '../components/NoteDialog';
 import { favoriteLooseIds, favoriteNotes, forgetNote, forgetProject, hiddenIds, hideProject, looseNotes, type NoteRef, noteTitle, pinnedIds, recentNotes, removeLooseNote, setFavorite, showProject, togglePin } from '../side-menu';
 import { Settings, type SettingsTab } from './Settings';
@@ -20,7 +19,7 @@ interface Props {
   tools: ToolInfo[];
   version: string;
   onOpen: (id: string) => void;
-  onCreate: (name: string, starter: Starter, folder?: string, tags?: string[]) => Promise<void>;
+  onCreate: (name: string, starter: Starter, tags?: string[], setup?: boolean, folder?: string) => Promise<void>; // setup: open with "Set up"; folder: link it
   settings: SettingsTab | null;
   onSettings: (tab: SettingsTab | null) => void;
   onBack?: () => void;
@@ -33,6 +32,7 @@ interface Props {
   onSearch?: () => void;
   onFound?: (project: string, path?: string) => void;
   onDeleted?: () => void; // a project was deleted for good: reload the list
+  onToolsChanged: () => void; // Settings › My AIs: read the AI tools again
 }
 
 const onboarding = (status: string): string => ({
@@ -41,7 +41,7 @@ const onboarding = (status: string): string => ({
 
 interface MenuItem { label: string; icon: ReactNode; run: () => void; danger?: boolean }
 
-export function Home({ projects, tools, version, onOpen, onCreate, settings, onSettings, onBack, backLabel, project, onTerminal, workspace, onWorkspace, search = false, onSearch, onFound, onDeleted }: Props) {
+export function Home({ projects, tools, version, onOpen, onCreate, settings, onSettings, onBack, backLabel, project, onTerminal, workspace, onWorkspace, search = false, onSearch, onFound, onDeleted, onToolsChanged }: Props) {
   const [switching, setSwitching] = useState<WorkspaceInfo[] | null>(null); // the workspace menu, open
   const openSwitcher = () => { api.workspaces().then((r) => setSwitching(r.list)).catch(() => setSwitching([])); };
   const switchTo = (w: WorkspaceInfo) => {
@@ -49,10 +49,10 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
     if (w.id === workspace?.id) return;
     api.selectWorkspace(w.id).then((opened) => onWorkspace?.(opened)).catch((e: Error) => setError(e.message));
   };
-  const [creating, setCreating] = useState(false);
+  const [quick, setQuick] = useState(false); // "Create a new project": its name field, open
+  const [structured, setStructured] = useState(false); // "Create and customize…": the window with tags, context and setup
   const [name, setName] = useState('');
-  const [folder, setFolder] = useState(''); // an existing folder to link, from "Link an existing folder"
-  const [starter, setStarter] = useState<Starter>(recall('qa-starter') === 'blank' ? 'blank' : 'qa'); // the last choice is the default
+  const [folder, setFolder] = useState(''); // from "Open a project": the folder the new project links
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pins, setPins] = useState<string[]>(pinnedIds);
@@ -74,7 +74,6 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
     },
   });
   const [catalog, setCatalog] = useState<Tag[]>([]);
-  const [newTags, setNewTags] = useState<string[]>([]);
   useEffect(() => { api.tags().then(setCatalog).catch(() => setCatalog([])); }, []);
   const [noteTick, setNoteTick] = useState(0);
   useEffect(() => api.onNotesChanged(() => setNoteTick((n) => n + 1)), []);
@@ -127,21 +126,22 @@ export function Home({ projects, tools, version, onOpen, onCreate, settings, onS
     </li>
   );
 
-  const submit = async (e: FormEvent) => {
+  // Quick project: only the name; standard folders, no setup, straight in.
+  const submitQuick = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true); setError('');
-    remember('qa-starter', starter);
-    try { await onCreate(name, starter, folder || undefined, newTags); } catch (err) { setError(err instanceof Error ? err.message : String(err)); } finally { setBusy(false); }
+    try { await onCreate(name, 'minimal', [], false, folder || undefined); } catch (err) { setError(err instanceof Error ? err.message : String(err)); } finally { setBusy(false); }
   };
-
-  // The project is named after the chosen folder; the name can still be changed before creating it.
-  const pickFolder = () => {
+  // A folder with a project opens it; a new folder asks the project's name, the folder's as a suggestion.
+  const openFolder = () => {
     setError('');
     api.pickFolder().then((r) => {
       if (!r) return;
-      setFolder(r.folder); setName(r.name); setCreating(true);
-    }).catch((err: Error) => { setCreating(true); setError(err.message); });
+      if (r.project) { onOpen(r.project.id); return; }
+      setFolder(r.folder); setName(r.name); setQuick(true);
+    }).catch((err: Error) => setError(err.message));
   };
+  const closeQuick = () => { setQuick(false); setName(''); setFolder(''); setError(''); };
 
   return (
     <div className={`home${settings ? ' is-settings' : ''}`}>
@@ -264,7 +264,7 @@ ${workspace.path}`}>
       {deleting && <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} onDeleted={() => deleted(deleting.id)} />}
 
       {settings ? (
-        <Settings tab={settings} onTab={onSettings} onClose={() => onSettings(null)} onBack={onBack} backLabel={backLabel} project={project} projects={projects} tools={tools} onTerminal={onTerminal} />
+        <Settings tab={settings} onTab={onSettings} onClose={() => onSettings(null)} onBack={onBack} backLabel={backLabel} project={project} projects={projects} tools={tools} onTerminal={onTerminal} onToolsChanged={onToolsChanged} />
       ) : openNote ? (
       <main className="home-main home-note">
         <NoteDialog
@@ -285,62 +285,46 @@ ${workspace.path}`}>
         <p className="muted">{t('Version {version}', { version })}</p>
 
         <div className="home-actions">
-          {!creating ? (
+          {!quick ? (
             <div className="home-action">
               <div>
                 <strong>{t('Create a new project')}</strong>
-                <p className="muted small">{t('One project per system you test. Its context and history stay on this computer.')}</p>
+                <p className="muted small">{t('Its files, context and history stay on this computer.')}</p>
               </div>
-              <AddButton size="lg" title={t('Create')} onClick={() => setCreating(true)} />
+              <AddButton size="lg" title={t('Create')} onClick={() => { setQuick(true); setError(''); }} />
             </div>
           ) : (
-            <form className="home-action create" onSubmit={(e) => { void submit(e); }}>
+            <form className="home-action create" onSubmit={(e) => { void submitQuick(e); }}>
               <label className="field">
                 <strong>{t('Project name')}</strong>
-                <span className="muted small">{t('The system under test, e.g. "Billing Portal".')}</span>
-                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Billing Portal" maxLength={80} />
+                <span className="muted small">{t('Enter creates it with the standard folders and opens it. To choose tags and set it up, use Create and customize.')}</span>
+                <input autoFocus onFocus={(e) => e.currentTarget.select()} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') closeQuick(); }} maxLength={80} />
               </label>
-              <fieldset className="field">
-                <legend className="label">{t('Start with')}</legend>
-                <label className="field inline">
-                  <input type="radio" name="starter" checked={starter === 'qa'} onChange={() => setStarter('qa')} />
-                  <span>{t('QA context files')} <span className="muted small">{t('(glossary, business rules, flows, permissions…)')}</span></span>
-                </label>
-                <label className="field inline">
-                  <input type="radio" name="starter" checked={starter === 'blank'} onChange={() => setStarter('blank')} />
-                  <span>{t('A blank project')} <span className="muted small">{t('(after your description, the AI asks what it needs and proposes a plan)')}</span></span>
-                </label>
-              </fieldset>
-              <div className="field">
-                <strong>{t('Tags')}</strong>
-                <span className="muted small">{t('Optional. Projects and files with the same tag share their context with this one.')}</span>
-                <TagPicker catalog={catalog} value={newTags} onChange={setNewTags} onCatalog={setCatalog} />
-              </div>
               {folder && (
                 <div className="field">
-                  <span className="label">{t('Existing folder')}</span>
-                  <span className="row-actions">
-                    <code className="small">{folder}</code>
-                    <button type="button" className="icon-btn" onClick={() => setFolder('')} title={t('Do not link a folder')}><IconX size={14} /></button>
-                  </span>
-                  <span className="muted small">{t('Its AI settings (.claude, AGENTS.md…) are backed up inside it, in .moki-backup/. Nothing else in it changes.')}</span>
+                  <span className="label">{t('Folder')}</span>
+                  <code className="small">{folder}</code>
+                  <span className="muted small">{t('Its files stay where they are and show in the project. Its AI settings (.claude, AGENTS.md…) are backed up inside it, in .moki-backup/.')}</span>
                 </div>
               )}
               {error && <p className="error small">{error}</p>}
               <div className="row-actions">
                 <button type="submit" className="btn" disabled={busy || !name.trim()}>{busy ? t('Creating…') : t('Create project')}</button>
-                <button type="button" className="btn btn-ghost" onClick={() => { setCreating(false); setName(''); setFolder(''); setNewTags([]); setError(''); }}>{t('Cancel')}</button>
+                <button type="button" className="btn btn-ghost" disabled={busy || !name.trim()} onClick={() => setStructured(true)}>{t('Create and customize…')}</button>
+                <button type="button" className="btn btn-ghost" onClick={closeQuick}>{t('Cancel')}</button>
               </div>
             </form>
           )}
           <div className="home-action">
             <div>
               <strong>{t('Open a project')}</strong>
-              <p className="muted small">{t('Choose one on the left, or pick a folder you already have.')}</p>
+              <p className="muted small">{t('Choose one on the left, or pick a folder: it opens as a project.')}</p>
             </div>
-            <button type="button" className="home-action-icon" onClick={pickFolder} title={t('Open a project')} aria-label={t('Open a project')}><IconOpenProject size={20} /></button>
+            <button type="button" className="home-action-icon" onClick={openFolder} title={t('Open a project')} aria-label={t('Open a project')}><IconOpenProject size={20} /></button>
           </div>
         </div>
+        {!quick && error && <p className="error small home-error">{error}</p>}
+        {structured && <NewProjectDialog name={name} catalog={catalog} onCatalog={setCatalog} onClose={() => setStructured(false)} onCreate={(n, starter, tags) => onCreate(n, starter, tags, true, folder || undefined)} />}
 
         <p className="muted small home-tools">
           {installed.length

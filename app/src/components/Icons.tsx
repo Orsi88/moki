@@ -78,6 +78,14 @@ export const IconGlobe = ({ size }: IconProps) => (
 export const IconCopy = ({ size }: IconProps) => (
   <svg {...base(size)}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
 );
+// Adjustments of one thing (a project's settings), unlike the gear of Moki's own Settings.
+export const IconSliders = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M4 6h9" /><path d="M17 6h3" /><circle cx="15" cy="6" r="2" /><path d="M4 12h3" /><path d="M11 12h9" /><circle cx="9" cy="12" r="2" /><path d="M4 18h11" /><path d="M19 18h1" /><circle cx="17" cy="18" r="2" /></svg>
+);
+// A status, not an action: a circle half filled (work under way).
+export const IconProgress = ({ size }: IconProps) => (
+  <svg {...base(size)}><circle cx="12" cy="12" r="9" /><path d="M12 7a5 5 0 0 1 0 10z" fill="currentColor" stroke="none" /></svg>
+);
 export const IconRefresh = ({ size }: IconProps) => (
   <svg {...base(size)}><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" /></svg>
 );
@@ -104,6 +112,9 @@ export const IconEyeOff = ({ size }: IconProps) => (
 );
 export const IconExternal = ({ size }: IconProps) => (
   <svg {...base(size)}><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></svg>
+);
+export const IconDownload = ({ size }: IconProps) => (
+  <svg {...base(size)}><path d="M12 4v11" /><path d="M7 10l5 5 5-5" /><path d="M5 20h14" /></svg>
 );
 export const IconMore = ({ size }: IconProps) => (
   <svg {...base(size)}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>

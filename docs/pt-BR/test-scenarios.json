@@ -87,7 +87,6 @@
   "markdown to html": "Markdown para HTML",
   "markdown: deep lists, setext headings, rules and autolinks": "Markdown: listas aninhadas, títulos setext, linhas horizontais e links automáticos",
   "memory is listed per project and, inside it, per terminal": "a memória é listada por projeto e, dentro dele, por terminal",
-  "new files and folders: Markdown/text only, safe names, never inside activities": "arquivos e pastas novos: só Markdown/texto, nomes seguros, nunca dentro das atividades",
   "non-ASCII prompts reach Windows tools through a UTF-8 request file": "pedidos com caracteres não ASCII chegam às ferramentas no Windows por um arquivo de pedido em UTF-8",
   "note windows: only notes/<file>.md of a listed project or a loose note id, one window per note": "janelas de nota: só notes/<arquivo>.md de um projeto listado ou o id de uma nota avulsa, uma janela por nota",
   "notes: one is deleted from the start screen; nothing outside notes/ is": "notas: uma é excluída pela tela inicial; nada fora de notes/ é excluído",
@@ -166,5 +165,19 @@
   "agents, operations, templates and skills are starred from their cards and come first": "agentes, operações, templates e skills são marcados com estrela pelo card e aparecem primeiro",
   "Skills lists the skills of Moki; without a project only the upload can add (for every project)": "Skills lista as skills do Moki; sem projeto, só o envio de skills adiciona (para todos os projetos)",
   "upload of skills and agents: preview writes nothing, blocks per item, installs only what is confirmed": "envio de skills e agentes: a prévia não grava nada, bloqueia por item e instala só o que foi confirmado",
-  "upload from a zip: layouts, limits, unsafe paths, and a failure undoes everything": "envio por .zip: formatos aceitos, limites, caminhos inseguros, e uma falha desfaz tudo"
+  "upload from a zip: layouts, limits, unsafe paths, and a failure undoes everything": "envio por .zip: formatos aceitos, limites, caminhos inseguros, e uma falha desfaz tudo",
+  "install plans: fixed vendor commands per system for every terminal AI; editors are downloaded, not installed": "planos de instalação: comandos fixos do fabricante por sistema para toda IA de terminal; editores são baixados, não instalados",
+  "my AIs: path and version of the installed tools, nothing run for the missing ones": "minhas IAs: caminho e versão das ferramentas instaladas, nada é executado para as que faltam",
+  "my AIs: the Moki extension of the app version is downloaded, verified, installed and the editor opens": "minhas IAs: a extensão do Moki da versão do app é baixada, conferida, instalada e o editor abre",
+  "my AIs: only installed editors that take the extension, and only a vsix GitHub vouches for": "minhas IAs: só editores instalados que aceitam a extensão, e só um vsix que o GitHub garante",
+  "my AIs: in a checkout, the vsix built in release/ is installed without downloading": "minhas IAs: num checkout, o vsix gerado em release/ é instalado sem download",
+  "the default AI is set in My AIs and an activity choosing another one keeps it": "a IA padrão é definida em Minhas IAs e uma atividade que escolhe outra a mantém",
+  "launching: \"talk\" is a conversation with one agent, never listed where an activity is picked": "abrir: \"talk\" é uma conversa com um agente, nunca listada onde se escolhe uma atividade",
+  "the project panel only acts: an activity, or a conversation with an agent": "o painel do projeto só age: uma atividade, ou uma conversa com um agente",
+  "new files and folders: Markdown, text, empty spreadsheet and Word files, safe names, never inside activities": "arquivos e pastas novos: Markdown, texto, planilha e Word vazios, nomes seguros, nunca dentro das atividades",
+  "the + of the tabs opens categories in place; File creates an empty spreadsheet in Inbox and shows it": "o + das abas abre categorias no lugar; Arquivo cria uma planilha vazia na Entrada e a mostra",
+  "the sidebar is in blocks: folders, Tracking and Other files, then Project settings and MCPs; the Operations card is in the project panel": "a barra lateral é em blocos: pastas, Acompanhamento e Outros arquivos, depois Configurações do projeto e MCPs; o card de Operações fica no painel do projeto",
+  "creating a project: Enter on the name opens it with the standard folders; Create and customize opens with Set up": "criar um projeto: Enter no nome abre com as pastas padrão; Criar e personalizar abre em Configurar",
+  "open a folder: the name is yours, the folder shows live in the tree as @folder, and opens in an IDE": "abrir pasta: o nome é seu, a pasta aparece ao vivo na árvore como @folder e abre numa IDE",
+  "a linked folder shows first in the tree, live, with Open in the IDE; its files open in the app": "uma pasta vinculada aparece primeiro na árvore, ao vivo, com Abrir na IDE; os arquivos dela abrem no app"
 }

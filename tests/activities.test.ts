@@ -34,7 +34,7 @@ const text = (fields: Record<string, string>, body = '') => ['---', ...Object.en
 
 test('the app\'s actions and the activities that come with Moki: one list, the same ids as before', () => {
   const ids = listActivities(root).map((a) => `${a.source}:${a.id}`);
-  for (const id of ['open', 'context', 'setup', 'plan', 'resume']) assert.ok(ids.includes(`moki:${id}`), id);
+  for (const id of ['open', 'context', 'setup', 'plan', 'resume', 'talk']) assert.ok(ids.includes(`moki:${id}`), id);
   for (const id of ['review', 'tests', 'review-then-tests', 'failure', 'evidence', 'automation']) assert.ok(ids.includes(`builtin:${id}`), id);
   assert.ok(!ids.some((i) => i.endsWith(':README')), 'the README of activities/ is not an activity');
   assert.deepEqual(getActivity('review-then-tests', root)?.target, { kind: 'workflow', name: 'requirements-to-tests' });
@@ -116,4 +116,20 @@ test('launching: your activity\'s text, an agent\'s activity acts as it, an oper
   assert.throws(() => svc.launch({ project: 'acme', activity: 'run-fluxo', tool: 'claude', files: [], note: '', language: 'English' } as never), /starts the operation/);
   assert.throws(() => svc.launch({ project: 'acme', activity: 'made-up', tool: 'claude', files: [], note: '', language: 'English' } as never), /Unknown activity/);
   assert.ok(readFileSync(join(libraryDir(root), 'run-fluxo.md'), 'utf8').includes(`uses: operation:${op.id}`));
+});
+
+test('launching: "talk" is a conversation with one agent, never listed where an activity is picked', () => {
+  prompts.length = 0;
+  assert.ok(listActivities(root).some((a) => a.id === 'talk' && a.source === 'moki'));
+  assert.ok(!svc.activities('acme').activities.some((a) => a.id === 'talk'), 'not offered as an activity');
+  assert.throws(() => svc.launch({ project: 'acme', activity: 'talk', tool: 'claude', files: [], note: '', language: 'English' } as never), /Choose the agent to talk with/);
+  assert.throws(() => svc.launch({ project: 'acme', activity: 'talk', tool: 'claude', files: [], note: '', language: 'English', agent: 'made-up' } as never));
+  svc.launch({ project: 'acme', activity: 'talk', tool: 'claude', files: [], note: 'A coupon rule for the checkout', language: 'English', agent: 'test-designer' } as never);
+  const prompt = prompts.at(-1) ?? '';
+  assert.match(prompt, /Act as the test-designer agent: read .*test-designer\.md/);
+  assert.match(prompt, /this is a conversation, not an activity\. Do not start a run, follow a skill procedure or write files unless I ask\./);
+  assert.match(prompt, /A coupon rule for the checkout/);
+  assert.doesNotMatch(prompt, /Ask me what I have in mind/);
+  svc.launch({ project: 'acme', activity: 'talk', tool: 'claude', files: [], note: '', language: 'English', agent: 'test-designer' } as never);
+  assert.match(prompts.at(-1) ?? '', /Ask me what I have in mind\./);
 });

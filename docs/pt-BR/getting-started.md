@@ -31,15 +31,16 @@ Troque de workspace no rodapé da lista de projetos, ou volte para a lista com *
 
 **Busca** (a lupa, ou **Ctrl+Shift+F**) toma o lugar da lista e procura no workspace ativo: nome e descrição dos projetos, e nome e texto dos arquivos deles (Markdown, texto, JSON, CSV e o texto dos arquivos Word). As tags aparecem ali como filtros; texto e tags se combinam. Um resultado abre o projeto com o arquivo.
 
-**Criar um projeto** digitando o nome e, se quiser, as tags:
+**Criar um novo projeto** (o +) pede só o nome:
 
-| Começar com | O que você ganha |
+| Você aperta | O que acontece |
 |---|---|
-| **Arquivos de contexto de QA** | Glossário, regras de negócio, módulos, fluxos, permissões e o resto, para um sistema que você testa. |
-| **Um projeto em branco** | Ainda sem contexto. Você descreve o objetivo; a IA pergunta o que precisa e escreve um plano. Os arquivos de contexto só aparecem depois da sua aprovação. |
-| **Uma pasta que já existe** | *Abrir um projeto* escolhe uma pasta. O projeto recebe o nome dela (você pode editar), vincula essa pasta e abre *Configurar &lt;nome&gt;*. As configurações de IA da pasta são copiadas para `.moki-backup/` dentro dela. Nada mais ali muda. |
+| **Enter** (*Criar projeto*) | O projeto abre na hora com as pastas padrão (`context/` vazia, `inbox/`, `runs/`, `temporary/`) e nada para configurar. Os arquivos de contexto aparecem conforme as atividades precisam. |
+| **Criar e personalizar…** | Uma janela: o nome, tags opcionais e como o contexto começa: **Vazio** (como acima) ou **Planejado pela IA** (a IA pergunta o que precisa e escreve um plano; os arquivos de contexto só aparecem depois da sua aprovação). O projeto abre em *Configurar &lt;nome&gt;* (descrição, skills, agentes). |
 
-O formulário de criar ainda diz "um projeto por sistema que você testa". Um projeto em branco e uma pasta vinculada usam o mesmo formulário.
+**Abrir um projeto**: escolha um à esquerda, ou escolha uma pasta na janela do sistema. Uma pasta já vinculada a um projeto abre esse projeto. Uma pasta nova pede o nome do projeto (o da pasta vem como sugestão), e então o projeto é criado com as pastas padrão e vinculado a ela. As configurações de IA da pasta são copiadas para `.moki-backup/` dentro dela. Nada mais ali muda.
+
+**A pasta vinculada na árvore.** Ela vem primeiro na barra lateral do projeto, com o próprio nome, ao vivo: os arquivos são os originais (nada é copiado), abrem e são pré-visualizados no app, e `.md`/`.txt` são editados no lugar. `.git`, `node_modules`, pastas de build e arquivos ocultos ficam de fora. O botão `</>` na linha dela abre a pasta na sua IDE (VS Code ou Cursor; com os dois instalados, você escolhe).
 
 ## A partir do código
 

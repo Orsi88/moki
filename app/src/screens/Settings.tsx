@@ -4,6 +4,7 @@
 // already installed (and where), and adding a skill. Templates: the look of the files
 // activities and agents generate (header, footer, fonts, colours, watermark). MCP servers:
 // one catalog for the workspace, each server global or for the projects chosen (components/McpManager.tsx).
+// My AIs: the AI tools, the default one, installing them and the Moki extension (components/AiToolsPage.tsx).
 
 import { useEffect, useState } from 'react';
 import { api, type ProjectSummary, type SkillScope, type TerminalRef, type ToolInfo } from '../api';
@@ -17,8 +18,9 @@ import { SkillsPage } from '../components/SkillsPage';
 import { Operations } from './Operations';
 import { McpManager } from '../components/McpManager';
 import { ActivitiesPage } from '../components/ActivitiesPage';
+import { AiToolsPage } from '../components/AiToolsPage';
 
-export type SettingsTab = 'agents' | 'activities' | 'operations' | 'skills' | 'mcp' | 'documents';
+export type SettingsTab = 'agents' | 'activities' | 'ai' | 'operations' | 'skills' | 'mcp' | 'documents';
 
 interface Props {
   tab: SettingsTab;
@@ -31,9 +33,10 @@ interface Props {
   projects: ProjectSummary[];
   tools: ToolInfo[];
   onTerminal: (terminal: TerminalRef, projectId: string) => void;
+  onToolsChanged: () => void; // My AIs installed or found something: the app reads the tool list again
 }
 
-export function Settings({ tab, onTab, onClose, onBack, backLabel, project, projects: given, tools, onTerminal }: Props) {
+export function Settings({ tab, onTab, onClose, onBack, backLabel, project, projects: given, tools, onTerminal, onToolsChanged }: Props) {
   // Every project of the workspace, for the tabs' pickers (opened from a project, Settings is given only that one).
   const [projects, setProjects] = useState<ProjectSummary[]>(given);
   useEffect(() => { api.projects().then((all) => { if (all.length) setProjects(all); }).catch(() => {}); }, []);
@@ -65,6 +68,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
         <div className="dialog-tabs settings-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={tab === 'agents'} className={`dialog-tab${tab === 'agents' ? ' on' : ''}`} onClick={() => onTab('agents')}>{t('Agents')}</button>
           <button type="button" role="tab" aria-selected={tab === 'activities'} className={`dialog-tab${tab === 'activities' ? ' on' : ''}`} onClick={() => onTab('activities')}>{t('Activities')}</button>
+          <button type="button" role="tab" aria-selected={tab === 'ai'} className={`dialog-tab${tab === 'ai' ? ' on' : ''}`} onClick={() => onTab('ai')}>{t('My AIs')}</button>
           <button type="button" role="tab" aria-selected={tab === 'operations'} className={`dialog-tab${tab === 'operations' ? ' on' : ''}`} onClick={() => onTab('operations')}>{t('Operations')}</button>
           <button type="button" role="tab" aria-selected={tab === 'skills'} className={`dialog-tab${tab === 'skills' ? ' on' : ''}`} onClick={() => onTab('skills')}>{t('Skills')}</button>
           <button type="button" role="tab" aria-selected={tab === 'mcp'} className={`dialog-tab${tab === 'mcp' ? ' on' : ''}`} onClick={() => onTab('mcp')}>{t('MCP servers')}</button>
@@ -76,6 +80,7 @@ export function Settings({ tab, onTab, onClose, onBack, backLabel, project, proj
           : tab === 'mcp' ? <McpManager key={target?.id ?? 'none'} project={target} projects={projects} />
           : tab === 'operations' ? <Operations tools={tools} />
           : tab === 'activities' ? <ActivitiesPage />
+          : tab === 'ai' ? <AiToolsPage tools={tools} project={target} onToolsChanged={onToolsChanged} onTerminal={(terminal) => { if (target) onTerminal(terminal, target.id); }} />
           : tab === 'agents'
           ? (
             <Library

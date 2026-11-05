@@ -12,7 +12,9 @@ test('PATH: the fresher PATH and the usual tool folders join the current one, wi
 });
 
 test('PATH: npm global and the installers\' folders are among the usual ones', () => {
-  assert.ok(toolDirs('win32', 'C:\\Users\\a', { APPDATA: 'C:\\Users\\a\\AppData\\Roaming' }).some((d) => d.replace(/\//g, '\\') === 'C:\\Users\\a\\AppData\\Roaming\\npm'));
+  const win = toolDirs('win32', 'C:\\Users\\a', { APPDATA: 'C:\\Users\\a\\AppData\\Roaming', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' }).map((d) => d.replace(/\//g, '\\'));
+  // npm, then the Cursor Agent CLI and Antigravity CLI installers.
+  for (const d of ['C:\\Users\\a\\AppData\\Roaming\\npm', 'C:\\Users\\a\\AppData\\Local\\cursor-agent', 'C:\\Users\\a\\AppData\\Local\\agy\\bin']) assert.ok(win.includes(d), d);
   const mac = toolDirs('darwin', '/Users/a', {});
   for (const d of ['/opt/homebrew/bin', '/usr/local/bin', '/Users/a/.local/bin', '/Users/a/.npm-global/bin']) assert.ok(mac.some((x) => x.replace(/\\/g, '/') === d), d);
 });

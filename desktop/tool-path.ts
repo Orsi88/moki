@@ -46,6 +46,7 @@ export function toolDirs(platform: NodeJS.Platform, home: string, env: NodeJS.Pr
     const appData = env.APPDATA ?? join(home, 'AppData', 'Roaming');
     const local = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local');
     return [join(appData, 'npm'), join(home, '.local', 'bin'), join(local, 'Programs', 'cursor', 'resources', 'app', 'bin'),
+      join(local, 'cursor-agent'), join(local, 'agy', 'bin'), // Cursor Agent CLI and Antigravity CLI installers
       join(home, '.bun', 'bin'), join(local, 'Volta', 'bin'), join(home, 'scoop', 'shims')];
   }
   const nvm = join(home, '.nvm', 'versions', 'node');

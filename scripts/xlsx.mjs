@@ -122,6 +122,22 @@ export function buildXlsx(layout, data, lang = 'en', { style = DEFAULT_STYLE, va
   ]);
 }
 
+// An empty workbook with one sheet, for "New › Spreadsheet" in the desktop app: no header row,
+// no filter (buildXlsx always writes both, for deliverables).
+export function blankXlsx(sheet = 'Sheet1') {
+  const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const ns = 'http://schemas.openxmlformats.org';
+  return zip([
+    ['[Content_Types].xml', `${head}<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>`
+      + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+      + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'],
+    ['_rels/.rels', `${head}<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ['xl/workbook.xml', `${head}<workbook xmlns="${ns}/spreadsheetml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><sheets><sheet name="${esc(sheet.slice(0, 31))}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ['xl/_rels/workbook.xml.rels', `${head}<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
+    ['xl/worksheets/sheet1.xml', `${head}<worksheet xmlns="${ns}/spreadsheetml/2006/main"><sheetData/></worksheet>`],
+  ]);
+}
+
 // Element prefixes dropped (<x:row> becomes <row>): some .NET/Java tools write them.
 const plain = (xml) => xml.replace(/<(\/?)[A-Za-z][\w.-]*:(?=[A-Za-z])/g, '<$1');
 // Text of a string item: its <t> elements (not phonetic guides), with Excel's _xHHHH_ escapes decoded.

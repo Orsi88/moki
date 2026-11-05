@@ -20,7 +20,7 @@ export interface ContextChoice { own: string[]; shared: { tag: Tag; sources: Sha
 // A workspace, like an Obsidian vault: a folder with its own projects, tags and settings.
 export interface WorkspaceInfo { id: string; name: string; path: string; isDefault: boolean; missing: boolean; projects: number }
 // How a new project starts: with the QA context files, or blank (the AI interviews and proposes a plan).
-export type Starter = 'qa' | 'blank';
+export type Starter = 'qa' | 'blank' | 'minimal';
 // The AI's recommendation for a blank project (plan.json), reviewed in "Set up project".
 export interface Plan {
   approved: boolean; skills: string[]; agents: string[]; searchSkills: string[];
@@ -28,7 +28,12 @@ export interface Plan {
 }
 export interface SkillInfo { name: string; status: string; description: string }
 export type ToolKind = 'terminal' | 'editor' | 'chat' | 'print';
-export interface ToolInfo { id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean; installable?: boolean }
+export interface ToolInfo {
+  id: string; label: string; hint: string; command: string; kind: ToolKind; available: boolean; installable?: boolean;
+  docs?: string; download?: string; mokiExtension?: '' | 'supported' | 'unverified'; // install instructions; editors: download page, Moki extension
+}
+// Settings › My AIs: where a tool is, its version and, in an editor, the Moki extension's version ('' = unknown or none).
+export interface AiToolStatus { id: string; available: boolean; path: string; version: string; extension: string }
 // An activity (scripts/lib/activities.ts): the app's own (moki), one that comes with Moki (builtin) or the person's (library).
 export type ActivityTarget = { kind: 'moki' | 'skill' | 'agent' | 'workflow' | 'operation'; name: string };
 export interface ActivityInfo {
@@ -63,6 +68,7 @@ export interface TreeNode {
   name: string; path: string; type: 'dir' | 'file'; size?: number; children?: TreeNode[];
   run?: { status: string; skill: string; currentStep: string };
   mcp?: string; // MCP server row: where it is configured
+  linked?: string; // the linked folder (path "@folder", shown live): its full path on this computer
 }
 
 export type FileContent =
@@ -275,7 +281,9 @@ export const api = {
   setFileTags: (project: string, path: string, ids: string[]) => call<string[]>('setFileTags', project, path, ids),
   search: (query: string, tags: string[]) => call<SearchResult>('search', query, tags),
   contextChoice: (project: string) => call<ContextChoice>('contextChoice', project),
-  pickFolder: () => call<{ folder: string; name: string } | null>('pickFolder'),
+  // Open a project from a folder: the project already linked to it, or the folder and a suggested name (null: cancelled).
+  pickFolder: () => call<{ folder: string; name: string; project?: ProjectSummary } | null>('pickFolder'),
+  openInEditor: (project: string, tool: string) => call<boolean>('openInEditor', project, tool),
   skills: () => call<SkillInfo[]>('skills'),
   // Favorites first (a stable sort keeps the order of the rest).
   activities: (project?: string) => call<{ activities: ActivityInfo[]; languages: string[] }>('activities', project)
@@ -289,6 +297,8 @@ export const api = {
   deleteActivity: (id: string) => call<boolean>('deleteActivity', id),
   setActivityFavorite: (id: string, on: boolean) => call<string[]>('setActivityFavorite', id, on),
   integrations: () => call<ToolInfo[]>('integrations'),
+  aiTools: () => call<AiToolStatus[]>('aiTools'),
+  installMokiExtension: (tool: string, project?: string) => call<{ version: string; folder: string }>('installMokiExtension', tool, project),
   tree: (project: string) => call<TreeNode[]>('tree', project),
   readFile: (project: string, path: string) => call<FileContent>('readFile', project, path),
   writeFile: (project: string, path: string, text: string) => call<FileContent>('writeFile', project, path, text),

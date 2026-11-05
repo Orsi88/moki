@@ -8,18 +8,21 @@
 
 1. Escolha a atividade.
 2. Se quiser, escolha quais arquivos do inbox entram, qual contexto compartilhado manter (quando o projeto tem tags, veja [Tags](#tags)) e quem deve fazer (um agente).
-3. Acrescente uma observação e escolha a ferramenta.
+3. Acrescente uma observação e escolha a ferramenta. Ela já vem na sua IA padrão (**Configurações › Minhas IAs**); escolher outra aqui vale só para este pedido.
 
 Claude Code, Codex, Gemini CLI, Antigravity CLI e Cursor Agent abrem numa aba de terminal do app. Cursor e VS Code abrem a pasta com o pedido copiado. ChatGPT, claude.ai, Gemini web e *Só mostrar a solicitação* deixam o texto na tela, pronto para copiar. Se a abertura ainda estiver rodando depois de cerca de 20 segundos, o assistente avisa.
 
+Para conversar sobre uma ideia sem atividade, o **Chamar agente** do painel do projeto escolhe um dos agentes do projeto (e, se quiser, o assunto) e abre a sua IA como esse agente, numa conversa: nenhum run começa e nada é gravado sem você pedir.
+
 Aí você conversa nessa ferramenta como de costume. O pedido cita o projeto, a pasta vinculada e as skills e os agentes instalados nele.
 
-**Configurações** (a engrenagem) tem seis abas, cada uma uma lista com filtros e busca:
+**Configurações** (a engrenagem) tem sete abas; fora Minhas IAs, cada uma é uma lista com filtros e busca:
 
 | Aba | O que você faz ali |
 |---|---|
 | **Agentes** | Papéis que usam uma ou mais skills. Duplique um pronto, ou crie o seu; as tags dizem a quais projetos ele chega. |
 | **Atividades** | Os pedidos prontos que você escolhe em "Abrir na sua ferramenta de IA": os do Moki e os seus (o que pedir, a qual skill, agente, workflow ou operação, com quais arquivos). Veja [Atividades](activities.md). |
+| **Minhas IAs** | As IAs que o Moki abre (de terminal e editores), cada uma com a versão (o caminho aparece ao passar o mouse). O ícone do cartão faz a ação principal (instalar, ou instalar ou atualizar a extensão do Moki) e o menu **…** tem as outras, como **Tornar padrão**, que escolhe em qual as atividades começam (numa atividade você ainda pode escolher outra, só para ela). **Instalar** uma IA de terminal que falta: uma aba de terminal mostra o comando oficial e só o roda depois que você digita `y`; depois, **Verificar de novo**. No VS Code e no Cursor, **Instalar a extensão do Moki e abrir** instala a extensão da versão deste app (da release dele, conferida por SHA-256) e abre o editor na pasta ligada do projeto; um editor que falta tem **Baixar**. No Cursor a extensão aparece como *Não verificado*. Uma IA não encontrada, escolhida ao começar uma atividade, traz você para esta aba. |
 | **Operações** | Agentes ligados por setas numa operação multiagente. Veja [Agents and operations](../agents.md) (em inglês). |
 | **Skills** | O que já está instalado, o que vem com o Moki, os plugins do app (em roxo) e **Adicionar skill**: busque no registro público [SkillMD](https://skillmd.com), descreva uma para a sua ferramenta de IA redigir ou **Envie** skills e agentes de uma pasta `.claude` (ou de um `.zip`) do seu computador. O mesmo envio está em **Configurar projeto** (para o projeto ou para todos os projetos) e na tela inicial sem projeto aberto (para todos os projetos). Você escolhe os itens e confirma antes de qualquer instalação. |
 | **Servidores MCP** | As ferramentas que a IA recebe, globais ou para projetos escolhidos. Veja [MCP servers](../mcp-servers.md) (em inglês). |

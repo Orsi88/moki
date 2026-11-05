@@ -1,13 +1,15 @@
-// Side panel of a project, below the files and MCPs: the multi-agent operations
-// linked to it (click to start one) and its operation runs with their status
-// (open ones first; finished ones folded, the last five). The + links or unlinks
-// operations made in Settings › Operations.
+// Operations card of a project, in the right panel below the AI assistant, taking the room left: three tabs - the
+// multi-agent operations linked to it (click to start one), its runs under way and the
+// last five finished, each with its status. It opens on the runs under way when there are
+// any, and goes back to them when a new run starts. The + links or unlinks operations
+// made in Settings › Operations.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, statusLabel, type Operation, type OperationRun } from '../api';
 import { t } from '../i18n';
-import { IconCheck, IconPlay } from './Icons';
+import { IconCheck, IconPlay, IconProgress } from './Icons';
 import { AddButton } from './AddButton';
+import { ListTabs } from './ListPage';
 
 interface Props {
   project: string;
@@ -18,6 +20,7 @@ interface Props {
 }
 
 const ENDED = ['completed', 'cancelled'];
+type Tab = 'start' | 'open' | 'ended';
 const pill = (status: string) => (status === 'completed' ? 'pill-completed' : status === 'paused' || status === 'cancelled' ? '' : status === 'in-progress' ? 'pill-in-progress' : 'pill-awaiting-approval');
 
 export function OperationsPanel({ project, tick, active, onStart, onRun }: Props) {
@@ -25,6 +28,7 @@ export function OperationsPanel({ project, tick, active, onStart, onRun }: Props
   const [runs, setRuns] = useState<OperationRun[]>([]);
   const [all, setAll] = useState<Operation[] | null>(null); // the link menu, open
   const [error, setError] = useState('');
+  const [chosen, setChosen] = useState<Tab | null>(null); // null: the tab follows the runs
 
   useEffect(() => {
     api.projectOperations(project).then(setLinked).catch((e: Error) => setError(e.message));
@@ -33,15 +37,25 @@ export function OperationsPanel({ project, tick, active, onStart, onRun }: Props
 
   const toggle = (id: string) => {
     const ids = linked.some((o) => o.id === id) ? linked.filter((o) => o.id !== id).map((o) => o.id) : [...linked.map((o) => o.id), id];
+    setChosen('start'); // linked or unlinked: show the list it changed
     api.setProjectOperations(project, ids).then(() => api.projectOperations(project)).then(setLinked).catch((e: Error) => setError(e.message));
   };
   const open = runs.filter((r) => !ENDED.includes(r.status));
   const ended = runs.filter((r) => ENDED.includes(r.status)).slice(0, 5);
+  // A run that started since the last look takes the panel back to the runs under way.
+  const seen = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(open.map((r) => r.id));
+    if (seen.current && [...ids].some((id) => !seen.current?.has(id))) setChosen(null);
+    seen.current = ids;
+  }, [runs]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setChosen(null); seen.current = null; }, [project]);
+  const tab: Tab = chosen ?? (open.length ? 'open' : 'start');
   const current = (r: OperationRun) => r.steps.find((s) => s.id === r.visits?.find((v) => v.slot === r.currentStep)?.step);
 
   const runRow = (r: OperationRun) => (
     <li key={r.id}>
-      <button type="button" className={`ops-side-row${active === r.id ? ' active' : ''}`} onClick={() => onRun(r.id)} title={r.id}>
+      <button type="button" className={`ops-side-row${active === r.id ? ' active' : ''}`} data-status={r.status} onClick={() => onRun(r.id)} title={r.id}>
         <span className="ops-side-name">{r.operation.name}</span>
         <span className="ops-side-meta">
           <span className={`pill ${pill(r.status)}`}>{statusLabel(r.status)}</span>
@@ -75,23 +89,28 @@ export function OperationsPanel({ project, tick, active, onStart, onRun }: Props
         </div>
       )}
       {error && <p className="error small">{error}</p>}
-      {!linked.length && !runs.length && <p className="muted small ops-side-empty">{t('Link the operations this project uses with the +.')}</p>}
-      <ul>
-        {linked.map((o) => (
-          <li key={o.id}>
-            <button type="button" className={`ops-side-row${active === o.id ? ' active' : ''}`} onClick={() => onStart(o.id)} title={o.description || t('Start {name}', { name: o.name })}>
-              <span className="ops-side-name"><IconPlay size={12} /> {o.name}</span>
-            </button>
-          </li>
+      <ListTabs<Tab> label={t('Operations')} value={tab} onChange={setChosen} tabs={[
+        { id: 'start', label: t('Launch'), icon: <IconPlay size={14} /> },
+        { id: 'open', label: t('Under way'), icon: <IconProgress size={14} />, count: open.length },
+        { id: 'ended', label: t('Finished'), icon: <IconCheck size={14} />, count: ended.length },
+      ]} />
+      <div className="ops-side-body">
+      {tab === 'start' && (!linked.length
+        ? <p className="muted small ops-side-empty">{t('Link the operations this project uses with the +.')}</p>
+        : (
+          <ul>
+            {linked.map((o) => (
+              <li key={o.id}>
+                <button type="button" className={`ops-side-row${active === o.id ? ' active' : ''}`} data-status="start" onClick={() => onStart(o.id)} title={o.description || t('Start {name}', { name: o.name })}>
+                  <span className="ops-side-name"><IconPlay size={12} /> {o.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         ))}
-      </ul>
-      {open.length > 0 && <><div className="ops-side-sub">{t('Under way')}</div><ul>{open.map(runRow)}</ul></>}
-      {ended.length > 0 && (
-        <details className="ops-side-ended">
-          <summary className="ops-side-sub">{t('Finished ({n})', { n: ended.length })}</summary>
-          <ul>{ended.map(runRow)}</ul>
-        </details>
-      )}
+      {tab === 'open' && (open.length ? <ul>{open.map(runRow)}</ul> : <p className="muted small ops-side-empty">{t('Nothing under way.')}</p>)}
+      {tab === 'ended' && (ended.length ? <ul className="ops-side-ended">{ended.map(runRow)}</ul> : <p className="muted small ops-side-empty">{t('Nothing finished yet.')}</p>)}
+      </div>
     </section>
   );
 }

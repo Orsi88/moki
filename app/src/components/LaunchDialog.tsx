@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, describeRun, type ActivityInfo, type ContextChoice, type AgentInfo, type InboxFile, type LaunchResult, type OpenRun, type ProjectSummary, type TerminalRef, type ToolInfo, type ToolKind } from '../api';
 import { conversationLanguage, t } from '../i18n';
+import { defaultTool, remember } from '../prefs';
 import { IconCheck, IconCode, IconCopy, IconFile, IconFolder, IconGlobe, IconPlay, IconRefresh, IconTerminal, IconX } from './Icons';
 import { FileIcon } from '../icons';
 import { TagChip } from './TagPicker';
@@ -12,16 +13,14 @@ import { TagChip } from './TagPicker';
 interface Props {
   project: ProjectSummary;
   tools: ToolInfo[];
-  preset?: { activity: string; run?: string; skipActivity?: boolean }; // skipActivity: the activity was already chosen (side panel)
+  preset?: { activity: string; run?: string; skipActivity?: boolean; tool?: string }; // skipActivity: the activity was already chosen (side panel); tool: the AI chosen there
   onClose: () => void;
   onTerminal: (terminal: TerminalRef) => void; // the tool opened in a terminal tab of the app
   onOperation?: (operation: string) => void; // an activity of an operation opens its start form instead
+  onMyAis?: () => void; // Settings › My AIs, to install the AIs not found here
 }
 
 type StepKey = 'activity' | 'run' | 'files' | 'context' | 'agent' | 'details' | 'tool' | 'review';
-
-const remember = (key: string, value: string) => { try { window.localStorage.setItem(key, value); } catch { /* optional */ } };
-const recall = (key: string) => { try { return window.localStorage.getItem(key); } catch { return null; } };
 
 const KIND_ICON: Record<ToolKind, ReactNode> = {
   terminal: <IconTerminal size={16} />, editor: <IconCode size={16} />, chat: <IconGlobe size={16} />, print: <IconFile size={16} />,
@@ -33,7 +32,7 @@ const kindHint = (kind: ToolKind): string => ({
 
 const formatSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOperation }: Props) {
+export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOperation, onMyAis }: Props) {
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [languages, setLanguages] = useState<string[]>(['English']);
   const [activity, setActivity] = useState(preset?.activity ?? '');
@@ -48,7 +47,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
   const [note, setNote] = useState('');
   const [language, setLanguage] = useState(conversationLanguage);
   const [tool, setTool] = useState(() => {
-    const saved = recall('qa-tool');
+    const saved = preset?.tool ?? defaultTool();
     return tools.some((t) => t.id === saved && t.available) ? saved as string : '';
   });
   const [step, setStep] = useState<StepKey>(preset?.activity === 'resume' && preset.run ? 'details' : preset?.skipActivity && preset.activity ? 'files' : 'activity');
@@ -103,7 +102,7 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
 
   const submit = async () => {
     setBusy(true); setResult(null); setError(''); setCopied(false);
-    remember('qa-tool', tool); remember('qa-language', language);
+    remember('qa-language', language);
     // The window shares the main process. If opening the tool never returns, say so instead of leaving "Opening…" up.
     let late = false;
     const timer = window.setTimeout(() => {
@@ -286,7 +285,8 @@ export function LaunchDialog({ project, tools, preset, onClose, onTerminal, onOp
                 <Answer key={ai.id} icon={KIND_ICON[ai.kind]} title={t(ai.label)} hint={kindHint(ai.kind)} on={tool === ai.id}
                   onPick={() => { setTool(ai.id); next(); }} />
               ))}
-              {notInstalled.length > 0 && <p className="muted small">{t('Not found on this computer:')} {notInstalled.map((ai) => t(ai.label).replace(/ \(.*\)$/, '')).join(' · ')}</p>}
+              {notInstalled.length > 0 && <p className="muted small">{t('Not found on this computer:')} {notInstalled.map((ai) => t(ai.label).replace(/ \(.*\)$/, '')).join(' · ')}
+                {onMyAis && <> <button type="button" className="link" onClick={onMyAis}>{t('Install in Settings › My AIs')}</button></>}</p>}
             </div>
           )}
 

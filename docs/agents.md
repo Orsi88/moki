@@ -74,7 +74,7 @@ The `framework` category maintains Moki itself, not a project: its agents are fo
 { "agents": ["requirements-analyst", "test-designer"] }
 ```
 
-Without the list, every usable agent is enabled. In the desktop app the side panel's **Agents in this project** checkboxes edit this list.
+Without the list, every usable agent is enabled. In the desktop app, **Set up project** (the pencil next to the project's name) has the **Agents in this project** checkboxes that edit this list. The side panel's **Call an agent** opens one of them for a conversation about an idea, without an activity.
 
 ## Using an agent
 

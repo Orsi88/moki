@@ -1,6 +1,6 @@
 // AI tool catalog: every AI tool Moki can open, as cards, to choose "where" in the
 // side panel. Same look as the activity catalog. Tools not found on this computer
-// are shown greyed out, so the QA knows they exist and what to install.
+// are shown greyed out, so the QA knows they exist; choosing one opens Settings › My AIs to install it.
 
 import { useEffect } from 'react';
 import type { ToolInfo } from '../api';
@@ -13,11 +13,12 @@ interface Props {
   selected: string;
   onPick: (id: string) => void;
   onClose: () => void;
+  onInstall?: () => void; // Settings › My AIs (a tool not found here)
 }
 
 const toolName = (tool: ToolInfo) => t(tool.label).replace(/ \(.*\)$/, '');
 
-export function ToolCatalog({ tools, selected, onPick, onClose }: Props) {
+export function ToolCatalog({ tools, selected, onPick, onClose, onInstall }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
@@ -41,8 +42,8 @@ export function ToolCatalog({ tools, selected, onPick, onClose }: Props) {
           <ul className="catalog-grid">
             {list.map((tool) => (
               <li key={tool.id}>
-                <button type="button" className={`catalog-card${tool.id === selected ? ' on' : ''}`} disabled={!tool.available}
-                  aria-pressed={tool.id === selected} onClick={() => { onPick(tool.id); onClose(); }}>
+                <button type="button" className={`catalog-card${tool.id === selected ? ' on' : ''}${tool.available ? '' : ' missing'}`} disabled={!tool.available && !onInstall}
+                  aria-pressed={tool.id === selected} onClick={() => { onClose(); if (tool.available) onPick(tool.id); else onInstall?.(); }}>
                   <span className="catalog-top">
                     <span className="catalog-num">{tool.kind === 'editor' ? t('Editor') : t('Terminal')}</span>
                     {tool.command && <span className="catalog-skill">{tool.command}</span>}
@@ -58,6 +59,7 @@ export function ToolCatalog({ tools, selected, onPick, onClose }: Props) {
                   </span>
                   <span className="catalog-tags">
                     <span className={`catalog-tag${tool.available ? '' : ' muted-tag'}`}>{tool.available ? t('Installed') : t('Not installed')}</span>
+                    {!tool.available && onInstall && <span className="catalog-tag">{t('Install in Settings › My AIs')}</span>}
                   </span>
                 </button>
               </li>
