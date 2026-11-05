@@ -3,6 +3,7 @@
 // It never executes skills itself — the AI tools do, following AGENTS.md.
 
 import { existsSync, readdirSync, statSync, copyFileSync, cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { join, basename, extname, resolve, sep } from 'node:path';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -201,10 +202,7 @@ export function listRuns(project: string, root = ROOT): RunState[] {
 export const openRuns = (project: string, root = ROOT): RunState[] =>
   listRuns(project, root).filter((s) => !['completed', 'cancelled'].includes(s.status) && !s.operation);
 
-export function projectSummary(id: string, root = ROOT): ProjectSummary {
-  let data: Record<string, unknown> = {};
-  try { data = readJson(join(projectsDir(root), id, 'project.json')) as Record<string, unknown>; } catch { /* listed but unreadable */ }
-  const runs = listRuns(id, root);
+function summaryOf(id: string, data: Record<string, unknown>, runs: RunState[]): ProjectSummary {
   return {
     id,
     name: String(data.name || id),
@@ -219,6 +217,54 @@ export function projectSummary(id: string, root = ROOT): ProjectSummary {
     tags: Array.isArray(data.tags) ? [...new Set(data.tags.filter((s): s is string => typeof s === 'string'))] : [],
     plugins: Array.isArray(data.plugins) ? PROJECT_PLUGINS.filter((p) => (data.plugins as unknown[]).includes(p)) : [],
   };
+}
+
+export function projectSummary(id: string, root = ROOT): ProjectSummary {
+  let data: Record<string, unknown> = {};
+  try { data = readJson(join(projectsDir(root), id, 'project.json')) as Record<string, unknown>; } catch { /* listed but unreadable */ }
+  return summaryOf(id, data, listRuns(id, root));
+}
+
+// ---- async twins: the desktop app's main process must not block on disk. Same results as
+// listProjects / listRuns / projectSummary; the sync ones stay for the CLI, MCP and VS Code host.
+
+// map with at most `limit` calls in flight; results keep the order of the items.
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i], i); }
+  }));
+  return out;
+}
+
+export const IO_LIMIT = 32;
+const existsAsync = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
+const readJsonAsync = async (file: string): Promise<unknown> => JSON.parse(await readFile(file, 'utf8'));
+
+export async function listProjectsAsync(root = ROOT): Promise<string[]> {
+  const dir = projectsDir(root);
+  const names = await readdir(dir).catch(() => [] as string[]);
+  const ok = await mapLimit(names, IO_LIMIT, (d) => existsAsync(join(dir, d, 'project.json')));
+  return names.filter((_, i) => ok[i]).sort();
+}
+
+export async function listRunsAsync(project: string, root = ROOT): Promise<RunState[]> {
+  const dir = join(projectsDir(root), project, 'runs');
+  const ids = await readdir(dir).catch(() => [] as string[]);
+  const runs = await mapLimit(ids, IO_LIMIT, async (id): Promise<RunState | null> => {
+    const file = join(dir, id, 'state.json');
+    let text: string;
+    try { text = await readFile(file, 'utf8'); } catch (e) { return ['ENOENT', 'ENOTDIR'].includes((e as NodeJS.ErrnoException).code ?? '') ? null : { id, status: 'unreadable' }; } // no state.json: not a run
+    try { return { ...(JSON.parse(text) as object), id } as RunState; } catch { return { id, status: 'unreadable' }; }
+  });
+  return runs.filter((r): r is RunState => r !== null).sort((a, b) => b.id.localeCompare(a.id));
+}
+
+export async function projectSummaryAsync(id: string, root = ROOT): Promise<ProjectSummary> {
+  let data: Record<string, unknown> = {};
+  try { data = await readJsonAsync(join(projectsDir(root), id, 'project.json')) as Record<string, unknown>; } catch { /* listed but unreadable */ }
+  return summaryOf(id, data, await listRunsAsync(id, root));
 }
 
 // The folder linked with the desktop app's "Choose my folder": the repositories[] entry marked linkedFolder.
