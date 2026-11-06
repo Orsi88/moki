@@ -41,7 +41,9 @@ Run them from a terminal **without** `QA_ROOT`, `QA_MCP_SERVER` or `QA_RUN_TOOL`
 | `md-comments.test.ts` | Unit | Comments kept inside a Markdown file (invisible to other viewers), replies, edits and deletes |
 | `tool-path.test.ts` | Unit | Finding the AI tools from the installed app: the PATH it builds from the terminal's and the usual install folders |
 | `tags.test.ts` | Unit | The one rule (no tag = every project) and the migrations of agents and document templates to tags |
-| `usage.test.ts` | Unit | Claude and Codex plan windows, memory per terminal and per project |
+| `usage.test.ts` | Unit | Claude and Codex plan windows; Moki's memory by role (main process, each kind of window, GPU) apart from the memory per terminal and per project; PSS from `smaps_rollup` |
+| `terminals.test.ts` | Unit | The end of a terminal's output kept for a tab that comes back |
+| `search-cache.test.ts` | Unit | The text taken out of Word, PDF and spreadsheet files, kept per file version for the expanded search |
 | `i18n.test.ts` | Unit (static) | Every text of the app has a pt-BR translation that keeps its `{placeholders}` |
 | `icon-font.test.mjs` | Unit | The status bar cat glyph and the SVG path flattening |
 | `wiki.test.mjs` | Unit | The wiki built from `docs/`: every page, links rewritten, the in-development note, broken links stop it |

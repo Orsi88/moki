@@ -56,9 +56,47 @@ async function walkText(base: string, rel = ''): Promise<string[]> {
   return nested.flat();
 }
 
+// Text taken out of Word, PDF and spreadsheet files, kept per file version: each expanded search would
+// otherwise open and read every one of them again (pdf.js in the main process). Least recently used first out.
+const EXTRACTED_LIMIT = 16_000_000; // characters kept in all
+const extracted = new Map<string, { stamp: string; text: string }>();
+let extractedSize = 0;
+
+export function rememberText(file: string, stamp: string, text: string, limit = EXTRACTED_LIMIT): void {
+  const old = extracted.get(file);
+  if (old) { extracted.delete(file); extractedSize -= old.text.length; }
+  if (text.length > limit) return;
+  extracted.set(file, { stamp, text });
+  extractedSize += text.length;
+  for (const [key, value] of extracted) {
+    if (extractedSize <= limit) break;
+    extracted.delete(key);
+    extractedSize -= value.text.length;
+  }
+}
+
+export function recalledText(file: string, stamp: string): string | null {
+  const hit = extracted.get(file);
+  if (!hit || hit.stamp !== stamp) return null;
+  extracted.delete(file); // most recently used goes last
+  extracted.set(file, hit);
+  return hit.text;
+}
+
 async function fileText(full: string, extension: string): Promise<string> {
-  if (lstatSync(full).size > FILE_LIMIT) return '';
+  const st = lstatSync(full);
+  if (st.size > FILE_LIMIT) return '';
   if (TEXT.has(extension)) return readFileSync(full, 'utf8');
+  if (extension !== '.docx' && extension !== '.xlsx' && extension !== '.pdf') return '';
+  const stamp = `${st.mtimeMs}:${st.size}`;
+  const known = recalledText(full, stamp);
+  if (known !== null) return known;
+  const text = await extractText(full, extension);
+  rememberText(full, stamp, text);
+  return text;
+}
+
+async function extractText(full: string, extension: string): Promise<string> {
   if (extension === '.docx') return docxToMarkdown(readFileSync(full));
   if (extension === '.xlsx') return xlsxSheets(readFileSync(full)).map((sheet: { name: string; rows: unknown[][] }) => `${sheet.name}\n${sheet.rows.map((row) => row.join(' ')).join('\n')}`).join('\n');
   if (extension === '.pdf') {

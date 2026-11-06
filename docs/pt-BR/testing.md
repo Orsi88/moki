@@ -41,7 +41,9 @@ Rode a partir de um terminal **sem** `QA_ROOT`, `QA_MCP_SERVER` ou `QA_RUN_TOOL`
 | `md-comments.test.ts` | Unidade | Comentários guardados dentro de um arquivo Markdown (invisíveis em outros visualizadores), respostas, edições e exclusões |
 | `tool-path.test.ts` | Unidade | Encontrar as ferramentas de IA a partir do app instalado: o PATH que ele monta com o do terminal e as pastas de instalação de sempre |
 | `tags.test.ts` | Unidade | A regra única (sem tag = todos os projetos) e a migração de agentes e modelos de documento para tags |
-| `usage.test.ts` | Unidade | As janelas de uso dos planos do Claude e do Codex, memória por terminal e por projeto |
+| `usage.test.ts` | Unidade | As janelas de uso dos planos do Claude e do Codex; a memória do Moki por função (processo principal, cada tipo de janela, GPU) à parte da memória por terminal e por projeto; PSS do `smaps_rollup` |
+| `terminals.test.ts` | Unidade | O fim da saída de um terminal guardado para a aba que volta |
+| `search-cache.test.ts` | Unidade | O texto tirado de arquivos Word, PDF e planilhas, guardado por versão do arquivo para a busca expandida |
 | `i18n.test.ts` | Unidade (estático) | Todo texto do app tem tradução em pt-BR que mantém os `{marcadores}` |
 | `icon-font.test.mjs` | Unidade | O desenho do gato na barra de status e a conversão dos caminhos SVG |
 | `wiki.test.mjs` | Unidade | A wiki gerada a partir de `docs/`: todas as páginas, links reescritos, o aviso de versão em desenvolvimento, links quebrados param a geração |

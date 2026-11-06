@@ -18,7 +18,7 @@ import { appChooser } from './open-with.ts';
 import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
 import { runPdfLocal } from './pdf-local.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
-import { memoryUsage, planUsage } from './usage.ts';
+import { memoryUsage, planUsage, type WindowKind } from './usage.ts';
 import { fixToolPath } from './tool-path.ts';
 
 const DIST = dirname(fileURLToPath(import.meta.url)); // app/dist-electron
@@ -85,6 +85,18 @@ const noteWindows = new Map<string, BrowserWindow>();
 function isNoteWindow(contents: WebContents): boolean {
   for (const note of noteWindows.values()) if (!note.isDestroyed() && note.webContents === contents) return true;
   return false;
+}
+
+// Which window each renderer process draws, for the memory of Moki by window in the status bar.
+function windowProcesses(): Map<number, WindowKind> {
+  const kinds = new Map<number, WindowKind>();
+  const add = (w: BrowserWindow | null | undefined, kind: WindowKind) => {
+    if (w && !w.isDestroyed()) { const pid = w.webContents.getOSProcessId(); if (pid) kinds.set(pid, kind); }
+  };
+  add(win, 'window');
+  for (const note of noteWindows.values()) add(note, 'notes');
+  add(searchWindow, 'search');
+  return kinds;
 }
 
 // Only our own UI (loaded from app/dist) may call the service.
@@ -296,11 +308,10 @@ if (!app.requestSingleInstanceLock()) {
       ? terminals.list().filter((x) => x.project === project).map((x) => ({ id: x.id, title: x.title })) : []));
     ipcMain.handle('qa:term-attach', (event, id: unknown) => (trusted(event) && typeof id === 'string' ? terminals.attach(id) : null));
 
-    // Status bar: plan usage of the AI tools, and memory of the computer, of Moki and of each project's terminals.
+    // Status bar: plan usage of the AI tools, and memory of the computer, of Moki and, apart, of each project's terminals.
     ipcMain.handle('qa:usage', async (event, refresh: unknown) => {
       if (!trusted(event)) return null;
-      const appBytes = app.getAppMetrics().reduce((sum, m) => sum + m.memory.workingSetSize * 1024, 0);
-      const [memory, plans] = await Promise.all([memoryUsage(terminals.list(), appBytes), planUsage(refresh === true)]);
+      const [memory, plans] = await Promise.all([memoryUsage(terminals.list(), app.getAppMetrics(), windowProcesses()), planUsage(refresh === true)]);
       return { memory, plans };
     });
 

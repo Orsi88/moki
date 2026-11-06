@@ -28,7 +28,7 @@ export function TerminalView({ id, project, active, onExit }: Props) {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: '"Cascadia Code", "JetBrains Mono", ui-monospace, Consolas, monospace',
-      scrollback: 10000,
+      scrollback: 5000, // lines kept per tab; every tab stays mounted, so this is held for each terminal open
       theme: { background: css('--bg'), foreground: css('--text'), cursor: css('--accent'), selectionBackground: css('--accent-soft') },
     });
     const fit = new FitAddon();

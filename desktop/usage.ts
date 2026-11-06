@@ -1,6 +1,6 @@
 // Numbers for the status bar, as in Orca: how much of each AI plan is used (Claude
 // Code and Codex, asked to each provider with the login the tool saved on this
-// computer) and the memory of the computer and of the terminals of each project.
+// computer) and the memory of the computer, of Moki itself and, apart, of the terminals of each project.
 // The logins are only read here and sent to their own provider; the UI never sees them.
 
 import { execFile } from 'node:child_process';
@@ -15,7 +15,17 @@ const C_LOCALE = { ...process.env, LC_ALL: 'C', LANG: 'C' };
 export interface PlanWindow { label: string; percent: number; resetsAt: number | null }
 export interface PlanUsage { tool: 'claude' | 'codex'; label: string; windows: PlanWindow[]; error?: string }
 export interface ProjectMemory { project: string; bytes: number; sessions: { id: string; bytes: number }[] } // a session is one terminal tab
-export interface MemoryUsage { total: number; used: number; app: number; projects: ProjectMemory[] }
+// How a process is measured: PSS on Linux (shared pages split between the processes that share them,
+// so a sum is not inflated), private bytes on Windows, the resident size on macOS.
+export type MemoryMetric = 'pss' | 'private' | 'rss';
+// Moki's own processes by role: the main process (service, Node), each kind of window, the GPU process and the rest of Chromium.
+export type AppProcessKind = 'main' | 'window' | 'notes' | 'search' | 'gpu' | 'other';
+export interface AppProcess { kind: AppProcessKind; bytes: number; count: number }
+// app: Moki itself. tools: everything the terminal tabs started (the shells and AI tools), listed by project in projects.
+export interface MemoryUsage { total: number; used: number; metric: MemoryMetric; app: { bytes: number; processes: AppProcess[] }; tools: number; projects: ProjectMemory[] }
+// One process of app.getAppMetrics() (sizes in kilobytes; privateBytes only on Windows).
+export interface AppMetric { pid: number; type: string; memory: { workingSetSize: number; privateBytes?: number } }
+export type WindowKind = 'window' | 'notes' | 'search';
 
 // '5h', '7d', '30d' from a window length in seconds.
 export const windowLabel = (seconds: number): string => (seconds % 86400 === 0 ? `${seconds / 86400}d` : `${Math.round(seconds / 3600)}h`);
@@ -108,27 +118,65 @@ export function parseProcesses(out: string): Map<number, { ppid: number; kb: num
   return rows;
 }
 
-// Memory of a process and everything it started (the shell, the AI tool, its helpers).
-export function treeBytes(rows: Map<number, { ppid: number; kb: number }>, root: number): number {
+// A process and everything it started (the shell, the AI tool, its helpers).
+export function treePids(rows: Map<number, { ppid: number; kb: number }>, root: number): number[] {
   const children = new Map<number, number[]>();
   for (const [pid, { ppid }] of rows) children.set(ppid, [...(children.get(ppid) ?? []), pid]);
-  let kb = 0;
   const seen = new Set<number>();
   const queue = [root];
   for (let pid = queue.pop(); pid !== undefined; pid = queue.pop()) {
-    if (seen.has(pid)) continue;
+    if (seen.has(pid) || !rows.has(pid)) continue;
     seen.add(pid);
-    kb += rows.get(pid)?.kb ?? 0;
     queue.push(...(children.get(pid) ?? []));
   }
-  return kb * 1024;
+  return [...seen];
+}
+
+// Memory of a process tree, each process counted once. sizes: bytes measured per pid (PSS), used instead of the listed kilobytes.
+export function treeBytes(rows: Map<number, { ppid: number; kb: number }>, root: number, sizes?: Map<number, number>): number {
+  return treePids(rows, root).reduce((sum, pid) => sum + (sizes?.get(pid) ?? (rows.get(pid)?.kb ?? 0) * 1024), 0);
+}
+
+// The proportional set size from /proc/<pid>/smaps_rollup, in bytes; null when the line is missing.
+export function parseSmapsRollup(text: string): number | null {
+  const kb = /^Pss:\s+(\d+)\s*kB/m.exec(text)?.[1];
+  return kb === undefined ? null : Number(kb) * 1024;
+}
+
+// PSS of each process that can be read (Linux only; a process that ended or is not readable is left out).
+async function pssOf(pids: number[]): Promise<Map<number, number>> {
+  const sizes = new Map<number, number>();
+  if (process.platform !== 'linux') return sizes;
+  await Promise.all(pids.map(async (pid) => {
+    const bytes = parseSmapsRollup(await readFile(`/proc/${pid}/smaps_rollup`, 'utf8').catch(() => ''));
+    if (bytes !== null) sizes.set(pid, bytes);
+  }));
+  return sizes;
+}
+
+const KIND_ORDER: AppProcessKind[] = ['main', 'window', 'notes', 'search', 'gpu', 'other'];
+
+// Moki's processes grouped by role. windows: renderer pid -> the window it draws. sizes: PSS per pid when measured,
+// otherwise private bytes (Windows) or the working set.
+export function appMemory(metrics: AppMetric[], windows: Map<number, WindowKind>, sizes: Map<number, number> = new Map()): { bytes: number; processes: AppProcess[] } {
+  const groups = new Map<AppProcessKind, AppProcess>();
+  for (const m of metrics) {
+    const kind: AppProcessKind = m.type === 'Browser' ? 'main' : m.type === 'GPU' ? 'gpu' : windows.get(m.pid) ?? 'other';
+    const bytes = sizes.get(m.pid) ?? (m.memory.privateBytes ?? m.memory.workingSetSize) * 1024;
+    const g = groups.get(kind) ?? { kind, bytes: 0, count: 0 };
+    g.bytes += bytes;
+    g.count += 1;
+    groups.set(kind, g);
+  }
+  const processes = KIND_ORDER.flatMap((k) => groups.get(k) ?? []);
+  return { bytes: processes.reduce((n, p) => n + p.bytes, 0), processes };
 }
 
 async function processes(): Promise<string> {
   try {
     if (process.platform !== 'win32') return (await run('ps', ['-A', '-o', 'pid=,ppid=,rss='], { env: C_LOCALE, timeout: 5000, maxBuffer: 10 << 20 })).stdout;
     return (await run('powershell.exe', ['-NoProfile', '-Command',
-      'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $([math]::Round($_.WorkingSetSize / 1KB))" }'],
+      'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $([math]::Round($_.PrivatePageCount / 1KB))" }'],
     { timeout: 10_000, maxBuffer: 10 << 20, windowsHide: true })).stdout;
   } catch { return ''; }
 }
@@ -146,14 +194,18 @@ async function available(): Promise<number> {
   return freemem();
 }
 
-// appBytes: Electron's own processes (app.getAppMetrics), which the terminals are not part of.
-export async function memoryUsage(terminals: { id: string; pid: number; project: string }[], appBytes: number): Promise<MemoryUsage> {
+// metrics: Electron's own processes (app.getAppMetrics), which the terminals are not part of; windows: which window each renderer draws.
+// Moki and the AI tools are measured apart, the same way, so neither number includes the other.
+export async function memoryUsage(terminals: { id: string; pid: number; project: string }[], metrics: AppMetric[], windows: Map<number, WindowKind> = new Map()): Promise<MemoryUsage> {
   const [out, free] = await Promise.all([terminals.length ? processes() : Promise.resolve(''), available()]);
   const rows = parseProcesses(out);
+  const trees = new Map(terminals.map((t) => [t.id, treePids(rows, t.pid)]));
+  const sizes = await pssOf([...metrics.map((m) => m.pid), ...[...trees.values()].flat()]);
+  const metric: MemoryMetric = sizes.size ? 'pss' : process.platform === 'win32' ? 'private' : 'rss';
   const byProject = new Map<string, ProjectMemory>();
   for (const { id, pid, project } of terminals) {
     const p = byProject.get(project) ?? { project, bytes: 0, sessions: [] };
-    const bytes = treeBytes(rows, pid);
+    const bytes = treeBytes(rows, pid, sizes);
     p.bytes += bytes;
     p.sessions.push({ id, bytes });
     byProject.set(project, p);
@@ -161,5 +213,5 @@ export async function memoryUsage(terminals: { id: string; pid: number; project:
   const projects = [...byProject.values()].sort((a, b) => b.bytes - a.bytes);
   for (const p of projects) p.sessions.sort((a, b) => b.bytes - a.bytes);
   const total = totalmem();
-  return { total, used: Math.max(0, total - free), app: appBytes, projects };
+  return { total, used: Math.max(0, total - free), metric, app: appMemory(metrics, windows, sizes), tools: projects.reduce((n, p) => n + p.bytes, 0), projects };
 }

@@ -2,7 +2,7 @@
 // the memory of a terminal's process tree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claudeWindows, codexWindows, memoryUsage, parseProcesses, treeBytes, windowLabel } from '../desktop/usage.ts';
+import { appMemory, claudeWindows, codexWindows, memoryUsage, parseProcesses, parseSmapsRollup, treeBytes, treePids, windowLabel } from '../desktop/usage.ts';
 
 test('Claude plan windows come from limits[], with the model of a scoped limit', () => {
   const windows = claudeWindows({
@@ -37,16 +37,49 @@ test('a terminal counts the memory of everything it started, once', () => {
   assert.equal(treeBytes(rows, 99), 0); // already exited
 });
 
-test('memory is listed per project and, inside it, per terminal', async () => {
+test('a terminal tree can be measured with the PSS of each process', () => {
+  const rows = parseProcesses(' 10 1 2048\n 11 10 1024\n 12 11 512\n');
+  assert.deepEqual(treePids(rows, 10).sort(), [10, 11, 12]);
+  // 11 was measured (PSS), the others keep the size ps listed.
+  assert.equal(treeBytes(rows, 10, new Map([[11, 100]])), 2048 * 1024 + 100 + 512 * 1024);
+});
+
+test('PSS is read from smaps_rollup', () => {
+  const text = '55d0c0000000-7ffd00000000 ---p 00000000 00:00 0 [rollup]\nRss:              270464 kB\nPss:              153600 kB\nPss_Anon:          90000 kB\n';
+  assert.equal(parseSmapsRollup(text), 153600 * 1024);
+  assert.equal(parseSmapsRollup(''), null);
+});
+
+test("Moki's memory is grouped by role, with the windows each renderer draws", () => {
+  const metric = (pid: number, type: string, kb: number, privateBytes?: number) => ({ pid, type, memory: { workingSetSize: kb, ...(privateBytes === undefined ? {} : { privateBytes }) } });
+  const app = appMemory(
+    [metric(1, 'Browser', 1000), metric(2, 'GPU', 500), metric(3, 'Tab', 800), metric(4, 'Tab', 300), metric(5, 'Tab', 200), metric(6, 'Utility', 100), metric(7, 'Zygote', 50, 10)],
+    new Map([[3, 'window'], [4, 'notes'], [5, 'notes']]),
+    new Map([[1, 4096]]), // the main process measured (PSS)
+  );
+  assert.deepEqual(app.processes, [
+    { kind: 'main', bytes: 4096, count: 1 },
+    { kind: 'window', bytes: 800 * 1024, count: 1 },
+    { kind: 'notes', bytes: 500 * 1024, count: 2 },
+    { kind: 'gpu', bytes: 500 * 1024, count: 1 },
+    { kind: 'other', bytes: (100 + 10) * 1024, count: 2 }, // private bytes (Windows) win over the working set
+  ]);
+  assert.equal(app.bytes, app.processes.reduce((n, p) => n + p.bytes, 0));
+});
+
+test('memory is listed per project and, inside it, per terminal, apart from Moki', async () => {
   const m = await memoryUsage([
     { id: 't1', pid: process.pid, project: 'acme' },
     { id: 't2', pid: 2 ** 22 + 12345, project: 'acme' }, // exited: no memory
     { id: 't3', pid: process.pid, project: 'beta' },
-  ], 1);
-  assert.ok(m.total > 0 && m.used > 0 && m.app === 1);
+  ], [{ pid: 2 ** 22 + 54321, type: 'Browser', memory: { workingSetSize: 1 } }]);
+  assert.ok(m.total > 0 && m.used > 0);
+  assert.ok(['pss', 'private', 'rss'].includes(m.metric));
+  assert.deepEqual(m.app, { bytes: 1024, processes: [{ kind: 'main', bytes: 1024, count: 1 }] }); // the terminals are not part of Moki
   const acme = m.projects.find((p) => p.project === 'acme');
   assert.deepEqual(acme?.sessions.map((s) => s.id), ['t1', 't2']);
   assert.ok((acme?.sessions[0].bytes ?? 0) > 0);
   assert.equal(acme?.bytes, acme?.sessions[0].bytes);
   assert.deepEqual(m.projects.map((p) => p.project).sort(), ['acme', 'beta']);
+  assert.equal(m.tools, m.projects.reduce((n, p) => n + p.bytes, 0));
 });

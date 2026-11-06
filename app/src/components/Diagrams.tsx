@@ -2,20 +2,13 @@
 // process only carries the escaped source; drawing happens here. A drawing can be
 // edited and is written back into its fence. Mermaid stays source.
 import { createRoot } from 'react-dom/client';
-import { useRef, useState } from 'react';
-import { Excalidraw, exportToSvg, restore, serializeAsJSON } from '@excalidraw/excalidraw';
-import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import '@excalidraw/excalidraw/index.css';
 import { t } from '../i18n';
 import { mountDiagramJobs, type DiagramJob } from '../diagram-mount';
 import { type DiagramLang } from '../diagram-source';
-import { IconCheck } from './Icons';
 
-function sceneOf(source: string) {
-  const parsed = JSON.parse(source) as { type?: string; elements?: unknown[]; appState?: object; files?: never };
-  if (!parsed || parsed.type !== 'excalidraw' || !Array.isArray(parsed.elements)) throw new Error('invalid');
-  return restore({ elements: parsed.elements as never, appState: parsed.appState ?? {}, files: parsed.files ?? ({} as never) }, null, null);
-}
+// Excalidraw is loaded on the first drawing (ExcalidrawScene.tsx), like Mermaid on the first diagram.
+const scene = () => import('./ExcalidrawScene');
+const drawExcalidraw = async (host: HTMLElement, source: string) => (await scene()).drawExcalidraw(host, source);
 
 export async function paintDiagram(host: HTMLElement, lang: DiagramLang, source: string) {
   if (lang === 'excalidraw') {
@@ -29,47 +22,6 @@ export async function paintDiagram(host: HTMLElement, lang: DiagramLang, source:
   const { svg } = await mermaid.render(id, source);
   host.innerHTML = svg;
   host.querySelectorAll('script').forEach((node) => node.remove());
-}
-
-async function drawExcalidraw(host: HTMLElement, source: string) {
-  const restored = sceneOf(source);
-  const paper = String(restored.appState.viewBackgroundColor || '');
-  const plain = !paper || paper.toLowerCase() === '#ffffff' || paper.toLowerCase() === '#fff';
-  const svg = await exportToSvg({
-    elements: restored.elements,
-    appState: { ...restored.appState, exportBackground: !plain, viewBackgroundColor: plain ? 'transparent' : paper },
-    files: restored.files,
-    exportPadding: 16,
-  });
-  host.replaceChildren(svg);
-}
-
-function DrawingEditor({ source, onSave, onClose }: { source: string; onSave: (body: string) => void; onClose: () => void }) {
-  const api = useRef<ExcalidrawImperativeAPI | null>(null);
-  const [initial] = useState(() => {
-    try {
-      const restored = sceneOf(source);
-      return { elements: restored.elements, appState: restored.appState, files: restored.files };
-    } catch {
-      return { elements: [], appState: { viewBackgroundColor: '#ffffff' } };
-    }
-  });
-  const save = () => {
-    const ex = api.current;
-    if (!ex) return;
-    onSave(serializeAsJSON(ex.getSceneElements(), ex.getAppState(), ex.getFiles(), 'local'));
-  };
-  return (
-    <div className="drawing-editor" role="dialog" aria-label={t('Drawing')}>
-      <div className="drawing-editor-bar">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t('Cancel')}</button>
-        <button type="button" className="btn btn-icon" onClick={save} title={t('Save drawing')} aria-label={t('Save drawing')}><IconCheck size={16} /></button>
-      </div>
-      <div className="drawing-editor-canvas">
-        <Excalidraw initialData={initial} excalidrawAPI={(next) => { api.current = next; }} />
-      </div>
-    </div>
-  );
 }
 
 // Ctrl + scroll over the card. The same range as the +/- buttons. A passive
@@ -90,11 +42,13 @@ export function bindDiagramZoom(host: HTMLElement): () => void {
 }
 
 export function openDrawing(source: string, onSave: (body: string) => void) {
-  const host = document.createElement('div');
-  document.body.append(host);
-  const root = createRoot(host);
-  const close = () => { root.unmount(); host.remove(); };
-  root.render(<DrawingEditor source={source} onSave={(body) => { onSave(body); close(); }} onClose={close} />);
+  void scene().then(({ DrawingEditor }) => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    const close = () => { root.unmount(); host.remove(); };
+    root.render(<DrawingEditor source={source} onSave={(body) => { onSave(body); close(); }} onClose={close} />);
+  });
 }
 
 // The same zoom as a PDF: the picture starts fitted to the card, then grows or shrinks inside it.

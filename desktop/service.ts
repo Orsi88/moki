@@ -102,6 +102,8 @@ export type FileContent =
   | { kind: 'image'; path: string; dataUrl: string }
   | { kind: 'pdf'; path: string; data: string } // base64
   | { kind: 'binary'; path: string; size: number; openable: boolean; reason?: string };
+// What readFile returns: the content, and the file's version (modification time and size) when it was read.
+export type ReadContent = FileContent & { stamp?: string };
 
 export interface LaunchRequest {
   project: string; activity: string; tool: string; files: string[]; note: string; language: string; run?: string; agent?: string;
@@ -650,8 +652,18 @@ export function createService(root: string, deps: Deps) {
     };
   }
 
-  function readFile(project: string, rel: string): FileContent {
+  // The version of a file: when it last changed and its size. '' when it is not a file.
+  const stampOf = (file: string): string => {
+    try { const st = statSync(file); return st.isFile() ? `${st.mtimeMs}:${st.size}` : ''; } catch { return ''; }
+  };
+
+  function readFile(project: string, rel: string): ReadContent {
     const file = projectPath(project, rel);
+    const stamp = stampOf(file); // read before the content: a change made while reading shows as a new version next time
+    return { ...readContent(project, rel, file), stamp };
+  }
+
+  function readContent(project: string, rel: string, file: string): FileContent {
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
     const path = posix(String(rel));
     const ext = extname(file).toLowerCase();
@@ -957,6 +969,14 @@ export function createService(root: string, deps: Deps) {
     tree: (project: string) => tree(project),
 
     readFile: (project: string, rel: string) => readFile(project, rel),
+
+    // The versions of the files open in tabs, in the same order (see readFile): after a change in the project
+    // folder the app reads again only the ones whose version changed. '' for a file that is gone.
+    fileStamps: (project: string, paths: unknown) => {
+      projectDir(project);
+      if (!Array.isArray(paths) || paths.length > 500 || !paths.every((p) => typeof p === 'string')) throw new ServiceError('Invalid files.');
+      return paths.map((rel: string) => { try { return stampOf(projectPath(project, rel)); } catch { return ''; } });
+    },
 
     writeFile: (project: string, rel: string, text: unknown) => {
       const file = projectPath(project, rel);

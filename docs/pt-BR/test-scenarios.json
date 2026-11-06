@@ -86,7 +86,6 @@
   "markdown tables draw merged cells (<< and ^^) as one cell": "as tabelas de Markdown desenham células mescladas (<< e ^^) como uma célula só",
   "markdown to html": "Markdown para HTML",
   "markdown: deep lists, setext headings, rules and autolinks": "Markdown: listas aninhadas, títulos setext, linhas horizontais e links automáticos",
-  "memory is listed per project and, inside it, per terminal": "a memória é listada por projeto e, dentro dele, por terminal",
   "non-ASCII prompts reach Windows tools through a UTF-8 request file": "pedidos com caracteres não ASCII chegam às ferramentas no Windows por um arquivo de pedido em UTF-8",
   "note windows: only notes/<file>.md of a listed project or a loose note id, one window per note": "janelas de nota: só notes/<arquivo>.md de um projeto listado ou o id de uma nota avulsa, uma janela por nota",
   "notes: one is deleted from the start screen; nothing outside notes/ is": "notas: uma é excluída pela tela inicial; nada fora de notes/ é excluído",
@@ -179,5 +178,14 @@
   "the sidebar is in blocks: folders, Tracking and Other files, then Project settings and MCPs; the Operations card is in the project panel": "a barra lateral é em blocos: pastas, Acompanhamento e Outros arquivos, depois Configurações do projeto e MCPs; o card de Operações fica no painel do projeto",
   "creating a project: Enter on the name opens it with the standard folders; Create and customize opens with Set up": "criar um projeto: Enter no nome abre com as pastas padrão; Criar e personalizar abre em Configurar",
   "open a folder: the name is yours, the folder shows live in the tree as @folder, and opens in an IDE": "abrir pasta: o nome é seu, a pasta aparece ao vivo na árvore como @folder e abre numa IDE",
-  "a linked folder shows first in the tree, live, with Open in the IDE; its files open in the app": "uma pasta vinculada aparece primeiro na árvore, ao vivo, com Abrir na IDE; os arquivos dela abrem no app"
+  "a linked folder shows first in the tree, live, with Open in the IDE; its files open in the app": "uma pasta vinculada aparece primeiro na árvore, ao vivo, com Abrir na IDE; os arquivos dela abrem no app",
+  "memory is listed per project and, inside it, per terminal, apart from Moki": "a memória é listada por projeto e, dentro dele, por terminal, à parte do Moki",
+  "a terminal tree can be measured with the PSS of each process": "a árvore de um terminal pode ser medida com o PSS de cada processo",
+  "PSS is read from smaps_rollup": "o PSS é lido do smaps_rollup",
+  "Moki's memory is grouped by role, with the windows each renderer draws": "a memória do Moki é agrupada por função, com as janelas que cada renderer desenha",
+  "fileStamps tells which open files changed since they were read": "fileStamps diz quais arquivos abertos mudaram desde que foram lidos",
+  "a terminal keeps only the end of its output, at least the size asked for": "um terminal guarda só o fim da sua saída, no mínimo o tamanho pedido",
+  "the output kept is the same as cutting the whole output": "a saída guardada é a mesma que cortar a saída inteira",
+  "extracted text is reused only for the same version of the file": "o texto extraído só é reaproveitado para a mesma versão do arquivo",
+  "the least recently used text leaves first when the limit is passed": "o texto usado há mais tempo sai primeiro quando o limite é passado"
 }

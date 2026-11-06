@@ -618,11 +618,16 @@ fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
 .usage-pop th { padding: 5px 14px; text-align: left; font-weight: 500; color: var(--text); }
 .usage-pop td { padding: 5px 14px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .usage-pop tbody tr:hover { background: var(--bg-3); }
-.usage-pop p { margin: 0; padding: 10px 14px; }
+.usage-pop p { margin: 0; padding: 10px 14px; white-space: normal; } /* the status bar keeps its text on one line */
 .usage-twisty { display: inline-flex; width: 16px; color: var(--muted); transition: transform 0.12s; }
 .usage-twisty.open { transform: rotate(90deg); }
-.usage-project button, .usage-session button { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.usage-session th { padding-left: 30px; font-weight: 400; color: var(--muted); }
+.usage-group button, .usage-project button, .usage-session button { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.usage-group th { font-weight: 600; }
+.usage-group td { color: var(--text); font-weight: 600; }
+.usage-group:not(:first-child) th, .usage-group:not(:first-child) td { border-top: 1px solid var(--border); }
+.usage-project th { padding-left: 30px; }
+.usage-sub th { padding-left: 46px; font-weight: 400; color: var(--muted); }
+.usage-session th { padding-left: 46px; font-weight: 400; color: var(--muted); }
 .usage-session button:hover, .usage-session button:focus-visible { color: var(--text); text-decoration: underline; outline: none; }
 .usage-dot { display: inline-block; width: 6px; height: 6px; margin-right: 10px; vertical-align: middle; border-radius: 50%; background: var(--ok); }
 

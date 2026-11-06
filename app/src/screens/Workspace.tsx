@@ -2,7 +2,7 @@
 // (view and edit) and terminals (AI tools or a shell), and a side panel with
 // the activity or project details.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
 import { api, type FileContent, type ProjectSummary, type Tag, type TerminalRef, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { defaultTool, recall, remember } from '../prefs';
@@ -17,7 +17,6 @@ import { ActivityRunView } from '../components/ActivityRunView';
 import { OperationRunView } from '../components/OperationRunView';
 import { SidePanel } from '../components/SidePanel';
 import { SetupDialog } from '../components/SetupDialog';
-import { TerminalView } from '../components/TerminalView';
 import { UsageStatus } from '../components/UsageStatus';
 import { TagPicker } from '../components/TagPicker';
 import { SearchPanel } from '../components/SearchPanel';
@@ -30,6 +29,9 @@ import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
 import { parseActivityLaunches, type ActivityLaunch, type ActivityLaunchPhase } from '../activity-launches';
+
+// xterm.js loads with the first terminal tab.
+const TerminalView = lazy(() => import('../components/TerminalView').then((m) => ({ default: m.TerminalView })));
 
 interface Props { workspaceId: string; project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
 
@@ -166,6 +168,23 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   };
   const colorsOf = (path: string) => (fileTags[path] ?? []).map((id) => catalog.find((tg) => tg.id === id)?.color).filter((c): c is string => Boolean(c));
 
+  // Open tabs whose file changed are read again. A change anywhere in the folder fires this (the AI tool writes
+  // often), so only the version of each file is asked first: a PDF or an image is sent and drawn again only when
+  // it really changed. Markdown is always read again, since the pictures it embeds may have changed.
+  const reloadChanged = useCallback(async () => {
+    const clean = tabsRef.current.filter((t) => !isDirty(t));
+    if (!clean.length) return;
+    const stamps = await api.fileStamps(project.id, clean.map((t) => t.path)).catch(() => null);
+    clean.forEach((t, i) => {
+      const stamp = stamps?.[i];
+      if (stamp === '') return; // file removed: keep the tab as it was
+      if (stamp && t.content.kind !== 'markdown' && stamp === t.content.stamp) return;
+      api.readFile(project.id, t.path)
+        .then((content) => setTabs((all) => all.map((x) => (x.path === t.path && !isDirty(x) ? { ...x, content, draft: textOf(content) } : x))))
+        .catch(() => { /* file removed: keep the tab as it was */ });
+    });
+  }, [project.id]);
+
   // Live updates: the AI tool writes files while the app is open.
   useEffect(() => {
     loadTree();
@@ -177,15 +196,10 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
       loadTree();
       setRefreshKey((k) => k + 1);
       onProjectChanged();
-      for (const t of tabsRef.current) {
-        if (isDirty(t)) continue;
-        api.readFile(project.id, t.path)
-          .then((content) => setTabs((all) => all.map((x) => (x.path === t.path && !isDirty(x) ? { ...x, content, draft: textOf(content) } : x))))
-          .catch(() => { /* file removed: keep the tab as it was */ });
-      }
+      void reloadChanged();
     });
     return () => { off(); void api.watch(null); };
-  }, [project.id, loadTree, onProjectChanged]);
+  }, [project.id, loadTree, onProjectChanged, reloadChanged]);
 
   const openPath = useCallback((path: string, mode: Tab['mode'] = 'preview') => {
     setError('');
@@ -638,9 +652,11 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
         </div>
         {notice && <div className="error-bar info-bar" role="status">{notice}<button type="button" className="icon-btn" onClick={() => setNotice('')}><IconX size={14} /></button></div>}
         {error && <div className="error-bar">{error}<button type="button" className="icon-btn" onClick={() => setError('')}><IconX size={14} /></button></div>}
-        {terms.map((t) => (
-          <TerminalView key={t.id} id={t.id} project={project.id} active={t.id === activeTerm} onExit={() => setTerms((all) => all.map((x) => (x.id === t.id ? { ...x, running: false } : x)))} />
-        ))}
+        <Suspense fallback={null}>
+          {terms.map((t) => (
+            <TerminalView key={t.id} id={t.id} project={project.id} active={t.id === activeTerm} onExit={() => setTerms((all) => all.map((x) => (x.id === t.id ? { ...x, running: false } : x)))} />
+          ))}
+        </Suspense>
         {graphFocus ? (
           <div className="welcome">
             <h1>{t('Graph view')}</h1>

@@ -22,7 +22,7 @@ const RULES = {
   'desktop.test.ts': [
     [/^projects and project creation|^deleting a project|^tree lists/, 'Projects', I],
     [/^fs-guard/, 'Files and confinement', U],
-    [/^readFile|^file access|^editing is limited|^files dropped|^open folder|^new files and folders|^where an item is/, 'Files and confinement', I],
+    [/^readFile|^fileStamps|^file access|^editing is limited|^files dropped|^open folder|^new files and folders|^where an item is/, 'Files and confinement', I],
     [/^gio mime/, 'Open with', U],
     [/^"open with"/, 'Open with', I],
     [/^pdfcraft-cli|^a selection on drawn pages|^the comment cards beside a PDF/, 'PDF (PdfCraft)', U],
@@ -62,6 +62,8 @@ const RULES = {
   'code-highlight.test.ts': [[/./, 'Rendering', U]],
   'pdf-local.test.ts': [[/./, 'PDF (PdfCraft)', U]],
   'usage.test.ts': [[/./, 'Status bar usage', U]],
+  'terminals.test.ts': [[/./, 'Launching AI tools', U]],
+  'search-cache.test.ts': [[/./, 'Search', U]],
   'i18n.test.ts': [[/./, 'Translations', U]],
   'icon-font.test.mjs': [[/./, 'IDE icon', U]],
   'wiki.test.mjs': [[/./, 'Documentation', U]],

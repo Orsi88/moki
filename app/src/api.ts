@@ -74,7 +74,8 @@ export interface TreeNode {
   linked?: string; // the linked folder (path "@folder", shown live): its full path on this computer
 }
 
-export type FileContent =
+// stamp: the file's version when it was read (desktop/service.ts readFile), to tell whether it changed since.
+export type FileContent = ({ stamp?: string }) & (
   | { kind: 'markdown'; path: string; text: string; html: string; editable: boolean }
   | { kind: 'text'; path: string; text: string; editable: boolean }
   | { kind: 'json'; path: string; text: string }
@@ -86,7 +87,7 @@ export type FileContent =
   }[] }
   | { kind: 'image'; path: string; dataUrl: string }
   | { kind: 'pdf'; path: string; data: string } // base64
-  | { kind: 'binary'; path: string; size: number; openable: boolean; reason?: string };
+  | { kind: 'binary'; path: string; size: number; openable: boolean; reason?: string });
 
 export interface RunState {
   id: string; status: string; currentStep?: string; skill?: string; workflow?: string; createdAt?: string; updatedAt?: string;
@@ -205,11 +206,17 @@ export interface GlobalItems {
   agents: { name: string; description: string; file: string; contract?: AgentContract }[];
 }
 export interface GlobalAgentDetail { name: string; description: string; file: string; text: string; html: string; contract?: AgentContract }
-// Status bar (desktop/usage.ts): plan usage of the AI tools and memory of the computer, of Moki and of each project's terminals.
+// Status bar (desktop/usage.ts): plan usage of the AI tools and memory of the computer, of Moki and, apart, of each project's terminals.
 export interface PlanUsage { tool: 'claude' | 'codex'; label: string; windows: { label: string; percent: number; resetsAt: number | null }[]; error?: string }
 export interface Usage {
   plans: PlanUsage[];
-  memory: { total: number; used: number; app: number; projects: { project: string; bytes: number; sessions: { id: string; bytes: number }[] }[] }; // a session is one terminal tab
+  // app: Moki itself, by role; tools: the terminal tabs (shells and AI tools), by project and tab. Measured apart, with the same metric.
+  memory: {
+    total: number; used: number; metric: 'pss' | 'private' | 'rss';
+    app: { bytes: number; processes: { kind: 'main' | 'window' | 'notes' | 'search' | 'gpu' | 'other'; bytes: number; count: number }[] };
+    tools: number;
+    projects: { project: string; bytes: number; sessions: { id: string; bytes: number }[] }[]; // a session is one terminal tab
+  };
 }
 
 // MCP Manager (scripts/lib/mcp.ts): one catalog per workspace; each server is global (projects: []) or for the projects listed.
@@ -311,6 +318,7 @@ export const api = {
   installMokiExtension: (tool: string, project?: string) => call<{ version: string; folder: string }>('installMokiExtension', tool, project),
   tree: (project: string) => call<TreeNode[]>('tree', project),
   readFile: (project: string, path: string) => call<FileContent>('readFile', project, path),
+  fileStamps: (project: string, paths: string[]) => call<string[]>('fileStamps', project, paths),
   writeFile: (project: string, path: string, text: string) => call<FileContent>('writeFile', project, path, text),
   renderMarkdown: (text: string, project?: string, path?: string) => call<string>('renderMarkdown', text, project, path),
   userName: () => call<string>('userName'),

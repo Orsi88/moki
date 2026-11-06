@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { api, hasBridge, pageParams, type ProjectSummary, type Starter, type TerminalRef, type ToolInfo, type WorkspaceInfo } from './api';
 import { t, useLang } from './i18n';
-import { Notebook } from './components/Notebook';
 import { SearchPanel } from './components/SearchPanel';
 import { hiddenIds, setMenuWorkspace } from './side-menu';
 import { Ribbon } from './components/Ribbon';
 import { UsageStatus } from './components/UsageStatus';
-import { Home } from './screens/Home';
-import { Workspace, linkedNotice } from './screens/Workspace';
 import { WorkspacePicker } from './screens/WorkspacePicker';
 import type { SettingsTab } from './screens/Settings';
+
+// Each window loads only the screens it shows: the search and note windows are separate renderers,
+// and the editor, PDF, terminal and drawing code of the main screens would otherwise load in every one.
+const Home = lazy(() => import('./screens/Home').then((m) => ({ default: m.Home })));
+const Workspace = lazy(() => import('./screens/Workspace').then((m) => ({ default: m.Workspace })));
+const Notebook = lazy(() => import('./components/Notebook').then((m) => ({ default: m.Notebook })));
+const Loading = ({ children }: { children: ReactNode }) => <Suspense fallback={<div className="notice muted">{t('Loading…')}</div>}>{children}</Suspense>;
 
 const noteParams = pageParams();
 const isNoteWindow = noteParams.get('view') === 'note';
@@ -89,8 +93,9 @@ export function App() {
   const create = async (name: string, starter: Starter, tags: string[] = [], setup = true, folder?: string) => {
     const project = await api.createProject(name, starter, folder, tags);
     await loadProjects();
+    const notice = folder ? (await import('./screens/Workspace')).linkedNotice(project) : '';
     open(project.id);
-    setCreated({ id: project.id, setup, notice: folder ? linkedNotice(project) : '' });
+    setCreated({ id: project.id, setup, notice });
   };
   const onProjectChanged = useCallback(() => { void loadProjects(); }, [loadProjects]);
   // A workspace was opened (picker or switcher): its projects, on the start screen. null goes back to the picker.
@@ -110,7 +115,7 @@ export function App() {
     const loose = noteParams.get('loose');
     return (
       <div className="note-float">
-        <Notebook project={noteParams.get('project')} path={noteParams.get('path')} loose={loose} projects={projects.map((p) => ({ id: p.id, name: p.name }))} />
+        <Loading><Notebook project={noteParams.get('project')} path={noteParams.get('path')} loose={loose} projects={projects.map((p) => ({ id: p.id, name: p.name }))} /></Loading>
       </div>
     );
   }
@@ -136,10 +141,10 @@ export function App() {
     return (
       <div className="shell">
         <Ribbon settingsOn={settings !== null} onHome={home} onSettings={() => setSettings(settings ? null : 'agents')} searchOn={search} onSearch={toggleSearch} />
-        <Home projects={projects} tools={tools} version={version} onOpen={open} onCreate={create} settings={settings} onSettings={setSettings} project={null} onTerminal={openTerminal} workspace={workspace} onWorkspace={openWorkspace} search={search} onSearch={toggleSearch} onFound={openFound} onDeleted={() => { void loadProjects(); }} onToolsChanged={loadTools} />
+        <Loading><Home projects={projects} tools={tools} version={version} onOpen={open} onCreate={create} settings={settings} onSettings={setSettings} project={null} onTerminal={openTerminal} workspace={workspace} onWorkspace={openWorkspace} search={search} onSearch={toggleSearch} onFound={openFound} onDeleted={() => { void loadProjects(); }} onToolsChanged={loadTools} /></Loading>
         <footer className="statusbar"><span className="statusbar-spacer" /><UsageStatus names={Object.fromEntries(projects.map((p) => [p.id, p.name]))} /></footer>
       </div>
     );
   }
-  return <Workspace key={`${workspace.id}:${project.id}`} workspaceId={workspace.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created?.id === project.id && created.setup} startNotice={created?.id === project.id ? created.notice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} onToolsChanged={loadTools} />;
+  return <Loading><Workspace key={`${workspace.id}:${project.id}`} workspaceId={workspace.id} project={project} tools={tools} onHome={home} settings={settings} onSettings={setSettings} onProjectChanged={onProjectChanged} launchOnOpen={launchOnOpen} startSetup={created?.id === project.id && created.setup} startNotice={created?.id === project.id ? created.notice : ''} pendingTerminal={pendingTerm} onPendingTerminal={() => setPendingTerm(null)} pendingPath={pendingPath} onPendingPath={() => setPendingPath(null)} search={search} onSearch={toggleSearch} onFound={openFound} onToolsChanged={loadTools} /></Loading>;
 }

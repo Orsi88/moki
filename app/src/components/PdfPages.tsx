@@ -12,7 +12,20 @@ const CSS_UNITS = 96 / 72; // pdf.js: one PDF point at zoom 1 is drawn as 96/72 
 // a new document opened meanwhile (after a save) would throw "the worker is being destroyed".
 let worker: PDFWorker | null = null;
 
-// A page is drawn (canvas and selectable text) only once it comes near the screen.
+// A page is drawn when it comes within NEAR of the screen and let go (its canvas freed) once it is
+// farther than FAR: an A4 page at 2x is about 14 MB of canvas, so a long PDF scrolled to the end
+// would otherwise keep every page it passed. The gap between the two avoids drawing again on small scrolls.
+const NEAR = '800px';
+const FAR = '3000px';
+const MAX_RATIO = 2; // sharper than 2x is not visible, and costs ratio² in memory
+
+// Empties a page: the canvas is shrunk first so Chromium frees its pixels now, not at the next GC.
+function release(el: HTMLElement): void {
+  for (const canvas of el.querySelectorAll('canvas')) { canvas.width = 0; canvas.height = 0; }
+  el.replaceChildren();
+}
+
+// A page is drawn (canvas and selectable text) only while it is near the screen.
 function Page({ doc, n, scale }: { doc: PDFDocumentProxy; n: number; scale: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -27,10 +40,17 @@ function Page({ doc, n, scale }: { doc: PDFDocumentProxy; n: number; scale: numb
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const io = new IntersectionObserver(([e]) => { if (e?.isIntersecting) { setVisible(true); io.disconnect(); } }, { rootMargin: '800px' });
-    io.observe(el);
-    return () => io.disconnect();
+    const near = new IntersectionObserver(([e]) => { if (e?.isIntersecting) setVisible(true); }, { rootMargin: NEAR });
+    const far = new IntersectionObserver(([e]) => { if (e && !e.isIntersecting) setVisible(false); }, { rootMargin: FAR });
+    near.observe(el);
+    far.observe(el);
+    return () => { near.disconnect(); far.disconnect(); release(el); };
   }, []);
+
+  // Gone far from the screen: its canvas and text are dropped (the page keeps its size, so nothing moves).
+  useEffect(() => {
+    if (!visible && ref.current) release(ref.current);
+  }, [visible]);
 
   useEffect(() => {
     const el = ref.current;
@@ -41,7 +61,7 @@ function Page({ doc, n, scale }: { doc: PDFDocumentProxy; n: number; scale: numb
     doc.getPage(n).then(async (page) => {
       if (gone) return;
       const viewport = page.getViewport({ scale: scale * CSS_UNITS });
-      const ratio = window.devicePixelRatio || 1;
+      const ratio = Math.min(window.devicePixelRatio || 1, MAX_RATIO);
       const canvas = document.createElement('canvas');
       canvas.width = Math.floor(viewport.width * ratio);
       canvas.height = Math.floor(viewport.height * ratio);

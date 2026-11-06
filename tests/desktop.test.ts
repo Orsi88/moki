@@ -136,11 +136,30 @@ test('readFile renders each kind of file', () => {
       widths: [64, 140, 63, 64, 64, 64, 64, 64], hiddenRows: [1], hiddenCols: [2], align: { '0:0': { h: 'center', v: 'middle', wrap: true } }, rows: [['Id'], [], ['', 'Renova&ção\r', { n: '42' }, 'TRUE', '00123', { n: '24/10/2026' }, { n: formatNumber(0.875, '0.00%') }, '=SUM(C3:C3)']] }, // the app uses the system locale
     { name: 'Empty', hidden: true, drawing: false, merges: [], truncated: false, widths: [], hiddenRows: [], hiddenCols: [], align: {}, rows: [] },
   ]);
-  assert.deepEqual(service.readFile('acme', 'inbox/report.pdf'), { kind: 'pdf', path: 'inbox/report.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
-  assert.deepEqual(service.readFile('acme', 'inbox/page.html'), { kind: 'html', path: 'inbox/page.html', text: '<h1>Page</h1>' });
+  const { stamp: pdfStamp, ...pdf } = service.readFile('acme', 'inbox/report.pdf');
+  assert.deepEqual(pdf, { kind: 'pdf', path: 'inbox/report.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
+  assert.match(pdfStamp ?? '', /^[\d.]+:8$/); // modification time and size
+  const { stamp: _html, ...html } = service.readFile('acme', 'inbox/page.html');
+  assert.deepEqual(html, { kind: 'html', path: 'inbox/page.html', text: '<h1>Page</h1>' });
   const exe = service.readFile('acme', 'inbox/tool.exe') as Extract<FileContent, { kind: 'binary' }>;
   assert.equal(exe.kind, 'binary');
   assert.equal(exe.openable, false);
+});
+
+test('fileStamps tells which open files changed since they were read', () => {
+  const path = 'context/stamp-check.md';
+  const file = join(root, 'workspace', 'projects', 'acme', ...path.split('/'));
+  writeFileSync(file, 'one');
+  const before = service.readFile('acme', path).stamp;
+  assert.deepEqual(service.fileStamps('acme', [path, 'inbox/report.pdf', 'inbox/gone.pdf']), [before, service.readFile('acme', 'inbox/report.pdf').stamp, '']);
+  writeFileSync(file, 'two and more');
+  assert.notEqual(service.fileStamps('acme', [path])[0], before);
+  rmSync(file);
+  // Outside the project is never measured, and bad input is refused.
+  assert.deepEqual(service.fileStamps('acme', ['../../../etc/passwd', '/etc/passwd']), ['', '']);
+  assert.throws(() => service.fileStamps('ghost', [path]), /Unknown project/);
+  assert.throws(() => service.fileStamps('acme', 'context' as unknown as string[]), /Invalid files/);
+  assert.throws(() => service.fileStamps('acme', [1] as unknown as string[]), /Invalid files/);
 });
 
 test('file access never leaves the project folder', () => {
