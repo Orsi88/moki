@@ -2,7 +2,7 @@
 // (view and edit) and terminals (AI tools or a shell), and a side panel with
 // the activity or project details.
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type DragEvent, type MouseEvent } from 'react';
 import { api, type FileContent, type ProjectSummary, type Tag, type TerminalRef, type ToolInfo, type TreeNode } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { defaultTool, recall, remember } from '../prefs';
@@ -29,9 +29,15 @@ import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
 import { parseActivityLaunches, type ActivityLaunch, type ActivityLaunchPhase } from '../activity-launches';
+import { loader, useLoaded } from '../loader';
+import type { TerminalView as TerminalViewType } from '../components/TerminalView';
 
 // xterm.js loads with the first terminal tab.
-const TerminalView = lazy(() => import('../components/TerminalView').then((m) => ({ default: m.TerminalView })));
+const loadTerminalView = loader(() => import('../components/TerminalView'));
+function TerminalView(props: ComponentProps<typeof TerminalViewType>) {
+  const loaded = useLoaded(loadTerminalView);
+  return loaded ? <loaded.TerminalView {...props} /> : null;
+}
 
 interface Props { workspaceId: string; project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
 
@@ -652,11 +658,9 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
         </div>
         {notice && <div className="error-bar info-bar" role="status">{notice}<button type="button" className="icon-btn" onClick={() => setNotice('')}><IconX size={14} /></button></div>}
         {error && <div className="error-bar">{error}<button type="button" className="icon-btn" onClick={() => setError('')}><IconX size={14} /></button></div>}
-        <Suspense fallback={null}>
-          {terms.map((t) => (
-            <TerminalView key={t.id} id={t.id} project={project.id} active={t.id === activeTerm} onExit={() => setTerms((all) => all.map((x) => (x.id === t.id ? { ...x, running: false } : x)))} />
-          ))}
-        </Suspense>
+        {terms.map((t) => (
+          <TerminalView key={t.id} id={t.id} project={project.id} active={t.id === activeTerm} onExit={() => setTerms((all) => all.map((x) => (x.id === t.id ? { ...x, running: false } : x)))} />
+        ))}
         {graphFocus ? (
           <div className="welcome">
             <h1>{t('Graph view')}</h1>

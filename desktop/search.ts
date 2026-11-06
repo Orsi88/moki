@@ -11,7 +11,6 @@ import { IO_LIMIT, fileTags, listProjects, listProjectsAsync, mapLimit, projectS
 import { workspaceDir } from '../scripts/lib/repo.mjs';
 import { docxToMarkdown } from '../scripts/lib/docx.ts';
 import { xlsxSheets } from '../scripts/xlsx.mjs';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 export interface FileHit { project: string; projectName: string; path: string; snippet: string; line: number; tags: string[] }
 export interface SearchResult { projects: ProjectSummary[]; files: FileHit[]; truncated: boolean }
@@ -100,6 +99,7 @@ async function extractText(full: string, extension: string): Promise<string> {
   if (extension === '.docx') return docxToMarkdown(readFileSync(full));
   if (extension === '.xlsx') return xlsxSheets(readFileSync(full)).map((sheet: { name: string; rows: unknown[][] }) => `${sheet.name}\n${sheet.rows.map((row) => row.join(' ')).join('\n')}`).join('\n');
   if (extension === '.pdf') {
+    const { getDocument } = await import('./pdfjs.ts'); // loaded on the first PDF, not at startup
     const task = getDocument({ data: new Uint8Array(readFileSync(full)), useSystemFonts: false, verbosity: 0 });
     const doc = await task.promise;
     try {

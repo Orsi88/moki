@@ -16,7 +16,6 @@ import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './no
 import { setWorkspaceEnv } from './workspaces.ts';
 import { appChooser } from './open-with.ts';
 import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
-import { runPdfLocal } from './pdf-local.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
 import { memoryUsage, planUsage, type WindowKind } from './usage.ts';
 import { fixToolPath } from './tool-path.ts';
@@ -51,8 +50,9 @@ const service = createService(ROOT, {
   reveal: (path) => shell.showItemInFolder(path),
   copy: (text) => clipboard.writeText(text),
   appChooser,
-  // PDF comments and page edits: PdfCraft when it is installed, otherwise Moki itself (desktop/pdf-local.ts).
-  pdfcraft: { available: () => true, run: (steps, root) => (pdfcraftAvailable() ? runPdfcraft(steps, root) : runPdfLocal(steps, root)) },
+  // PDF comments and page edits: PdfCraft when it is installed, otherwise Moki itself (desktop/pdf-local.ts,
+  // loaded on first use: it brings pdf.js and pdf-lib, most of the main bundle).
+  pdfcraft: { available: () => true, run: async (steps, root) => (pdfcraftAvailable() ? runPdfcraft(steps, root) : (await import('./pdf-local.ts')).runPdfLocal(steps, root)) },
   trash: (path) => shell.trashItem(path),
   pickFolder: async () => {
     if (!win) return null;
@@ -239,8 +239,10 @@ if (!app.requestSingleInstanceLock()) {
     win.focus();
   });
 
+  // Before ready, so Electron does not build its default menu only for it to be thrown away.
+  Menu.setApplicationMenu(null);
+
   app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, done) => done(false));
 
     ipcMain.handle('qa:call', async (event, method: unknown, args: unknown) => {
@@ -268,7 +270,7 @@ if (!app.requestSingleInstanceLock()) {
       if (typeof project !== 'string' || !listProjects(ROOT).includes(project)) return false;
       const changed = () => win?.webContents.send('qa:changed', project);
       try {
-        watcher = watchProject(join(projectsDir(ROOT), project), changed);
+        watcher = watchProject(join(projectsDir(ROOT), project), changed, { maxDirs: 2000 }); // a cap, so a huge runs/ tree cannot hold thousands of watchers
       } catch { return false; }
       // The linked folder shows live in the tree too; changes in its build and dependency folders are not news.
       const linked = projectRepository(project, ROOT);

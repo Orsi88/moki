@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, use, useCallback, useEffect, useState, type ComponentProps, type ReactNode } from 'react';
 import { api, hasBridge, pageParams, type ProjectSummary, type Starter, type TerminalRef, type ToolInfo, type WorkspaceInfo } from './api';
 import { t, useLang } from './i18n';
 import { SearchPanel } from './components/SearchPanel';
@@ -7,17 +7,27 @@ import { Ribbon } from './components/Ribbon';
 import { UsageStatus } from './components/UsageStatus';
 import { WorkspacePicker } from './screens/WorkspacePicker';
 import type { SettingsTab } from './screens/Settings';
+import { loader } from './loader';
+import type { Home as HomeScreen } from './screens/Home';
+import type { Workspace as WorkspaceScreen } from './screens/Workspace';
+import type { Notebook as NotebookScreen } from './components/Notebook';
 
 // Each window loads only the screens it shows: the search and note windows are separate renderers,
 // and the editor, PDF, terminal and drawing code of the main screens would otherwise load in every one.
-const Home = lazy(() => import('./screens/Home').then((m) => ({ default: m.Home })));
-const Workspace = lazy(() => import('./screens/Workspace').then((m) => ({ default: m.Workspace })));
-const Notebook = lazy(() => import('./components/Notebook').then((m) => ({ default: m.Notebook })));
+// Each window starts loading its screens at once, alongside its first calls to the service, and shows
+// them when both are done, so use() reads them without suspending (./loader.ts).
+const loadHome = loader(() => import('./screens/Home'));
+const loadWorkspace = loader(() => import('./screens/Workspace'));
+const loadNotebook = loader(() => import('./components/Notebook'));
+const Home = (props: ComponentProps<typeof HomeScreen>) => { const Screen = use(loadHome()).Home; return <Screen {...props} />; };
+const Workspace = (props: ComponentProps<typeof WorkspaceScreen>) => { const Screen = use(loadWorkspace()).Workspace; return <Screen {...props} />; };
+const Notebook = (props: ComponentProps<typeof NotebookScreen>) => { const Screen = use(loadNotebook()).Notebook; return <Screen {...props} />; };
 const Loading = ({ children }: { children: ReactNode }) => <Suspense fallback={<div className="notice muted">{t('Loading…')}</div>}>{children}</Suspense>;
 
 const noteParams = pageParams();
 const isNoteWindow = noteParams.get('view') === 'note';
 const isSearchWindow = noteParams.get('view') === 'search';
+const screens = Promise.all(isNoteWindow ? [loadNotebook()] : isSearchWindow ? [] : [loadWorkspace(), loadHome()]);
 
 const LAST_PROJECT = 'qa-last-project';
 const recall = () => { try { return window.localStorage.getItem(LAST_PROJECT); } catch { return null; } };
@@ -64,7 +74,7 @@ export function App() {
   useEffect(() => {
     if (isSearchWindow) { setMenuWorkspace(noteParams.get('workspace') ?? ''); setReady(true); return; }
     if (!hasBridge()) { setError(t('Moki must be opened with the qa command.')); return; }
-    Promise.all([api.session(), api.projects(), api.integrations(), api.workspaces()])
+    Promise.all([api.session(), api.projects(), api.integrations(), api.workspaces(), screens])
       .then(([session, list, toolList, spaces]) => {
         setVersion(session.version);
         setProjects(list);

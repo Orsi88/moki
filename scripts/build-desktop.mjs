@@ -17,9 +17,15 @@ await viteBuild({ configFile: join(ROOT, 'app', 'vite.config.ts'), logLevel: 'wa
 // pdf.js tries to load the native @napi-rs/canvas at import; inside Electron 43 it crashes the
 // process (SIGTRAP). Moki only reads annotations and text, so pdf.js runs without it.
 const noCanvas = { name: 'no-napi-canvas', setup: (b) => b.onLoad({ filter: /pdfjs-dist[\\/].*pdf\.mjs$/ }, (a) => ({ contents: readFileSync(a.path, 'utf8').replaceAll('require("@napi-rs/canvas")', 'require("moki-no-canvas")'), loader: 'js' })) };
-const common = { plugins: [noCanvas], bundle: true, platform: 'node', target: 'node22', sourcemap: false, logLevel: 'warning', external: ['electron', 'node-pty'] };
+// Targets follow the Electron version (43: Node 24, Chromium 150), so nothing is rewritten for older engines.
+const common = { plugins: [noCanvas], bundle: true, platform: 'node', target: 'node24', sourcemap: false, logLevel: 'warning', external: ['electron', 'node-pty'] };
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'boot.ts')], outfile: join(out, 'boot.mjs'), format: 'esm', external: ['electron', './main.mjs'] });
-await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'main.ts')], outfile: join(out, 'main.mjs'), format: 'esm' });
+// Split: what main.ts loads with import() (pdf.js and pdf-lib, desktop/pdfjs.ts) goes to chunks/ and
+// is read only when first used, instead of at every startup. The entry keeps the name boot.mjs imports.
+await esbuild({
+  ...common, entryPoints: { main: join(ROOT, 'desktop', 'main.ts') }, outdir: out, format: 'esm',
+  splitting: true, chunkNames: 'chunks/[name]-[hash]', outExtension: { '.js': '.mjs' },
+});
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'preload.ts')], outfile: join(out, 'preload.cjs'), format: 'cjs' });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'run-tool.ts')], outfile: join(out, 'run-tool.mjs'), format: 'esm' });
 // Moki's MCP server for the AI tools the app starts (desktop/service.ts mokiServer).

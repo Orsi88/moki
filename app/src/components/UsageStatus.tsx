@@ -41,14 +41,16 @@ export function UsageStatus({ names, terminals = [], onTerminal }: { names: Reco
   const [open, setOpen] = useState<'plans' | 'memory' | null>(null);
   const [closed, setClosed] = useState<Set<string>>(new Set()); // collapsed projects in the Resource Manager
   const load = useCallback((refresh = false) => { api.usage(refresh).then(setUsage, () => {}); }, []);
-  // Every 5 s while the window is on screen: each look lists the processes, so a hidden window does not ask.
+  // Each look lists the processes (on Windows it starts PowerShell), so: every 5 s while the memory
+  // popover is open, every 15 s for the status bar alone, and not at all while the window is hidden.
+  const every = open === 'memory' ? 5000 : 15000;
   useEffect(() => {
     load();
-    const timer = window.setInterval(() => { if (!document.hidden) load(); }, 5000);
+    const timer = window.setInterval(() => { if (!document.hidden) load(); }, every);
     const onShow = () => { if (!document.hidden) load(); };
     document.addEventListener('visibilitychange', onShow);
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onShow); };
-  }, [load]);
+  }, [load, every]);
   if (!usage) return null;
   const { plans, memory } = usage;
   const sessions = memory.projects.reduce((n, p) => n + p.sessions.length, 0);

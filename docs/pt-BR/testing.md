@@ -95,6 +95,17 @@ Depois rode o `npm run test-catalog`: ele acrescenta o cenário ao catálogo e p
 
 Antes de um commit: `npm run typecheck`, `npm run check`, `npm test` e, quando a janela mudou, `npm run test:ui`.
 
+## Medir a memória
+
+O `npm run bench:memory` (Linux) abre o app compilado (rode `npm run app:build` antes) numa cópia descartável do framework na pasta temporária do sistema e mostra, em MB, o tempo até a janela ficar pronta e o PSS dos processos do app, no total e por tipo de processo (`browser` é o processo principal). Os passos são: em repouso, um PDF de 60 páginas aberto e rolado até o fim, uma ferramenta de IA gravando arquivos, e as janelas de notas e de busca abertas. O PSS conta uma só vez as páginas que os processos do Electron compartilham, ao contrário da soma do RSS. Rode no `main` e no seu branch e ponha os dois resultados no pull request quando a mudança for de memória ou de inicialização.
+
+Os testes de interface e este script abrem janelas do app. Num desktop Linux, rode-os num display headless para não ocuparem a sua tela, por exemplo com o compositor do GNOME:
+
+```bash
+dbus-run-session -- mutter --headless --wayland --no-x11 --virtual-monitor 1600x1000 --wayland-display moki-headless &
+env -u DISPLAY WAYLAND_DISPLAY=moki-headless ELECTRON_OZONE_PLATFORM_HINT=wayland npm run bench:memory
+```
+
 ## O que não tem teste automatizado
 
 | Parte | Por que importa | Coberta hoje por |

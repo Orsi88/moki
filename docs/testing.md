@@ -95,6 +95,17 @@ Then run `npm run test-catalog`: it adds the scenario to the catalog, and stops 
 
 Before a commit: `npm run typecheck`, `npm run check`, `npm test`, and `npm run test:ui` when the window changed.
 
+## Measuring memory
+
+`npm run bench:memory` (Linux) starts the built app (`npm run app:build` first) on a throwaway copy of the framework in the system temp folder and prints, in MB, the time until the window is ready and the PSS of the app's processes, in total and by process type (`browser` is the main process). The steps are: idle, a 60-page PDF opened and scrolled to the end, an AI tool writing files, and the notes and search windows open. PSS counts the pages Electron's processes share once, unlike the sum of RSS. Run it on `main` and on your branch and put both results in the pull request when a change is about memory or startup.
+
+The interface tests and this script open app windows. On a Linux desktop, run them on a headless display so they do not take your screen, for example with GNOME's compositor:
+
+```bash
+dbus-run-session -- mutter --headless --wayland --no-x11 --virtual-monitor 1600x1000 --wayland-display moki-headless &
+env -u DISPLAY WAYLAND_DISPLAY=moki-headless ELECTRON_OZONE_PLATFORM_HINT=wayland npm run bench:memory
+```
+
 ## What has no automated test
 
 | Part | Why it matters | Covered today by |

@@ -6,5 +6,6 @@ export default defineConfig({
   root: 'app',
   base: './', // loaded from disk by Electron
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  // Electron 43 runs Chromium 150: modern syntax ships as written (scripts/build-desktop.mjs targets its Node).
+  build: { outDir: 'dist', emptyOutDir: true, target: 'chrome150' },
 });

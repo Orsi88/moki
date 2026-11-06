@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentProps, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { api, type FileContent, type OpenWithApps } from '../api';
 import { t } from '../i18n';
 import { IconChat, IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconMore, IconRefresh, IconTag } from './Icons';
@@ -10,9 +10,15 @@ import { readComments } from '../md-comments';
 import { recall, remember } from '../prefs';
 import { TipTapEditor } from './TipTapEditor';
 import { DiagramSourceEditor } from './DiagramSourceEditor';
+import { loader, useLoaded } from '../loader';
+import type { PdfDoc as PdfDocView } from './PdfDoc';
 
 // pdf.js and its worker (bundled inline, about 1.5 MB) load with the first PDF opened, not with the window.
-const PdfDoc = lazy(() => import('./PdfDoc').then((m) => ({ default: m.PdfDoc })));
+const loadPdfDoc = loader(() => import('./PdfDoc'));
+function PdfDoc(props: ComponentProps<typeof PdfDocView>) {
+  const loaded = useLoaded(loadPdfDoc);
+  return loaded ? <loaded.PdfDoc {...props} /> : <p className="muted">{t('Loading…')}</p>;
+}
 
 interface Props {
   content: FileContent;
@@ -256,7 +262,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
         )}
         {content.kind === 'xlsx' && <SheetView key={content.path} sheets={content.sheets} />}
         {content.kind === 'pdf' && (project && onPdfSaved
-          ? <Suspense fallback={<p className="muted">{t('Loading…')}</p>}><PdfDoc key={content.path} project={project} path={content.path} data={content.data} native={<PdfView data={content.data} title={content.path} />} onSaved={onPdfSaved} /></Suspense>
+          ? <PdfDoc key={content.path} project={project} path={content.path} data={content.data} native={<PdfView data={content.data} title={content.path} />} onSaved={onPdfSaved} />
           : <PdfView data={content.data} title={content.path} />)}
         {content.kind === 'html' && <HtmlView text={content.text} title={content.path} />}
         {content.kind === 'image' && <div className="image-view"><img src={content.dataUrl} alt={content.path} /></div>}

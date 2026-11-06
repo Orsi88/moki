@@ -8,12 +8,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFString, degrees } from 'pdf-lib';
-import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
-import { getDocument, type PDFPageProxy, type PageViewport } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { getDocument, type PDFPageProxy, type PageViewport } from './pdfjs.ts';
 import type { PdfRunner, PdfStep } from './pdfcraft.ts';
-
-// pdf.js runs its worker on this thread when the worker module is here (no worker file to load).
-(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker = pdfjsWorker;
 
 const COLORS: Record<string, [number, number, number]> = {
   yellow: [1, 0.85, 0.04], green: [0.27, 0.77, 0.42], blue: [0.29, 0.56, 0.94], pink: [0.94, 0.42, 0.69],
