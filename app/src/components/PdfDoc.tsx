@@ -5,10 +5,14 @@ import { t } from '../i18n';
 import { selectionNote, stackCards } from '../pdf-quads';
 import { IconChat, IconEdit, IconHighlight, IconNativeViewer, IconNotePlus, IconPages, IconPlus, IconSearch, IconTrash, IconX } from './Icons';
 import { recall, remember } from '../prefs';
-import { PdfPages } from './PdfPages';
+import { lazyHeavy } from '../lazy-module';
+import { useLoaded } from './useLoaded';
 import { NoteDialog } from './NoteDialog';
 import { COLORS, SWATCH as COLOR_SWATCH } from '../md-comments';
 import { colorName } from './CommentColors';
+
+// pdf.js and its worker load when the first PDF tab is shown (lazy-module.ts).
+const pdfPages = lazyHeavy(() => import('./PdfPages'));
 
 const SWATCH: Record<string, string> = COLOR_SWATCH;
 const CSS_UNITS = 96 / 72; // as PdfPages draws the pages
@@ -35,7 +39,8 @@ let lastTab: 'comment' | 'edit' = 'comment';
 interface Props {
   project: string;
   path: string;
-  data: string; // base64
+  url: string; // the file's moki-file:// URL (desktop/file-protocol.ts); `renew` brings a fresh one when it is refused
+  renew: () => Promise<string>;
   native: ReactNode; // Chromium's own viewer (search, print)
   onSaved: (path: string) => void; // the file the change was saved to
 }
@@ -84,7 +89,7 @@ function NoteBorderColor({ color, disabled, onChange }: { color?: string; disabl
 // a small box right there to highlight and comment. On the right the comments scroll with the
 // pages, each beside what it comments (PdfCraft's rect), joined to it by a thin line; reply,
 // edit and delete there. PdfCraft writes every change.
-export function PdfDoc({ project, path, data, native, onSaved }: Props) {
+export function PdfDoc({ project, path, url, renew, native, onSaved }: Props) {
   const [view, setView] = useState<'pages' | 'native'>('pages');
   const [zoom, setZoomState] = useState(1);
   const zoomed = useRef(false); // the person chose a zoom: it is no longer fitted to the window
@@ -120,6 +125,10 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   const rail = useRef<HTMLDivElement>(null);
   const properties = useRef<HTMLDetailsElement>(null);
   const toNative = useCallback(() => setView('native'), []);
+  // If the pdf.js chunk cannot load, the tab falls back to Chromium's viewer; the Pages button tries the import again.
+  const pages = useLoaded(pdfPages);
+  useEffect(() => { if (pages.failed) toNative(); }, [pages.failed, toNative]);
+  const Pages = pages.mod?.PdfPages;
   const onLoad = useCallback((i: { pages: number; title: string; author: string }) => { setInfo(i); setProps({ title: i.title, author: i.author }); }, []);
   // The service saves to a "-edited" copy: always for files from the inbox, and for page edits of any file.
   const isCopy = /-edited(-\d+)?\.pdf$/i.test(path);
@@ -130,7 +139,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
   useEffect(() => {
     if (!available) return;
     api.pdfComments(project, path).then(setComments).catch((e: Error) => setError(e.message));
-  }, [available, project, path, data]);
+  }, [available, project, path, url]);
 
   // Where each card goes: beside its place on its page, pushed down under the card above when they would overlap.
   const measure = useCallback(() => {
@@ -432,7 +441,7 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
       <div className="pdf-bar" role="toolbar" aria-label={t('PDF tools')}>
         <div className="pdf-bar-leading">
         <div className="view-toggle" role="group" aria-label={t('PDF view')}>
-          <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => setView('pages')} title={t('Pages')} aria-label={t('Pages')}><IconPages size={16} /></button>
+          <button type="button" className={view === 'pages' ? 'on' : ''} aria-pressed={view === 'pages'} onClick={() => { setView('pages'); pages.retry(); }} title={t('Pages')} aria-label={t('Pages')}><IconPages size={16} /></button>
           <button type="button" className={view === 'native' ? 'on' : ''} aria-pressed={view === 'native'} onClick={() => setView('native')} title={t('Native viewer')} aria-label={t('Native viewer')}><IconNativeViewer size={16} /></button>
         </div>
         {view === 'pages' && (
@@ -501,8 +510,8 @@ export function PdfDoc({ project, path, data, native, onSaved }: Props) {
       {view === 'pages' ? (
         <div className="pdf-scroll" ref={scroller}>
           <div className={`pdf-stage${showRail ? ' with-rail' : ''}`} ref={stage}>
-            <PdfPages data={data} zoom={zoom} onSelection={tab === 'comment' && available ? onSelection : () => {}} onError={toNative} onLoad={onLoad} onDoc={onDoc}
-              pageTools={tab === 'edit' ? pageTools : undefined} afterPage={afterPage} />
+            {Pages ? <Pages url={url} renew={renew} zoom={zoom} onSelection={tab === 'comment' && available ? onSelection : () => {}} onError={toNative} onLoad={onLoad} onDoc={onDoc}
+              pageTools={tab === 'edit' ? pageTools : undefined} afterPage={afterPage} /> : <div className="pdf-pages" />}
             {showRail && (
               <>
                 <svg className="pdf-links" width="100%" height={placed.height} aria-hidden="true">

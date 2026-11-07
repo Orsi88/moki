@@ -2,16 +2,13 @@
 // the Templates screen scrolls and accepts a logo and a watermark, and
 // Create skill lives only under Add a skill.
 
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { createRequire } from 'node:module';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { ROOT } from '../../scripts/lib/repo.mjs';
-
-const require = createRequire(import.meta.url);
-const electronPath = require('electron') as string;
+import { launchMoki } from './launch.ts';
 
 // 1×1 PNG. The window accepts data: images; this is enough to prove the logo landed.
 const PNG = Buffer.from(
@@ -46,15 +43,7 @@ function fixture(): string {
 
 // Opens the app in Portuguese on a project of `root` (acme), or on the workspace picker (null).
 async function openApp(root: string, userData: string, project: string | null = 'acme', extra: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
-  env.QA_ROOT = root;
-  env.QA_USER_DATA = userData;
-  if (project) env.QA_OPEN_PROJECT = project; else delete env.QA_OPEN_PROJECT;
-  delete env.QA_SCREENSHOT;
-  delete env.ELECTRON_RUN_AS_NODE;
-  Object.assign(env, extra);
-  const app = await electron.launch({ executablePath: electronPath, cwd: ROOT, args: [ROOT], env, timeout: 60_000 });
+  const app = await launchMoki({ QA_ROOT: root, QA_USER_DATA: userData, QA_OPEN_PROJECT: project ?? undefined, ...extra });
   const page = await app.firstWindow();
   page.on('pageerror', (err) => console.error('pageerror', err.message));
   await page.evaluate(() => {
@@ -237,6 +226,10 @@ test.describe.serial('Moki settings', () => {
   });
 
   test('an operation links agents with arrows: approval, which output answers which input, saved in the list', async () => {
+    // The window starts in English and is reloaded in Portuguese: its first load may already have listed the operations,
+    // and the example then came in English. Start from an empty folder so the first listing seeds it in the app's language.
+    const [fixtureRoot] = readFileSync(join(scratch, 'root.txt'), 'utf8').trim().split('\n');
+    rmSync(join(fixtureRoot, 'workspace', 'library', 'operations'), { recursive: true, force: true });
     await page.getByRole('tab', { name: 'Operações' }).click();
     // The first time, an example to learn from: three lanes, the Moki agents, approval between them.
     const example = page.locator('.library-item', { hasText: 'Exemplo: da história às evidências' });
@@ -327,7 +320,7 @@ test.describe.serial('Moki settings', () => {
     await page.getByRole('button', { name: 'Expandir' }).click();
     await expect(page.locator('.ops-editor.expanded')).toBeVisible();
     await expect.poll(async () => (await scroller.boundingBox())?.height ?? 0).toBeGreaterThan(normalH + 100);
-    await page.getByRole('button', { name: 'Recolher' }).click();
+    await page.getByRole('button', { name: 'Recolher', exact: true }).click();
     await expect(page.locator('.ops-editor.expanded')).toHaveCount(0);
     // Esc: first it closes the details of what is selected, then the expanded view; Settings stays open.
     await page.getByRole('button', { name: 'Expandir' }).click();
@@ -561,6 +554,7 @@ test.describe.serial('Moki workspaces', () => {
     await expect(wsPage.locator('.modal-backdrop')).toHaveCount(0);
     await expect(wsPage.locator('.hero')).toHaveCount(0);
     await note.getByPlaceholder('ex.: Ideias de teste').fill('Lista');
+    await note.getByRole('button', { name: 'Código Markdown' }).click(); // a note opens in its formatted editor; the source is one click away
     await note.locator('textarea.note-editor').fill('leite');
     await expect(note.getByRole('button', { name: 'Salvar' })).toHaveCount(0); // it saves on its own
     await expect(note.getByText(/^Salvo às/)).toBeVisible();
@@ -570,6 +564,7 @@ test.describe.serial('Moki workspaces', () => {
 
     // A click opens it here again; the icon beside it opens the notebook window.
     await wsPage.locator('.home-row', { hasText: 'Lista' }).last().locator('.home-project').click();
+    await note.getByRole('button', { name: 'Código Markdown' }).click();
     await expect(note.locator('textarea.note-editor')).toHaveValue('leite');
     await note.getByRole('button', { name: 'Fechar (Esc)' }).click();
 
@@ -579,6 +574,7 @@ test.describe.serial('Moki workspaces', () => {
     await wsPage.getByRole('menuitem', { name: 'Abrir no bloco de notas' }).click();
     const book = await opened;
     await expect(book.getByRole('tab')).toHaveText(['Lista']);
+    await book.getByRole('button', { name: 'Código Markdown' }).click();
     await expect(book.locator('textarea.note-editor')).toHaveValue('leite');
 
     await book.getByRole('button', { name: 'Nova nota' }).click();
@@ -645,8 +641,10 @@ test.describe.serial('Moki project tree', () => {
     await treePage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
     await expect.poll(() => readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'cenarios.md'), 'utf8')).toContain('| Coluna 1 |');
     await treePage.getByRole('button', { name: 'Editor visual', exact: true }).click();
-    await expect(treePage.getByRole('status').filter({ hasText: 'precisa do código Markdown' })).toBeVisible();
-    await expect(md).toBeVisible();
+    // The formatted editor draws the table itself (it no longer falls back to the source), and nothing was rewritten.
+    await expect(treePage.locator('.tiptap-body table')).toBeVisible();
+    await expect(md).toBeHidden();
+    expect(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', 'inbox', 'cenarios.md'), 'utf8')).toContain('| Coluna 1 |');
 
     await treePage.getByRole('button', { name: 'Opções da pasta do projeto' }).click();
     await expect(treePage.getByRole('menuitem', { name: 'Copiar caminho' })).toBeVisible();
@@ -793,6 +791,7 @@ test.describe.serial('Moki project tree', () => {
     await treePage.getByRole('button', { name: 'Nova nota' }).click();
     const note = treePage.locator('.note-dialog'); // its name follows the title typed below
     await note.getByPlaceholder('ex.: Ideias de teste').fill('Compras');
+    await note.getByRole('button', { name: 'Código Markdown' }).click();
     const editor = note.locator('textarea.note-editor');
     const commands = note.getByRole('listbox', { name: 'Comandos' });
 
@@ -884,6 +883,7 @@ test.describe.serial('Moki project tree', () => {
     await book.getByRole('button', { name: 'Nova nota' }).click();
     const page = book.locator('.notebook-page:not([hidden])');
     await page.getByPlaceholder('ex.: Ideias de teste').fill('terceira');
+    await page.getByRole('button', { name: 'Código Markdown' }).click();
     const editor = page.locator('textarea.note-editor');
     await editor.fill('texto');
     await expect(book.getByRole('tab', { name: 'terceira' })).toHaveAttribute('aria-selected', 'true'); // saved on its own
@@ -1306,7 +1306,8 @@ test.describe.serial('Moki PDF comments', () => {
   });
 
   test('a selection is commented right on the page; the comment stays beside it, joined by a line', async () => {
-    await pdfPage.locator('.tree-row[title=".other"]').click(); // files loose in the project root are grouped in the sidebar
+    // Files loose in the project root are grouped in the sidebar; the group may already be open from the first test.
+    if (!await pdfPage.locator('.tree-row[title="relatorio.pdf"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
     await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
     const span = pdfPage.locator('.pdf-page .textLayer span', { hasText: 'Requisito' }).first();
     await expect(span).toBeVisible();
@@ -1388,6 +1389,7 @@ test.describe.serial('Moki PDF comments', () => {
     await expect(card.getByRole('toolbar', { name: 'Formatação' })).toBeHidden();
     await card.getByRole('button', { name: 'Mostrar ferramentas da nota' }).click();
     await expect(card.getByRole('toolbar', { name: 'Formatação' })).toBeVisible();
+    await card.getByRole('button', { name: 'Código Markdown' }).click(); // the source is in the tools; the note opens formatted
     await card.getByRole('button', { name: 'Recolher ferramentas da nota' }).click();
     const noteEditor = card.locator('textarea.note-editor');
     await noteEditor.fill(`Uma anotação entre páginas${'\n'.repeat(8)}`);
@@ -1426,7 +1428,7 @@ test.describe.serial('Moki PDF comments', () => {
     await expect.poll(() => JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.height).toBeLessThan(enlarged.height - 30);
     await pdfPage.locator('.tree-row[title="revisao.md"]').click();
     await pdfPage.locator('.tree-row[title="relatorio.pdf"]').click();
-    await expect(pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note textarea')).toHaveValue(/Uma anotação entre páginas/);
+    await expect(pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note .tiptap-body')).toContainText('Uma anotação entre páginas'); // comes back formatted
     await expect(pdfPage.locator('.pdf-page-wrap').first().locator('.pdf-inline-note')).toHaveCSS('border-left-color', 'rgb(70, 196, 106)');
     await expect(pdfPage.locator('.pdf-page-wrap').first().getByRole('textbox', { name: 'Título da nota' })).toHaveValue('Minha nota revisada');
     const storedHeight = JSON.parse(readFileSync(join(dirs[0], 'workspace', 'projects', 'acme', '.moki-pdf-notes.json'), 'utf8'))[0]?.notes[0]?.height as number;
@@ -1440,7 +1442,7 @@ test.describe.serial('Moki PDF comments', () => {
     const destination = pdfPage.locator('.pdf-page-wrap').nth(1).locator('.pdf-note-drop');
     await destination.dispatchEvent('dragover', { dataTransfer: transfer });
     await destination.dispatchEvent('drop', { dataTransfer: transfer });
-    await expect(pdfPage.locator('.pdf-page-wrap').nth(1).locator('.pdf-inline-note textarea')).toHaveValue(/Uma anotação entre páginas/);
+    await expect(pdfPage.locator('.pdf-page-wrap').nth(1).locator('.pdf-inline-note .tiptap-body')).toContainText('Uma anotação entre páginas');
   });
 
   test('a .md file is commented the same way; the comment is kept inside the file, invisible to other viewers', async () => {
@@ -1481,10 +1483,11 @@ test.describe.serial('Moki PDF comments', () => {
     await pdfPage.locator('.tree-row[title="revisao.md"]').click();
     await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(74, 143, 240)');
     await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
-    const visual = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    const visual = pdfPage.locator('.tiptap-body');
     await expect(visual).toHaveAttribute('contenteditable', 'true');
-    await expect(visual.locator('mark.md-comment')).toHaveText('expira em 30 dias');
-    await expect(visual.locator('mark.md-comment')).toHaveCSS('--md-comment-color', '#4a8ff0');
+    // The formatted editor keeps the comment as a highlighted span (one highlight for every comment, not the comment's own color).
+    await expect(visual.locator('span[data-md-comment]')).toHaveText('expira em 30 dias');
+    await expect(visual.locator('span[data-md-comment]')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await visual.locator('p').filter({ hasText: 'A senha expira' }).evaluate((p) => {
       const node = p.firstChild as Text;
       const range = document.createRange();
@@ -1495,13 +1498,7 @@ test.describe.serial('Moki PDF comments', () => {
     await pdfPage.keyboard.insertText('alterada ');
     await pdfPage.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
     await expect.poll(() => readFileSync(file, 'utf8')).toContain('A senha alterada <!--c:');
-    await visual.locator('mark.md-comment').evaluate((mark) => {
-      const range = document.createRange(); range.selectNodeContents(mark);
-      const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range);
-    });
-    await pdfPage.keyboard.press('Backspace');
-    await expect(pdfPage.getByRole('status').filter({ hasText: 'pode remover a formatação ou comentários' })).toBeVisible();
-    await expect(visual.locator('mark.md-comment')).toHaveText('expira em 30 dias');
+    await expect(visual.locator('span[data-md-comment]')).toHaveText('expira em 30 dias'); // still there after the save
     await pdfPage.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
     await expect(pdfPage.locator('.md-card')).toContainText('E quando expira?');
     await expect(pdfPage.locator('.md-card')).toHaveCSS('border-left-color', 'rgb(74, 143, 240)');
@@ -1524,7 +1521,7 @@ test.describe.serial('Moki PDF comments', () => {
     if (!await pdfPage.locator('.tree-row[title="visual.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
     await pdfPage.locator('.tree-row[title="visual.md"]').click();
     await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
-    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    const editor = pdfPage.locator('.tiptap-body');
     await expect(editor).toHaveAttribute('contenteditable', 'true');
     await expect(editor.locator('h1')).toHaveText('Título');
     await expect(editor.locator('strong')).toHaveText('Como cliente');
@@ -1555,7 +1552,7 @@ test.describe.serial('Moki PDF comments', () => {
     if (!await pdfPage.locator('.tree-row[title="irregular.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
     await pdfPage.locator('.tree-row[title="irregular.md"]').click();
     await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
-    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    const editor = pdfPage.locator('.tiptap-body');
     await expect(editor).toHaveAttribute('contenteditable', 'true');
     await expect(editor.locator('h2')).toHaveText('Pendências');
     await expect(editor.locator('li')).toHaveCount(2);
@@ -1570,8 +1567,8 @@ test.describe.serial('Moki PDF comments', () => {
     await expect(pdfPage.locator('textarea.editor')).toHaveValue(expected);
     await pdfPage.getByRole('button', { name: 'Editor visual', exact: true }).click();
     await expect(editor).toHaveAttribute('contenteditable', 'true');
-    await expect(editor.locator('mark.md-comment')).toHaveText('regra');
-    await expect(editor.locator('mark.md-comment')).toHaveCSS('--md-comment-color', '#4a8ff0');
+    await expect(editor.locator('span[data-md-comment]')).toHaveText('regra');
+    await expect(editor.locator('span[data-md-comment]')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await pdfPage.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
     await expect(pdfPage.locator('.md-card')).toContainText('Verificar');
   });
@@ -1581,7 +1578,7 @@ test.describe.serial('Moki PDF comments', () => {
     if (!await pdfPage.locator('.tree-row[title="irregular-windows.md"]').isVisible()) await pdfPage.locator('.tree-row[title=".other"]').click();
     await pdfPage.locator('.tree-row[title="irregular-windows.md"]').click();
     await pdfPage.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
-    const editor = pdfPage.getByRole('textbox', { name: 'Editor visual de Markdown' });
+    const editor = pdfPage.locator('.tiptap-body');
     await expect(editor).toHaveAttribute('contenteditable', 'true');
     await editor.locator('li').nth(1).click();
     await pdfPage.keyboard.press('End');
@@ -1809,12 +1806,15 @@ test.describe.serial('Moki my AIs and the project panel', () => {
     expect(await aiPage.evaluate(() => localStorage.getItem('qa-tool'))).toBe('gemini');
   });
 
-  test('the project panel starts three ways under tabs with no title: an agent, an activity, an operation', async () => {
+  test('the project panel starts four ways under tabs with no title: an agent, an activity, an operation, a skill', async () => {
     const panel = aiPage.locator('.pp');
     const card = panel.getByRole('region', { name: 'Assistente de IA' });
     await expect(card.getByRole('heading')).toHaveCount(0);
     await expect(panel.getByText('Assistente de IA', { exact: true })).toHaveCount(0);
-    await expect(card.getByRole('tab')).toHaveText(['Agente', 'Atividade', 'Operação']);
+    // The tabs are icons (the name is the aria-label, so no visible text): agent, activity, operation, skill.
+    await expect(card.getByRole('tab')).toHaveCount(4);
+    for (const name of ['Agente', 'Atividade', 'Operação', 'Skill']) await expect(card.getByRole('tab', { name, exact: true })).toBeVisible();
+    await expect(card.getByRole('tab')).toHaveText(['', '', '', '']);
     await expect(card.getByRole('button', { name: 'Iniciar atividade' })).toBeVisible();
     for (const gone of ['Minha pasta', 'Agentes deste projeto', 'Entregáveis']) await expect(panel.getByText(gone)).toHaveCount(0);
 

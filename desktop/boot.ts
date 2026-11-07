@@ -16,11 +16,12 @@ if (app.isPackaged) {
   try { buildId = (JSON.parse(readFileSync(join(here, 'build-info.json'), 'utf8')) as { buildId: string }).buildId; } catch { /* use the version */ }
   syncFramework(join(process.resourcesPath, 'framework'), target, buildId);
   process.env.QA_ROOT = target;
-
-  // Started from the app menu, the app does not get the terminal's PATH, so AI tools would look missing (desktop/tool-path.ts).
-  fixToolPath();
 }
 
 // main.mjs is a separate built file next to this one; it must load after QA_ROOT is set.
 const mainEntry = './main.mjs';
 await import(mainEntry);
+
+// Started from the app menu, the app does not get the terminal's PATH, so AI tools would look missing (desktop/tool-path.ts).
+// Read in the background, after the app's code is loaded: detection and installs wait for it (pathReady), the window does not.
+if (app.isPackaged) void fixToolPath();

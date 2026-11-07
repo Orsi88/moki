@@ -8,7 +8,7 @@
 // the ribbon (linked folder), Set up project or Settings (agents per project, by their
 // tags). It can be collapsed to a thin rail.
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, describeRun, statusLabel, type ActivityInfo, type AgentInfo, type Operation, type OpenRun, type ProjectSummary, type RunState, type SkillInfo, type TerminalRef, type ToolInfo } from '../api';
 import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
@@ -54,7 +54,9 @@ const NEEDS_YOU = ['awaiting-approval', 'awaiting-input', 'blocked'];
 export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLaunch, onOperation, onOperationRun, onOpenRun, onTerminal, onActivityStart, onActivityUpdate, onSetup, onProjectChanged, collapsed, onToggle, graphOn, onGraph, onMyAis, operations }: Props) {
   const [run, setRun] = useState<RunState | null>(null);
   const [runs, setRuns] = useState<OpenRun[]>([]);
-  const [agents, setAgents] = useState<AgentInfo[]>([]); // usable and on in this project
+  const [agentCatalog, setAgentCatalog] = useState<AgentInfo[]>([]);
+  const [agentsOn, setAgentsOn] = useState<string[]>([]); // the project's own choice (project.json)
+  const agents = useMemo(() => agentCatalog.filter((a) => a.usable && agentsOn.includes(a.name)), [agentCatalog, agentsOn]); // usable and on in this project
   const [planPending, setPlanPending] = useState(false); // the AI left a plan.json to review
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(project.name);
@@ -98,14 +100,17 @@ export function SidePanel({ project, runId, refreshKey, tools, onOpenPath, onLau
 
   useEffect(() => { api.activities(project.id).then((r) => setActivities(r.activities)).catch(() => setActivities([])); }, [project.id]);
 
+  // The catalogs of this computer (agents, operations, skills) do not change with the project's files: once per project,
+  // not at every change burst. Leaving Settings mounts this panel again, so a new agent or skill shows up then.
   useEffect(() => {
-    api.openRuns(project.id).then(setRuns).catch(() => setRuns([]));
-    Promise.all([api.agents(), api.projectAgents(project.id)])
-      .then(([list, on]) => setAgents(list.filter((a) => a.usable && on.includes(a.name))))
-      .catch(() => setAgents([]));
-    api.readPlan(project.id).then((p) => setPlanPending(Boolean(p && !p.approved))).catch(() => setPlanPending(false));
+    api.agents().then(setAgentCatalog).catch(() => setAgentCatalog([]));
     api.operations().then(setOperationList).catch(() => setOperationList([]));
     api.skills().then((list) => setSkillList(list.filter((s) => s.status === 'draft' || s.status === 'stable'))).catch(() => setSkillList([]));
+  }, [project.id]);
+  useEffect(() => {
+    api.openRuns(project.id).then(setRuns).catch(() => setRuns([]));
+    api.projectAgents(project.id).then(setAgentsOn).catch(() => setAgentsOn([]));
+    api.readPlan(project.id).then((p) => setPlanPending(Boolean(p && !p.approved))).catch(() => setPlanPending(false));
   }, [project.id, refreshKey]);
   useEffect(() => { if (operationId && !operationList.some((o) => o.id === operationId)) setOperationId(''); }, [operationList, operationId]);
 

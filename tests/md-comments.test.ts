@@ -76,3 +76,17 @@ test('the formatted editor keeps a comment when the text around it changes', () 
   assert.match(tableKept, /<!--c:c1-->uno<!--\/c:c1-->/);
   assert.equal(readComments(tableKept).comments[0].text, 'cell');
 });
+
+test('reading the comments of a text with a very long run of blank lines takes linear time and gives the same body as before', () => {
+  const block = '<!-- moki-comments\n[\n{"id":"k1","author":"ana","at":"2026-11-01T10:00:00.000Z","text":"x","replies":[]}\n]\n-->\n';
+  // The pattern before the fix, kept here to prove the new one cuts the same body.
+  const before = (text: string) => { const m = /\n*<!-- moki-comments\n([\s\S]*?)\n-->\s*$/.exec(text); return m ? text.slice(0, m.index) : text; };
+  for (const text of ['', 'a', 'a\n', `a\n\n\n${block}`, `${block}`, `\n\n${block}`, `a ${block}`, `a\n${block}\n\n`, `a\n${block}b\n${block}`, `a\n<!-- moki-comments\nnot json\n-->\n`, `a\n\n\n\n<!-- moki-comments\n-->\n`]) {
+    assert.equal(readComments(text).body, before(text), JSON.stringify(text));
+  }
+  const long = `a${'\n'.repeat(300000)}b`; // the old pattern took minutes here
+  const start = performance.now();
+  assert.equal(readComments(long).body, long);
+  assert.equal(readComments(`${long}\n\n${block}`).comments.length, 1);
+  assert.ok(performance.now() - start < 1000, `took ${performance.now() - start} ms`);
+});

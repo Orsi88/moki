@@ -10,7 +10,90 @@
 import { createRequire } from 'node:module';
 
 export interface TermSpec { file: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv; title?: string }
-const KEEP = 256 * 1024; // characters of output kept per terminal, drawn again when its tab comes back
+const KEEP = 128 * 1024; // characters of output kept per terminal, drawn again when its tab comes back
+const BATCH_MS = 16; // output is sent to the window once per frame, not once per chunk of the process
+const FLOW_HIGH = 1024 * 1024; // characters sent and not yet drawn by the window above which the process is paused
+const FLOW_LOW = 256 * 1024; // ... and below which it goes on
+const FLOW_STALL_MS = 5000; // a paused process whose window confirms nothing for this long goes on anyway
+
+// The last `keep` characters of a stream, kept as chunks: appending never rebuilds the whole text
+// (small chunks join the last one, so the list stays short) and only the head is cut.
+export function createTail(keep: number) {
+  const chunks: string[] = [];
+  let size = 0;
+  return {
+    push(data: string): void {
+      if (!data) return;
+      if (chunks.length && chunks[chunks.length - 1].length < 8192) chunks[chunks.length - 1] += data;
+      else chunks.push(data);
+      size += data.length;
+      while (size > keep) {
+        const extra = size - keep;
+        if (chunks[0].length <= extra) size -= chunks.shift()!.length;
+        else { chunks[0] = chunks[0].slice(extra); size -= extra; }
+      }
+    },
+    text: (): string => chunks.join(''),
+  };
+}
+
+// Groups what arrives within `ms` into one call of `emit`, in order. flush() sends what waits now; cancel() drops it.
+export function createBatcher(emit: (data: string) => void, ms: number) {
+  let waiting: string[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = (): void => { if (timer) clearTimeout(timer); timer = undefined; };
+  const flush = (): void => {
+    stop();
+    if (!waiting.length) return;
+    const data = waiting.join('');
+    waiting = [];
+    emit(data);
+  };
+  return {
+    add(data: string): void { waiting.push(data); timer ??= setTimeout(flush, ms); },
+    flush,
+    cancel(): void { stop(); waiting = []; },
+  };
+}
+
+// Backpressure between a process and the window drawing it: `sent(n)` counts what was sent, `acked(n)` what the window
+// confirmed drawing. Above `high` unconfirmed the process is paused, below `low` it goes on (the gap avoids flapping).
+// It never leaves a process paused for good: reset() (a window attached again), release() (no window to draw: output is
+// not counted until it confirms something again), dispose() and a window that confirms nothing for `stallMs` all resume it.
+export function createFlowControl(o: { high: number; low: number; pause: () => void; resume: () => void; stallMs?: number }) {
+  let pending = 0;
+  let paused = false;
+  let off = false; // no window is drawing: nothing is counted and nothing pauses
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clear = (): void => { if (timer) clearTimeout(timer); timer = undefined; };
+  const go = (): void => { clear(); if (!paused) return; paused = false; try { o.resume(); } catch { /* the process is gone */ } };
+  const watch = (): void => {
+    clear();
+    timer = setTimeout(() => { pending = 0; off = true; go(); }, o.stallMs ?? FLOW_STALL_MS);
+    timer.unref?.();
+  };
+  return {
+    sent(n: number): void {
+      if (off || !(n > 0)) return;
+      pending += n;
+      if (paused || pending <= o.high) return;
+      paused = true;
+      try { o.pause(); } catch { paused = false; return; } // a terminal that cannot pause just is not slowed
+      watch();
+    },
+    // The window is not trusted: anything but a finite number >= 0 counts as nothing.
+    acked(n: number): void {
+      if (!Number.isFinite(n) || n <= 0) return;
+      off = false;
+      pending = Math.max(0, pending - n);
+      if (!paused) return;
+      if (pending < o.low) go(); else watch(); // progress: the stall timer starts again
+    },
+    reset(): void { pending = 0; off = false; go(); },
+    release(): void { pending = 0; off = true; go(); },
+    dispose(): void { pending = 0; off = true; go(); },
+  };
+}
 
 // The part of node-pty used here (it is an optional dependency, so its types may be absent).
 interface IPty {
@@ -20,6 +103,8 @@ interface IPty {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(): void;
+  pause(): void;
+  resume(): void;
 }
 interface PtyModule {
   spawn(file: string, args: string[], options: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv }): IPty;
@@ -46,12 +131,12 @@ export function createTerminals(send: (channel: 'qa:term-data' | 'qa:term-exit',
   const running = new Map<string, IPty>();
   const projectOf = new Map<string, string>(); // project whose tab runs the terminal, for the status bar
   const titleOf = new Map<string, string>();
-  const output = new Map<string, string>(); // the end of each running terminal's output
+  const output = new Map<string, { tail: ReturnType<typeof createTail>; batch: ReturnType<typeof createBatcher>; flow: ReturnType<typeof createFlowControl> }>(); // the end of each running terminal's output, the output not yet sent, and its backpressure
   let next = 0;
   // Ids differ between sessions: a run started before Moki was restarted never takes a new terminal for its own.
   const session = Date.now().toString(36);
 
-  const forget = (id: string): void => { projectOf.delete(id); titleOf.delete(id); output.delete(id); };
+  const forget = (id: string): void => { projectOf.delete(id); titleOf.delete(id); output.get(id)?.batch.cancel(); output.get(id)?.flow.dispose(); output.delete(id); };
   const kill = (id: string): void => {
     prepared.delete(id);
     forget(id);
@@ -81,13 +166,13 @@ export function createTerminals(send: (channel: 'qa:term-data' | 'qa:term-exit',
         const proc = p.spawn(spec.file, spec.args, { name: 'xterm-256color', cols, rows, cwd: spec.cwd, env: spec.env ?? process.env });
         running.set(id, proc);
         projectOf.set(id, project);
-        output.set(id, '');
-        proc.onData((data) => {
-          const kept = (output.get(id) ?? '') + data;
-          output.set(id, kept.length > KEEP ? kept.slice(-KEEP) : kept);
-          send('qa:term-data', id, data);
-        });
+        // The window confirms what it drew (ack): too much unconfirmed output pauses the process so the window's queue cannot grow without end.
+        const flow = createFlowControl({ high: FLOW_HIGH, low: FLOW_LOW, pause: () => proc.pause(), resume: () => proc.resume() });
+        const stream = { tail: createTail(KEEP), batch: createBatcher((data) => { send('qa:term-data', id, data); flow.sent(data.length); }, BATCH_MS), flow };
+        output.set(id, stream);
+        proc.onData((data) => { stream.tail.push(data); stream.batch.add(data); });
         proc.onExit(({ exitCode }) => {
+          stream.batch.flush(); // the last output reaches the window before the end
           if (running.get(id) === proc) { running.delete(id); forget(id); }
           send('qa:term-exit', id, exitCode);
           onExit?.(id, project); // closed from its tab too: the project it ran for, kept here
@@ -104,7 +189,16 @@ export function createTerminals(send: (channel: 'qa:term-data' | 'qa:term-exit',
     kill,
     list: (): { id: string; pid: number; project: string; title: string }[] => [...running].map(([id, proc]) => ({ id, pid: proc.pid, project: projectOf.get(id) ?? '', title: titleOf.get(id) ?? 'Terminal' })),
     // What a running terminal printed (its last part), for a tab drawn again; null when it is not running.
-    attach: (id: string): string | null => (running.has(id) ? output.get(id) ?? '' : null),
+    // Output waiting to be sent goes first, so it reaches the tab before this answer (which already contains it) and is not drawn twice.
+    attach: (id: string): string | null => {
+      if (!running.has(id)) return null;
+      output.get(id)?.batch.flush();
+      output.get(id)?.flow.reset(); // a window that attaches counts from zero (what it did not confirm before, a reload for one, is lost)
+      return output.get(id)?.tail.text() ?? '';
+    },
+    ack: (id: string, n: number): void => { output.get(id)?.flow.acked(n); },
+    // Its tab left the screen: nobody draws the output now, so it must not wait for confirmations.
+    detach: (id: string): void => { output.get(id)?.flow.release(); },
     killAll: (): void => { for (const id of [...prepared.keys(), ...running.keys()]) kill(id); },
   };
 }

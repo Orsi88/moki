@@ -15,7 +15,9 @@ export const isCommentColor = (value: unknown): value is CommentColor => typeof 
 export interface MdReply { author: string; at: string; text: string }
 export interface MdComment extends MdReply { id: string; replies: MdReply[]; color?: CommentColor }
 
-const BLOCK = /\n*<!-- moki-comments\n([\s\S]*?)\n-->\s*$/;
+// No leading \n*: unanchored it is tried at every newline of a long run of blank lines (quadratic); the blank lines
+// before the block are walked back below instead.
+const BLOCK = /<!-- moki-comments\n([\s\S]*?)\n-->\s*$/;
 const open = (id: string) => `<!--c:${id}-->`;
 const close = (id: string) => `<!--/c:${id}-->`;
 
@@ -30,7 +32,9 @@ export function readComments(text: string): { body: string; comments: MdComment[
   try { list = JSON.parse(m[1]); } catch { /* a broken block: no comments */ }
   const comments = (Array.isArray(list) ? list : []).filter((c): c is MdComment => isReply(c) && typeof (c as MdComment).id === 'string' && /^[a-z0-9]+$/.test((c as MdComment).id))
     .map((c) => ({ id: c.id, author: c.author, at: c.at, text: c.text, replies: Array.isArray(c.replies) ? c.replies.filter(isReply) : [], ...(isCommentColor(c.color) ? { color: c.color } : {}) }));
-  return { body: text.slice(0, m.index), comments };
+  let start = m.index;
+  while (start > 0 && text[start - 1] === '\n') start--;
+  return { body: text.slice(0, start), comments };
 }
 
 function write(body: string, comments: MdComment[]): string {

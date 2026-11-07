@@ -2,74 +2,54 @@
 // process only carries the escaped source; drawing happens here. A drawing can be
 // edited and is written back into its fence. Mermaid stays source.
 import { createRoot } from 'react-dom/client';
-import { useRef, useState } from 'react';
-import { Excalidraw, exportToSvg, restore, serializeAsJSON } from '@excalidraw/excalidraw';
-import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
-import '@excalidraw/excalidraw/index.css';
 import { t } from '../i18n';
-import { mountDiagramJobs, type DiagramJob } from '../diagram-mount';
+import { mountDiagramJobs, type DiagramJob, type MermaidDrawer } from '../diagram-mount';
+import { cachedMermaid, diagramCache, diagramKey } from '../diagram-cache';
 import { type DiagramLang } from '../diagram-source';
-import { IconCheck } from './Icons';
 
-function sceneOf(source: string) {
-  const parsed = JSON.parse(source) as { type?: string; elements?: unknown[]; appState?: object; files?: never };
-  if (!parsed || parsed.type !== 'excalidraw' || !Array.isArray(parsed.elements)) throw new Error('invalid');
-  return restore({ elements: parsed.elements as never, appState: parsed.appState ?? {}, files: parsed.files ?? ({} as never) }, null, null);
+// Excalidraw is heavy: its chunk loads on the first drawing, not with the app. A
+// failed load is not kept, so the next drawing tries again.
+let ex: Promise<typeof import('./DrawingEditor')> | undefined;
+const loadEditor = () => (ex ??= import('./DrawingEditor').catch((error) => { ex = undefined; throw error; }));
+
+// Mermaid is imported on the first drawing that is not in the cache. The theme is
+// read once per mount, so every diagram of that mount uses the same one.
+function mermaidDrawer(): MermaidDrawer {
+  const theme = document.documentElement.dataset.theme !== 'light' ? 'dark' : 'neutral';
+  return cachedMermaid({
+    render: async (id, source) => {
+      const mermaid = (await import('mermaid')).default;
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, theme });
+      return (await mermaid.render(id, source)).svg;
+    },
+  }, theme);
 }
+
+const show = (host: HTMLElement, svg: string) => {
+  host.innerHTML = svg;
+  host.querySelectorAll('script').forEach((node) => node.remove());
+};
 
 export async function paintDiagram(host: HTMLElement, lang: DiagramLang, source: string) {
   if (lang === 'excalidraw') {
     await drawExcalidraw(host, source);
     return;
   }
-  const mermaid = (await import('mermaid')).default;
-  const dark = document.documentElement.dataset.theme !== 'light';
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, theme: dark ? 'dark' : 'neutral' });
-  const id = `moki${Math.random().toString(36).slice(2, 10)}`;
-  const { svg } = await mermaid.render(id, source);
-  host.innerHTML = svg;
-  host.querySelectorAll('script').forEach((node) => node.remove());
+  show(host, await mermaidDrawer().render(`moki${Math.random().toString(36).slice(2, 10)}`, source));
 }
 
+// The drawing does not depend on the app theme, so its key has none. The key is the
+// whole source: an edited drawing is another key and is drawn again.
 async function drawExcalidraw(host: HTMLElement, source: string) {
-  const restored = sceneOf(source);
-  const paper = String(restored.appState.viewBackgroundColor || '');
-  const plain = !paper || paper.toLowerCase() === '#ffffff' || paper.toLowerCase() === '#fff';
-  const svg = await exportToSvg({
-    elements: restored.elements,
-    appState: { ...restored.appState, exportBackground: !plain, viewBackgroundColor: plain ? 'transparent' : paper },
-    files: restored.files,
-    exportPadding: 16,
-  });
-  host.replaceChildren(svg);
-}
-
-function DrawingEditor({ source, onSave, onClose }: { source: string; onSave: (body: string) => void; onClose: () => void }) {
-  const api = useRef<ExcalidrawImperativeAPI | null>(null);
-  const [initial] = useState(() => {
-    try {
-      const restored = sceneOf(source);
-      return { elements: restored.elements, appState: restored.appState, files: restored.files };
-    } catch {
-      return { elements: [], appState: { viewBackgroundColor: '#ffffff' } };
-    }
-  });
-  const save = () => {
-    const ex = api.current;
-    if (!ex) return;
-    onSave(serializeAsJSON(ex.getSceneElements(), ex.getAppState(), ex.getFiles(), 'local'));
-  };
-  return (
-    <div className="drawing-editor" role="dialog" aria-label={t('Drawing')}>
-      <div className="drawing-editor-bar">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t('Cancel')}</button>
-        <button type="button" className="btn btn-icon" onClick={save} title={t('Save drawing')} aria-label={t('Save drawing')}><IconCheck size={16} /></button>
-      </div>
-      <div className="drawing-editor-canvas">
-        <Excalidraw initialData={initial} excalidrawAPI={(next) => { api.current = next; }} />
-      </div>
-    </div>
-  );
+  const key = diagramKey('excalidraw', '', source);
+  const hit = diagramCache.get(key);
+  if (hit) {
+    host.innerHTML = hit.svg;
+    return;
+  }
+  await (await loadEditor()).exportDrawing(host, source);
+  const svg = host.querySelector('svg');
+  if (svg) diagramCache.set(key, { svg: svg.outerHTML });
 }
 
 // Ctrl + scroll over the card. The same range as the +/- buttons. A passive
@@ -89,7 +69,8 @@ export function bindDiagramZoom(host: HTMLElement): () => void {
   return () => host.removeEventListener('wheel', onWheel);
 }
 
-export function openDrawing(source: string, onSave: (body: string) => void) {
+export async function openDrawing(source: string, onSave: (body: string) => void) {
+  const { DrawingEditor } = await loadEditor();
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -135,7 +116,7 @@ function zoomControl(picture: HTMLElement) {
   return bar;
 }
 
-function failed(host: HTMLElement) {
+export function failed(host: HTMLElement) {
   const note = document.createElement('p');
   note.className = 'muted small';
   note.textContent = t('This diagram could not be drawn.');
@@ -183,11 +164,11 @@ export async function mountDiagrams(root: HTMLElement, onSave?: (index: number, 
         button.addEventListener('click', (event) => {
           event.preventDefault();
           event.stopPropagation();
-          openDrawing(frame.dataset.source ?? '', (body) => {
+          void openDrawing(frame.dataset.source ?? '', (body) => {
             frame.dataset.source = body;
             onSave(job.index, 'excalidraw', body);
             void drawExcalidraw(picture, body).catch(() => failed(picture));
-          });
+          }).catch(() => failed(picture));
         });
         actions.append(button);
       }
@@ -195,16 +176,8 @@ export async function mountDiagrams(root: HTMLElement, onSave?: (index: number, 
       return picture;
     },
     draw: (picture, source) => drawExcalidraw(picture, source),
-    loadMermaid: async () => {
-      const mermaid = (await import('mermaid')).default;
-      const dark = document.documentElement.dataset.theme !== 'light';
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, theme: dark ? 'dark' : 'neutral' });
-      return { render: async (id, source) => (await mermaid.render(id, source)).svg };
-    },
-    show: (picture, svg) => {
-      picture.innerHTML = svg;
-      picture.querySelectorAll('script').forEach((node) => node.remove());
-    },
+    loadMermaid: async () => mermaidDrawer(),
+    show,
     fail: failed,
   });
 }

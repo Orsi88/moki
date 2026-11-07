@@ -19,9 +19,18 @@ await viteBuild({ configFile: join(ROOT, 'app', 'vite.config.ts'), logLevel: 'wa
 const noCanvas = { name: 'no-napi-canvas', setup: (b) => b.onLoad({ filter: /pdfjs-dist[\\/].*pdf\.mjs$/ }, (a) => ({ contents: readFileSync(a.path, 'utf8').replaceAll('require("@napi-rs/canvas")', 'require("moki-no-canvas")'), loader: 'js' })) };
 const common = { plugins: [noCanvas], bundle: true, platform: 'node', target: 'node22', sourcemap: false, logLevel: 'warning', external: ['electron', 'node-pty'] };
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'boot.ts')], outfile: join(out, 'boot.mjs'), format: 'esm', external: ['electron', './main.mjs'] });
-await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'main.ts')], outfile: join(out, 'main.mjs'), format: 'esm' });
+// main.mjs is split: pdf-lib and pdf.js (desktop/pdf-local.ts, the PDF reader of search) are dynamic
+// imports, so they live in chunks/ and only load when the first PDF is read (less memory at start).
+await esbuild({
+  ...common, entryPoints: [join(ROOT, 'desktop', 'main.ts')], outdir: out, format: 'esm', splitting: true,
+  entryNames: '[name]', chunkNames: 'chunks/[name]-[hash]', outExtension: { '.js': '.mjs' },
+});
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'preload.ts')], outfile: join(out, 'preload.cjs'), format: 'cjs' });
 await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'run-tool.ts')], outfile: join(out, 'run-tool.mjs'), format: 'esm' });
+// The parse worker (worker_threads, desktop/parse-pool.ts): its own self-contained file, unpacked from app.asar like run-tool.
+// In a worker process.argv[1] is the worker file, which would make the CLI guard of the bundled
+// scripts/xlsx.mjs and docx.mjs (import.meta.url === argv[1]) run their command line; the banner empties it first.
+await esbuild({ ...common, entryPoints: [join(ROOT, 'desktop', 'parse-worker.ts')], outfile: join(out, 'parse-worker.mjs'), format: 'esm', banner: { js: "process.argv[1] = '';" } });
 // Moki's MCP server for the AI tools the app starts (desktop/service.ts mokiServer).
 await esbuild({ ...common, entryPoints: [join(ROOT, 'ide', 'mcp', 'server.ts')], outfile: join(out, 'mcp.mjs'), format: 'esm' });
 // One picture of each diagram in an exported PDF. The installed framework has no

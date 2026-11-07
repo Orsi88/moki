@@ -68,7 +68,7 @@ export interface OpenRun { id: string; status: string; currentStep: string }
 export interface ActivityRun extends OpenRun { skill: string; workflow: string }
 
 export interface TreeNode {
-  name: string; path: string; type: 'dir' | 'file'; size?: number; children?: TreeNode[];
+  name: string; path: string; type: 'dir' | 'file'; size?: number; mtime?: number; children?: TreeNode[];
   run?: { status: string; skill: string; currentStep: string };
   mcp?: string; // MCP server row: where it is configured
   linked?: string; // the linked folder (path "@folder", shown live): its full path on this computer
@@ -84,8 +84,10 @@ export type FileContent =
     name: string; hidden: boolean; drawing: boolean; rows: (string | { n: string })[][]; truncated: boolean;
     merges: number[][]; widths: number[]; hiddenRows: number[]; hiddenCols: number[]; align: Record<string, { h?: string; v?: string; wrap?: boolean }>;
   }[] }
-  | { kind: 'image'; path: string; dataUrl: string }
-  | { kind: 'pdf'; path: string; data: string } // base64
+  // No bytes: the view loads `url` (moki-file://<token>/, granted to this window by the main process). size and mtime
+  // (last change, ms) come from one stat and are what the tree's are compared with.
+  | { kind: 'image'; path: string; url: string; size: number; mtime: number }
+  | { kind: 'pdf'; path: string; url: string; size: number; mtime: number }
   | { kind: 'binary'; path: string; size: number; openable: boolean; reason?: string };
 
 export interface RunState {
@@ -209,7 +211,8 @@ export interface GlobalAgentDetail { name: string; description: string; file: st
 export interface PlanUsage { tool: 'claude' | 'codex'; label: string; windows: { label: string; percent: number; resetsAt: number | null }[]; error?: string }
 export interface Usage {
   plans: PlanUsage[];
-  memory: { total: number; used: number; app: number; projects: { project: string; bytes: number; sessions: { id: string; bytes: number }[] }[] }; // a session is one terminal tab
+  // bytes is the figure of the bar (kind 'pss' on Linux, 'rss' elsewhere); rssBytes / appRss are always the RSS. A session is one terminal tab.
+  memory: { total: number; used: number; app: number; appRss: number; kind: 'pss' | 'rss'; projects: { project: string; bytes: number; rssBytes: number; sessions: { id: string; bytes: number; rssBytes: number }[] }[] };
 }
 
 // MCP Manager (scripts/lib/mcp.ts): one catalog per workspace; each server is global (projects: []) or for the projects listed.
@@ -250,6 +253,8 @@ export interface Bridge {
     kill(id: string): void;
     list?(project: string): Promise<TerminalRef[]>; // the terminals still running for a project (they outlive its tabs)
     attach?(id: string): Promise<string | null>; // what a running terminal printed; null when it is not running
+    ack?(id: string, bytes: number): void; // output drawn (flow control: the process pauses when too much is unconfirmed)
+    detach?(id: string): void; // the tab left the screen: output is no longer confirmed
     on(event: 'data' | 'exit', callback: (id: string, payload: string | number) => void): () => void;
   };
 }

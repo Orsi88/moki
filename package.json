@@ -26,7 +26,8 @@
     "validate": "node scripts/validate.mjs",
     "check": "node scripts/validate.mjs && node scripts/check-artifacts.mjs --all && node scripts/check-secrets.mjs --all",
     "test": "node --test",
-    "test:ui": "node scripts/build-desktop.mjs && playwright test -c tests/ui/playwright.config.ts",
+    "test:ui": "node scripts/build-desktop.mjs && node tests/ui/run.mjs",
+    "measure:memory": "node tests/perf/measure-memory.mjs",
     "bundle": "node scripts/bundle.mjs",
     "new-project": "node scripts/new-project.mjs",
     "new-run": "node scripts/new-run.mjs",
@@ -87,6 +88,7 @@
     "asarUnpack": [
       "app/dist-electron/run-tool.mjs",
       "app/dist-electron/mcp.mjs",
+      "app/dist-electron/parse-worker.mjs",
       "node_modules/node-pty/**"
     ],
     "npmRebuild": false,

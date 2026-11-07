@@ -3,27 +3,30 @@
 // the embedded terminals, and watches the open project folder so files written
 // by the AI tools appear live.
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, protocol, screen, session, shell, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { existsSync, writeFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROOT } from '../scripts/lib/repo.mjs';
-import { TOOLS, isTool, listProjects, projectRepository, projectSummary, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
-import { callService, createService } from './service.ts';
+import { ROOT, workspaceDir } from '../scripts/lib/repo.mjs';
+import { TOOLS, isProject, isTool, projectRepository, projectSummary, projectsDir, type ToolKey } from '../scripts/lib/core.ts';
+import { callService, createService, servedFile, type CallResult } from './service.ts';
+import { FILE_SCHEME, createFileGrants } from './file-protocol.ts';
 import { watchProject } from './project-watch.ts';
 import { launchInTerminal, launchTool, openFolder } from './launcher.ts';
 import { notebookKey, noteQuery, parseNoteRequest, type NoteRequest } from './notes.ts';
 import { setWorkspaceEnv } from './workspaces.ts';
 import { appChooser } from './open-with.ts';
 import { pdfcraftAvailable, runPdfcraft } from './pdfcraft.ts';
-import { runPdfLocal } from './pdf-local.ts';
 import { createTerminals, shellSpec } from './terminals.ts';
 import { memoryUsage, planUsage } from './usage.ts';
 import { fixToolPath } from './tool-path.ts';
+import { describeSwitches, resolveSwitches } from './chromium-switches.ts';
+import { createParseClient } from './parse-pool.ts';
 
 const DIST = dirname(fileURLToPath(import.meta.url)); // app/dist-electron
 const UI = join(DIST, '..', 'dist'); // app/dist, inside the app (not the framework folder)
-const ICON = join(UI, 'icon.png');
+const ICON = join(UI, 'icon-512.png'); // 512 is enough for a window icon; the 1254 px icon.png stays for the installers
 // The tool runner must be a real file on disk: in the installer it is unpacked from app.asar.
 process.env.QA_RUN_TOOL = join(DIST, 'run-tool.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 // Moki's MCP server, which the AI tools started from the app get (bundled from ide/mcp/server.ts), unpacked the same way.
@@ -51,8 +54,10 @@ const service = createService(ROOT, {
   reveal: (path) => shell.showItemInFolder(path),
   copy: (text) => clipboard.writeText(text),
   appChooser,
+  // Word and spreadsheet previews parse on a worker thread; like run-tool.mjs it is a real file, unpacked from app.asar.
+  parse: createParseClient({ workerPath: join(DIST, 'parse-worker.mjs').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`) }),
   // PDF comments and page edits: PdfCraft when it is installed, otherwise Moki itself (desktop/pdf-local.ts).
-  pdfcraft: { available: () => true, run: (steps, root) => (pdfcraftAvailable() ? runPdfcraft(steps, root) : runPdfLocal(steps, root)) },
+  pdfcraft: { available: () => true, run: (steps, root) => (pdfcraftAvailable() ? runPdfcraft(steps, root) : import('./pdf-local.ts').then((m) => m.runPdfLocal(steps, root))) },
   trash: (path) => shell.trashItem(path),
   pickFolder: async () => {
     if (!win) return null;
@@ -81,6 +86,32 @@ let searchWindow: BrowserWindow | null = null;
 let watcher: (() => void) | null = null; // stops the watch of the open project
 let linkedWatcher: (() => void) | null = null; // stops the watch of the open project's linked folder
 const noteWindows = new Map<string, BrowserWindow>();
+
+// Every custom scheme of the app goes in this one list: Electron takes the call once, before 'ready'.
+protocol.registerSchemesAsPrivileged([
+  // moki-file://<token>/: a PDF or image of the open project, read by URL with Range (desktop/file-protocol.ts).
+  { scheme: FILE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+]);
+
+// The URLs a window may read are granted by qa:call (below) and die with the window or its project.
+const files = createFileGrants({
+  workspace: () => workspaceDir(ROOT),
+  bases: (project) => (isProject(project, ROOT) ? [join(projectsDir(ROOT), project), projectRepository(project, ROOT)].filter(Boolean) : null),
+});
+const granting = new Set<number>(); // windows whose end is already watched
+
+// A PDF or image the UI reads comes with the URL it loads it from, granted to the window that asked (nothing else sends bytes).
+function withFileUrl(sender: WebContents, project: unknown, result: CallResult): CallResult {
+  const file = result.ok ? servedFile(result.value) : undefined;
+  if (!result.ok || !file) return result;
+  const url = typeof project === 'string' ? files.grant(sender.id, project, file) : null;
+  if (!url) return { ok: false, error: 'File not found.' };
+  if (!granting.has(sender.id)) {
+    granting.add(sender.id);
+    sender.once('destroyed', () => { granting.delete(sender.id); files.revokeScope(sender.id); });
+  }
+  return { ok: true, value: { ...(result.value as object), url } };
+}
 
 function isNoteWindow(contents: WebContents): boolean {
   for (const note of noteWindows.values()) if (!note.isDestroyed() && note.webContents === contents) return true;
@@ -217,6 +248,12 @@ function createWindow(): void {
 // A UI test sets this so it does not share the profile, or the single-instance lock, with the app you have open.
 if (process.env.QA_USER_DATA) app.setPath('userData', process.env.QA_USER_DATA);
 
+// Chromium switches, before 'ready': the built-in defaults (none for now) plus QA_ELECTRON_ARGS="--disable-gpu" (see chromium-switches.ts).
+const switches = resolveSwitches(process.env);
+for (const { switch: name, value } of switches.applied) app.commandLine.appendSwitch(name, value);
+if (switches.rejected.length) console.error(`QA_ELECTRON_ARGS: ignored (not allowed): ${switches.rejected.join(' ')}`);
+if (process.env.QA_PERF === '1') console.error(describeSwitches(switches));
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -231,15 +268,21 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, done) => done(false));
 
+    protocol.handle(FILE_SCHEME, async (request) => {
+      const r = await files.serve(request.method, request.url, request.headers.get('range'));
+      return new Response(r.body instanceof Readable ? (Readable.toWeb(r.body) as ReadableStream) : r.body, { status: r.status, headers: r.headers });
+    });
+
     ipcMain.handle('qa:call', async (event, method: unknown, args: unknown) => {
       if (!trusted(event) && !(fromSearch(event) && (method === 'searchExpanded' || method === 'tags' || method === 'projects'))) return { ok: false, error: 'Untrusted caller.' };
-      return callService(service, method, args);
+      const result = await callService(service, method, args);
+      return method === 'readFile' ? withFileUrl(event.sender, Array.isArray(args) ? args[0] : undefined, result) : result;
     });
 
     ipcMain.handle('qa:search-window', (event) => { if (trusted(event) && event.sender === win?.webContents) { openSearchWindow(); return true; } return false; });
     ipcMain.on('qa:search-close', (event) => { if (trusted(event) && event.sender === win?.webContents) searchWindow?.close(); });
     ipcMain.on('qa:search-open', (event, project: unknown, path: unknown) => {
-      if (!fromSearch(event) || typeof project !== 'string' || !listProjects(ROOT).includes(project)) return;
+      if (!fromSearch(event) || typeof project !== 'string' || !isProject(project, ROOT)) return;
       if (typeof path !== 'string' || path.length > 400 || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return;
       win?.webContents.send('qa:open-in-main', project, path);
       if (win?.isMinimized()) win.restore();
@@ -249,14 +292,15 @@ if (!app.requestSingleInstanceLock()) {
     // Watch one project at a time; changes are debounced and sent to the UI.
     ipcMain.handle('qa:watch', (event, project: unknown) => {
       if (!trusted(event)) return false;
+      if (typeof project === 'string' && project) files.revokeOutside(event.sender.id, project);
       watcher?.();
       watcher = null;
       linkedWatcher?.();
       linkedWatcher = null;
-      if (typeof project !== 'string' || !listProjects(ROOT).includes(project)) return false;
+      if (typeof project !== 'string' || !isProject(project, ROOT)) return false;
       const changed = () => win?.webContents.send('qa:changed', project);
       try {
-        watcher = watchProject(join(projectsDir(ROOT), project), changed);
+        watcher = watchProject(join(projectsDir(ROOT), project), changed, { maxDirs: 2000 });
       } catch { return false; }
       // The linked folder shows live in the tree too; changes in its build and dependency folders are not news.
       const linked = projectRepository(project, ROOT);
@@ -276,13 +320,13 @@ if (!app.requestSingleInstanceLock()) {
       if (!terminals.available()) return { error: 'Terminals inside the app are not available on this computer (node-pty is not installed).' };
       if (tool === '') return { terminal: { id: terminals.prepare({ ...shellSpec(ROOT), title: 'Terminal' }), title: 'Terminal' } };
       if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].command || TOOLS[tool].clipboard) return { error: 'Unknown tool.' };
-      const plugins = typeof project === 'string' && listProjects(ROOT).includes(project) ? projectSummary(project, ROOT).plugins : [];
+      const plugins = isProject(project, ROOT) ? projectSummary(project, ROOT).plugins : [];
       const r = launchInTerminal(tool, '', ROOT, terminals.prepare, plugins);
       return r.terminal ? { terminal: r.terminal } : { error: r.message };
     });
     ipcMain.handle('qa:term-start', (event, id: unknown, cols: unknown, rows: unknown, project: unknown) => {
       if (!trusted(event) || typeof id !== 'string' || !isSize(cols) || !isSize(rows)) return 'Invalid terminal.';
-      return terminals.start(id, cols, rows, typeof project === 'string' && listProjects(ROOT).includes(project) ? project : '');
+      return terminals.start(id, cols, rows, isProject(project, ROOT) ? project : '');
     });
     ipcMain.on('qa:term-input', (event, id: unknown, data: unknown) => {
       if (trusted(event) && typeof id === 'string' && typeof data === 'string' && data.length <= 1_000_000) terminals.write(id, data);
@@ -295,12 +339,17 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('qa:term-list', (event, project: unknown) => (trusted(event) && typeof project === 'string'
       ? terminals.list().filter((x) => x.project === project).map((x) => ({ id: x.id, title: x.title })) : []));
     ipcMain.handle('qa:term-attach', (event, id: unknown) => (trusted(event) && typeof id === 'string' ? terminals.attach(id) : null));
+    // Flow control: the window confirms how much output it drew (finite, >= 0, capped), or that its tab left.
+    ipcMain.on('qa:term-ack', (event, id: unknown, bytes: unknown) => {
+      if (trusted(event) && typeof id === 'string' && typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0) terminals.ack(id, Math.min(bytes, 1 << 30));
+    });
+    ipcMain.on('qa:term-detach', (event, id: unknown) => { if (trusted(event) && typeof id === 'string') terminals.detach(id); });
 
     // Status bar: plan usage of the AI tools, and memory of the computer, of Moki and of each project's terminals.
     ipcMain.handle('qa:usage', async (event, refresh: unknown) => {
       if (!trusted(event)) return null;
-      const appBytes = app.getAppMetrics().reduce((sum, m) => sum + m.memory.workingSetSize * 1024, 0);
-      const [memory, plans] = await Promise.all([memoryUsage(terminals.list(), appBytes), planUsage(refresh === true)]);
+      const appProcesses = app.getAppMetrics().map((m) => ({ pid: m.pid, kb: m.memory.workingSetSize }));
+      const [memory, plans] = await Promise.all([memoryUsage(terminals.list(), appProcesses), planUsage(refresh === true)]);
       return { memory, plans };
     });
 
@@ -319,7 +368,7 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.on('qa:notes-changed', (event) => { if (trusted(event)) win?.webContents.send('qa:notes-changed'); });
     // A note window asks the main window to show a terminal it started, or a file it mentions.
     const fromNote = (event: IpcMainEvent, project: unknown): project is string =>
-      trusted(event) && isNoteWindow(event.sender) && typeof project === 'string' && listProjects(ROOT).includes(project);
+      trusted(event) && isNoteWindow(event.sender) && isProject(project, ROOT);
     const toFront = () => { if (!win) return; if (win.isMinimized()) win.restore(); win.focus(); };
     ipcMain.on('qa:show-terminal', (event, project: unknown, id: unknown, title: unknown) => {
       if (!fromNote(event, project) || typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id) || typeof title !== 'string') return;

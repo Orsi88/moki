@@ -1002,6 +1002,8 @@
   "Plugins in this project": "Plugins de este proyecto",
   "ponytail and rtk are always on. These load only in the sessions opened from this project.": "ponytail y rtk siempre están activados. Estos solo se cargan en las sesiones abiertas desde este proyecto.",
   "Usage": "Uso",
+  "PSS (real memory)": "PSS (memoria real)",
+  "RSS (as the system reports it)": "RSS (como lo informa el sistema)",
   "Resource Manager": "Administrador de recursos",
   "Resets in {when}": "Se restablece en {when}",
   "Plan usage of the AI tools": "Uso del plan de las herramientas de IA",

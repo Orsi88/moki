@@ -26,14 +26,25 @@ export function UsageStatus({ names, terminals = [], onTerminal }: { names: Reco
   const [open, setOpen] = useState<'plans' | 'memory' | null>(null);
   const [closed, setClosed] = useState<Set<string>>(new Set()); // collapsed projects in the Resource Manager
   const load = useCallback((refresh = false) => { api.usage(refresh).then(setUsage, () => {}); }, []);
+  // Polling pace: 5 s while the memory numbers are on screen, 30 s with the window visible, 60 s hidden.
+  const watching = open === 'memory';
   useEffect(() => {
+    let timer = 0;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { load(); schedule(); }, watching ? 5000 : document.hidden ? 60_000 : 30_000);
+    };
+    const onVisibility = () => { if (!document.hidden) load(); schedule(); };
     load();
-    const timer = window.setInterval(load, 5000);
-    return () => window.clearInterval(timer);
-  }, [load]);
+    schedule();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [load, watching]);
   if (!usage) return null;
   const { plans, memory } = usage;
-  const rss = memory.app + memory.projects.reduce((n, p) => n + p.bytes, 0);
+  const measured = memory.app + memory.projects.reduce((n, p) => n + p.bytes, 0); // PSS on Linux, RSS elsewhere
+  const rss = memory.appRss + memory.projects.reduce((n, p) => n + p.rssBytes, 0);
+  const pss = memory.kind === 'pss';
   const sessions = memory.projects.reduce((n, p) => n + p.sessions.length, 0);
   const toggle = (id: string) => setClosed((s) => { const n = new Set(s); if (!n.delete(id)) n.add(id); return n; });
   const refresh = (
@@ -59,7 +70,7 @@ export function UsageStatus({ names, terminals = [], onTerminal }: { names: Reco
         </button>
       )}
       <button type="button" className="usage-trigger" onClick={() => setOpen(open === 'memory' ? null : 'memory')} title={t('Memory of the computer, of Moki and of the terminals of each project')}>
-        <IconMemory size={13} /> {size(rss)}
+        <IconMemory size={13} /> {size(measured)}
         <span className="usage-sep">·</span>
         <IconTerminal size={13} /> {sessions}
       </button>
@@ -88,11 +99,12 @@ export function UsageStatus({ names, terminals = [], onTerminal }: { names: Reco
             <div className="usage-pop" role="dialog" aria-label={t('Resource Manager')} onMouseDown={(e) => e.stopPropagation()}>
               <header className="usage-pop-head"><IconMemory size={14} /><strong>{t('Resource Manager')}</strong>{refresh}</header>
               <div className="usage-total">
-                <strong>{size(rss)}</strong> <span className="muted">Σ RSS</span>
+                <strong>{size(measured)}</strong> <span className="muted">{pss ? t('PSS (real memory)') : 'Σ RSS'}</span>
+                {pss && <span className="muted">· {size(rss)} {t('RSS (as the system reports it)')}</span>}
                 <span className="muted usage-computer">{t('Computer')} {size(memory.used)} / {size(memory.total)} ({Math.round((memory.used / memory.total) * 100)}%)</span>
               </div>
               <table>
-                <thead><tr><th>{t('Name')}</th><td>RSS</td></tr></thead>
+                <thead><tr><th>{t('Name')}</th><td>{pss ? 'PSS' : 'RSS'}</td></tr></thead>
                 <tbody>
                   <tr><th><span className="usage-twisty" />Moki</th><td>{size(memory.app)}</td></tr>
                   {memory.projects.map((p) => {

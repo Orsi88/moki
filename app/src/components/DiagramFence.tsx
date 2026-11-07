@@ -6,7 +6,7 @@ import { Node, mergeAttributes, type MarkdownToken } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import { takeDiagramFence, type DiagramLang } from '../diagram-source';
 import { t } from '../i18n';
-import { bindDiagramZoom, openDrawing, paintDiagram } from './Diagrams';
+import { bindDiagramZoom, failed, openDrawing, paintDiagram } from './Diagrams';
 import { IconEdit } from './Icons';
 
 function DiagramFenceView({ node, updateAttributes, selected }: ReactNodeViewProps) {
@@ -47,7 +47,7 @@ function DiagramFenceView({ node, updateAttributes, selected }: ReactNodeViewPro
         <span className="diagram-actions">
           {lang === 'excalidraw' && (
             <button type="button" className="icon-btn diagram-edit" title={t('Edit drawing')} aria-label={t('Edit drawing')}
-              onClick={() => openDrawing(body, (next) => updateAttributes({ body: next }))}>
+              onClick={() => { void openDrawing(body, (next) => updateAttributes({ body: next })).catch(() => { if (picture.current) failed(picture.current); }); }}>
               <IconEdit size={16} />
             </button>
           )}

@@ -2,10 +2,10 @@
 // server: projects, runs, skills, AI tool detection and request building.
 // It never executes skills itself — the AI tools do, following AGENTS.md.
 
-import { existsSync, readdirSync, statSync, copyFileSync, cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { access, readdir, readFile } from 'node:fs/promises';
+import { accessSync, constants, existsSync, readdirSync, statSync, copyFileSync, cpSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { access, readdir, readFile, stat } from 'node:fs/promises';
 import { join, basename, extname, resolve, sep } from 'node:path';
-import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { ROOT, SLUG, readJson, workspaceDir, workspaceLabel } from './repo.mjs';
 import { parseFrontmatter } from './frontmatter.mjs';
@@ -185,6 +185,12 @@ export function listProjects(root = ROOT): string[] {
   const dir = projectsDir(root);
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((d) => existsSync(join(dir, d, 'project.json'))).sort();
+}
+
+// Whether `id` is a project of this workspace: a plain folder name (no separator, not . or ..) with a project.json.
+// One stat, not a scan of every project: what the desktop's IPC handlers check on each call.
+export function isProject(id: unknown, root = ROOT): id is string {
+  return typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && !/[\\/\0]/.test(id) && existsSync(join(projectsDir(root), id, 'project.json'));
 }
 
 export function listRuns(project: string, root = ROOT): RunState[] {
@@ -597,12 +603,35 @@ export function buildPrompt({ project, activity, files = [], note = '', run = ''
 
 // ---------------------------------------------------------------- AI tools
 
-export function which(command: string): string | null {
-  try {
-    // A missing command returns at once. A hung lookup must not freeze the app (the desktop window shares this process).
-    const out = execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
-    return out.split(/\r?\n/).find(Boolean) || null;
-  } catch { return null; }
+// Where a command is, resolved in JS like `which` (POSIX) and `where` (Windows) do, with no process per lookup:
+// the first PATH folder that has a file with that name (Windows: plus a PATHEXT extension, unless the name has one);
+// a folder never counts, and on POSIX the file must be executable. `env` and `platform` are parameters for tests.
+function pathCandidates(command: string, env: NodeJS.ProcessEnv, platform: string): string[] {
+  const win = platform === 'win32';
+  const exts = win ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  const names = win && !exts.some((e) => command.toLowerCase().endsWith(e.toLowerCase())) ? exts.map((e) => command + e) : [command];
+  if (/[\\/]/.test(command)) return names; // a path, not a name: no PATH search
+  const dirs = (env.PATH ?? env.Path ?? '').split(win ? ';' : ':').map((d) => (win ? d.trim().replace(/^"(.*)"$/, '$1') : d)).filter(Boolean);
+  return dirs.flatMap((d) => names.map((n) => join(d, n)));
+}
+
+export function which(command: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
+  for (const file of pathCandidates(command, env, platform)) {
+    try {
+      if (!statSync(file).isFile()) continue;
+      if (platform !== 'win32') accessSync(file, constants.X_OK);
+      return file;
+    } catch { /* not here */ }
+  }
+  return null;
+}
+
+// Same lookup without blocking the app's main process (the desktop checks several tools at once).
+export async function whichAsync(command: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Promise<string | null> {
+  const files = pathCandidates(command, env, platform);
+  const ok = await mapLimit(files, 16, (file) => stat(file).then((s) => s.isFile() && (platform === 'win32' || access(file, constants.X_OK).then(() => true, () => false)), () => false));
+  const i = ok.findIndex(Boolean);
+  return i < 0 ? null : files[i];
 }
 
 // What the terminal tab runs to install a tool, after the user types y (null: instructions only).
@@ -613,6 +642,11 @@ export function installPlan(tool: ToolKey, platform: string = process.platform):
   return platform === 'win32'
     ? { file: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], shown: cmd }
     : { file: '/bin/sh', args: ['-c', cmd], shown: cmd };
+}
+
+export async function detectToolsAsync(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): Promise<Record<ToolKey, boolean>> {
+  const found = await Promise.all(Object.entries(TOOLS).map(async ([key, t]): Promise<[string, boolean]> => [key, t.command ? Boolean(await whichAsync(t.command, env, platform)) : true]));
+  return Object.fromEntries(found) as Record<ToolKey, boolean>;
 }
 
 export function detectTools(): Record<ToolKey, boolean> {

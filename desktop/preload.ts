@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld('qa', {
     kill: (id: string) => ipcRenderer.send('qa:term-kill', id),
     list: (project: string) => ipcRenderer.invoke('qa:term-list', project),
     attach: (id: string) => ipcRenderer.invoke('qa:term-attach', id),
+    ack: (id: string, bytes: number) => ipcRenderer.send('qa:term-ack', id, bytes),
+    detach: (id: string) => ipcRenderer.send('qa:term-detach', id),
     on: (event: 'data' | 'exit', callback: (id: string, payload: string | number) => void) => {
       const listener = (_e: IpcRendererEvent, id: string, payload: string | number) => callback(id, payload);
       ipcRenderer.on(`qa:term-${event}`, listener);

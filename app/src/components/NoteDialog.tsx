@@ -16,7 +16,8 @@ import { conversationLanguage, t } from '../i18n';
 import { preferredTool } from '../prefs';
 import { isFavorite, looseNotes, noteTitle, removeLooseNote, saveLooseNote, setFavorite, touchNote, type NoteRef } from '../side-menu';
 import { ActivityCatalog } from './ActivityCatalog';
-import { TipTapEditor, type TipTapCommand, type TipTapHandle } from './TipTapEditor';
+import { LazyTipTap } from './LazyTipTap';
+import type { TipTapCommand, TipTapHandle } from './TipTapEditor';
 import { DiagramSourceEditor } from './DiagramSourceEditor';
 import { CatIcon } from './CatIcon';
 import { ACTIVITY_CAT } from '../icons/cats';
@@ -24,6 +25,7 @@ import { FileIcon } from '../icons';
 import { IconChevron, IconCode, IconEdit, IconExternal, IconFile, IconEye, IconLink, IconNotes, IconPlay, IconRefresh, IconStar, IconTerminal, IconX } from './Icons';
 import { ToolCatalog } from './ToolCatalog';
 import { TagPicker } from './TagPicker';
+import { flushEdits } from '../debounce';
 import { TABLE_ICON, useMarkdownEditing } from './useMarkdownEditing';
 
 interface Props {
@@ -184,7 +186,15 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   // A note without a title is named after its first line.
   const nameOf = (body: string, head: string) => head.trim()
     || body.split('\n').map((l) => l.replace(/^[#>*\-\d.\s[\]xX]+/, '').trim()).find(Boolean)?.slice(0, 40) || t('Untitled note');
+  // The visual editor sends its text once typing pauses: this takes it now and keeps `latest` in step at once, since persist reads it before any render.
+  const edit = (value: string) => {
+    const now = latest.current;
+    now.text = value;
+    now.dirty = loose ? value !== now.saved || now.title !== now.savedTitle : value !== now.saved;
+    setText(value);
+  };
   const persist = (): Promise<NoteRef | null> => {
+    flushEdits();
     const run = queue.current.catch(() => null).then(async (): Promise<NoteRef | null> => {
       const now = latest.current;
       if (!now.loaded || !now.dirty) return null;
@@ -291,8 +301,10 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   // A loose note sent to a project: it becomes a note of that project and leaves the loose notes.
   const send = () => {
     if (!destination) return;
+    flushEdits();
+    const body = latest.current.text;
     setSending(true); setError('');
-    api.createNote(destination, nameOf(text, title), text)
+    api.createNote(destination, nameOf(body, title), body)
       .then((savedPath) => {
         if (favorite) setFavorite({ project: destination, path: savedPath }, true); // the star goes with the note
         if (latest.current.curLoose) removeLooseNote(latest.current.curLoose);
@@ -377,6 +389,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
   const startAi = async () => {
     if (!target || !activity || !tool) return;
     setLaunching(true); setAiMsg(''); setError('');
+    flushEdits();
     try {
       // A saved project note goes as its path (any length); otherwise its text, on one line.
       let note: string;
@@ -386,7 +399,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
       if (project && file) {
         note = t('Use my note {file} as input (read it first; the paths in it are relative to {base}).', { file: `${base}${file}`, base });
       } else {
-        const body = text.replace(/!\[[^\]]*\]\(data:[^)]*\)/g, '[image]').replace(/\s+/g, ' ').trim();
+        const body = latest.current.text.replace(/!\[[^\]]*\]\(data:[^)]*\)/g, '[image]').replace(/\s+/g, ' ').trim();
         note = `${t('My note:')} ${title.trim() ? `${title.trim()} — ` : ''}${body}`.slice(0, 1990);
         if (body.length > 1900) setAiMsg(t('Only the start of the note was sent. Save it in the project to send all of it.'));
       }
@@ -590,7 +603,7 @@ export function NoteDialog({ project, path, looseId = null, projects = [], float
           )
             : (
               <div className="note-visual">
-                <TipTapEditor ref={visual} bar={false} text={text} path={path ?? curPath ?? 'notes/note.md'} onChange={setText} />
+                <LazyTipTap ref={visual} bar={false} text={text} path={path ?? curPath ?? 'notes/note.md'} onChange={edit} />
               </div>
             )}
         </div>

@@ -9,18 +9,21 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
-  CRAFT_APPS, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, installedAgents, installedSkills, isTool, isUsable, linkedFolder, listProjects, listProjectsAsync, mapLimit, projectSummaryAsync, IO_LIMIT,
+  CRAFT_APPS, LANGUAGES, TOOLS, agentFiles, contextChoice, fileTags, listTags, removeTag, saveTag, setFileTags, setProjectTags, agentMarkdown, buildPrompt, copyToInbox, createProject, detectTools, detectToolsAsync, installedAgents, installedSkills, isProject, isTool, isUsable, linkedFolder, listProjects, listProjectsAsync, mapLimit, projectSummaryAsync, IO_LIMIT,
   listRuns, listSkills, openRuns, projectAgentsDir, projectRepository, projectSkillsDir, projectSummary, projectsDir, skillFolders, skillStatus, slugify, which, windowsSafePrompt, PROJECT_PLUGINS, STARTERS, type ProjectSummary, type Starter, type ToolKey,
 } from '../scripts/lib/core.ts';
 import { CATEGORIES, MAX_PAGE, installSkill, searchSkills } from './skill-registry.ts';
 import { checksum, chooseAsset, chooseAssets, download, latestRelease, systemFamily } from './craft-download.ts';
+import { pathReady } from './tool-path.ts';
+import { parseOffice, type OfficeParsed } from './parse-office.ts';
+import type { ParseClient } from './parse-pool.ts';
 import { extensionVersion, installExtension, mokiVsix, runCommand, toolVersion, type RunCommand } from './editor-extension.ts';
 import { LIMITS, readFolder, readZip, scan, type Scan } from './claude-import.ts';
 import { parseFrontmatter } from '../scripts/lib/frontmatter.mjs';
 import { setWorkspaceDir, workspaceDir, workspaceLabel } from '../scripts/lib/repo.mjs';
 import { searchWorkspace, searchWorkspaceExpanded } from './search.ts';
 import { activeWorkspace, addWorkspaceFolder, createWorkspace, forgetWorkspace, listWorkspaces, renameWorkspace, setActiveWorkspace, type WorkspaceInfo } from './workspaces.ts';
-import { readableInputs, docxToMarkdown } from '../scripts/lib/docx.ts';
+import { readableInputs } from '../scripts/lib/docx.ts';
 import { checkOperation, cleanOperation, formatMessage, listOperations, removeOperation, seedExample, suggestOutput, writeOperation, type OperationAgent } from '../scripts/lib/operations.ts';
 import { advance, answered, approve, canRedo, cancel, createOperationRun, decide, isOperationRun, markStarted, missingOutputs, readRun, reject, resume, retry, runEvents, startFailed, setPaused, stepExited, stepPrompt, type RunRequest } from '../scripts/lib/operation-runs.ts';
 import { markdownToHtml } from '../scripts/lib/markdown.mjs';
@@ -29,10 +32,10 @@ import { FILES_RULES, ID as ACTIVITY_ID, TARGET_KINDS, activityId, activityMarkd
 import { listTemplates, removeTemplate, saveTemplate, setProjectTemplate, templateFor } from '../scripts/lib/doc-style.mjs';
 import { agentTags, agentsOfProject, setAgentTags, setAgentsOfProject } from '../scripts/lib/agent-tags.ts';
 import { appliesTo as reaches, projectTag } from '../scripts/lib/tags.mjs';
-import { blankXlsx, xlsxSheets } from '../scripts/xlsx.mjs';
+import { blankXlsx } from '../scripts/xlsx.mjs';
 import { buildDocx } from '../scripts/docx.mjs';
 import { cleanPrompt, type LaunchResult } from './launcher.ts';
-import { isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
+import { IMAGE_LIMIT, IMAGE_TYPES, OFFICE_LIMIT, isEditable, isOpenable, openWithType, PathError, resolveInside } from './fs-guard.ts';
 import type { AppChooser } from './open-with.ts';
 import { isPageEdit, parsePdfChange, pdfScript, toComments, type PdfRunner } from './pdfcraft.ts';
 import { pdfNotes, remapPdfNotes, setPdfNotes, validPdfNote } from './pdf-notes.ts';
@@ -56,12 +59,13 @@ export interface Deps {
   saveFile?: (name: string, extension: string, title?: string) => Promise<string | null>; // native save dialog (exporting a note, downloading an app); the UI never sends paths
   craftSystem?: { platform: string; arch: string; family?: string }; // which release files fit this computer; family = 'rpm' | 'deb' | '' (tests fake it)
   pickFile?: () => Promise<string | null>; // native dialog for a .zip (an uploaded .claude); the UI never sends paths
+  parse?: ParseClient; // Word and spreadsheet previews on a worker thread (desktop/parse-pool.ts); without it they parse inline
   home?: string; // user folder for skills and agents for all projects (tests point it elsewhere)
   fetch?: typeof fetch;
   trash?: (path: string) => Promise<void>; // removing skills/agents moves them to the trash (tests delete)
   onWorkspace?: (dir: string) => void; // the active workspace changed (the app passes it to the tools it starts)
   detectTools?: () => Record<ToolKey, boolean>; // AI tools installed (tests fake it)
-  fixPath?: () => void; // reads the PATH again, so a tool installed after the app started is found (desktop/tool-path.ts)
+  fixPath?: () => void | Promise<void>; // reads the PATH again, so a tool installed after the app started is found (desktop/tool-path.ts)
   runCommand?: RunCommand; // versions and the Moki extension of the AI tools (desktop/editor-extension.ts); tests fake it
   which?: (command: string) => string | null; // where a tool's command is (tests fake it)
   killTerminal?: (id: string) => void; // stops what runs in a terminal tab of the app (cancelling an operation)
@@ -75,6 +79,7 @@ export interface TreeNode {
   path: string; // relative to the project folder, with "/" separators
   type: 'dir' | 'file';
   size?: number;
+  mtime?: number; // files: last change (ms); with size, tells the app whether a PDF/image tab must be read again
   children?: TreeNode[];
   linked?: string; // the linked folder's node (path "@folder"): its full path on this computer
   run?: { status: string; skill: string; currentStep: string };
@@ -99,8 +104,10 @@ export type FileContent =
   | { kind: 'html'; path: string; text: string } // shown rendered, read-only
   | { kind: 'docx'; path: string; html: string }
   | { kind: 'xlsx'; path: string; sheets: Sheet[] }
-  | { kind: 'image'; path: string; dataUrl: string }
-  | { kind: 'pdf'; path: string; data: string } // base64
+  // PDF and image carry no bytes: the UI loads them from `url` (moki-file://<token>, added by desktop/main.ts to a UI call and
+  // served by desktop/file-protocol.ts). size and mtime come from one stat, taken before; the app compares them with the tree's.
+  | { kind: 'image'; path: string; size: number; mtime: number; url?: string }
+  | { kind: 'pdf'; path: string; size: number; mtime: number; url?: string }
   | { kind: 'binary'; path: string; size: number; openable: boolean; reason?: string };
 
 export interface LaunchRequest {
@@ -126,18 +133,18 @@ const PLAN_FOLDER = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
 const AGENT_TEXT_LIMIT = 8000;
-const IMAGE_LIMIT = 10 * 1024 * 1024;
 const MAX_TREE_ENTRIES = 5000;
-const SHEET_ROWS = 2000; // rows and columns per sheet shown in the app; the rest only in the spreadsheet program
-const SHEET_COLS = 200;
-const OFFICE_LIMIT = 30 * 1024 * 1024;
 const OFFICE_TYPES: Record<string, 'docx' | 'xlsx'> = { '.docx': 'docx', '.docm': 'docx', '.dotx': 'docx', '.dotm': 'docx', '.xlsx': 'xlsx', '.xlsm': 'xlsx', '.xltx': 'xlsx', '.xltm': 'xlsx' };
-const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
 const TEXT_TYPES = new Set(['.txt', '.log', '.csv', '.xml', '.yaml', '.yml', '.html', '.htm', '.feature', '.ts', '.js']);
 const PROPOSALS = 'skill-proposals'; // skills drafted by the AI tool from "Create skill", waiting for review
 // Office files "New" can create, empty (the app shows them; they are edited in Excel, Word or a Craft app).
 const BLANK_FILES: Record<string, () => Uint8Array> = { '.xlsx': () => blankXlsx(), '.docx': () => buildDocx({ blocks: [] }).buffer };
 export const LINKED = '@folder'; // the linked folder in the paths of a project (see projectPath)
+// The resolved file behind a PDF/image content, for desktop/main.ts to grant its moki-file:// URL. It stays out of the
+// content itself: the UI never sees a disk path.
+const contentFiles = new WeakMap<object, string>();
+const served = (content: FileContent, file: string): FileContent => { contentFiles.set(content, file); return content; };
+export const servedFile = (content: unknown): string | undefined => (typeof content === 'object' && content ? contentFiles.get(content) : undefined);
 const SKIP_LINKED = new Set(['node_modules', '.git', '.moki-backup', 'dist', 'build', '__pycache__']); // not listed from a linked folder
 const TOP_ORDER = ['context', 'inbox', 'runs', 'notes', PROPOSALS, 'proposed-updates.md', 'activity-log.md', 'project.json', 'README.md', 'temporary'];
 const FIXED_FOLDERS = new Set(['context', 'inbox', 'runs', 'notes', 'temporary']);
@@ -169,8 +176,20 @@ export function createService(root: string, deps: Deps) {
   const failing = <T>(fn: () => T): T => { try { return fn(); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); } };
   const failingAsync = async <T>(fn: () => Promise<T>): Promise<T> => { try { return await fn(); } catch (e) { throw new ServiceError(e instanceof Error ? e.message : String(e)); } };
 
+  // Which AI tools are installed: found in JS (no process per tool), kept 30 s for as long as the PATH is the same.
+  // aiTools and an extension install forget it. Tests that fake detectTools skip the cache.
+  let toolsSeen: { at: number; path: string; found: Record<ToolKey, boolean> } | null = null;
+  const toolsCached = () => (toolsSeen && toolsSeen.path === (process.env.PATH ?? '') && Date.now() - toolsSeen.at < 30_000 ? toolsSeen.found : null);
+  const toolsStore = (found: Record<ToolKey, boolean>) => { toolsSeen = { at: Date.now(), path: process.env.PATH ?? '', found }; return found; };
+  const toolsNow = (): Record<ToolKey, boolean> => deps.detectTools?.() ?? toolsCached() ?? toolsStore(detectTools());
+  const toolsFound = async (): Promise<Record<ToolKey, boolean>> => {
+    if (deps.detectTools) return deps.detectTools();
+    await pathReady(); // the PATH read that starts with the app (desktop/tool-path.ts)
+    return toolsCached() ?? toolsStore(await detectToolsAsync());
+  };
+
   const projectDir = (id: unknown): string => {
-    if (typeof id !== 'string' || !listProjects(root).includes(id)) throw new ServiceError('Unknown project.');
+    if (!isProject(id, root)) throw new ServiceError('Unknown project.');
     return join(projectsDir(root), id);
   };
 
@@ -453,7 +472,8 @@ export function createService(root: string, deps: Deps) {
           if (run) node.run = { status: run.status, skill: String(run.skill ?? run.workflow ?? ''), currentStep: String(run.currentStep ?? '') };
           nodes.push(node);
         } else if (e.isFile()) {
-          nodes.push({ name: e.name, path, type: 'file', size: statSync(full).size });
+          const st = statSync(full);
+          nodes.push({ name: e.name, path, type: 'file', size: st.size, mtime: st.mtimeMs });
         }
       }
       return nodes;
@@ -650,49 +670,34 @@ export function createService(root: string, deps: Deps) {
     };
   }
 
-  function readFile(project: string, rel: string): FileContent {
+  function readFile(project: string, rel: string): FileContent | Promise<FileContent> {
     const file = projectPath(project, rel);
     if (!existsSync(file) || !statSync(file).isFile()) throw new ServiceError('File not found.');
     const path = posix(String(rel));
     const ext = extname(file).toLowerCase();
-    const size = statSync(file).size;
+    const stat = statSync(file); // taken before reading: a change in between only costs the app one extra read
+    const size = stat.size;
     if (OFFICE_TYPES[ext]) {
       const what = OFFICE_TYPES[ext] === 'docx' ? 'Word document' : 'spreadsheet';
       if (size > OFFICE_LIMIT) return { kind: 'binary', path, size, openable: true, reason: `${what[0].toUpperCase()}${what.slice(1)} too large to preview.` };
       const data = readFileSync(file);
       // Password-protected (and old .doc/.xls) files are not zip packages.
       if (data.subarray(0, 4).toString('hex') === 'd0cf11e0') return { kind: 'binary', path, size, openable: true, reason: `Password-protected ${what}: open it in your program.` };
-      try {
-        if (OFFICE_TYPES[ext] === 'docx') return { kind: 'docx', path, html: markdownToHtml(docxToMarkdown(data, { preview: true })) };
-        const sheets = xlsxSheets(data, { display: true }) as Omit<Sheet, 'truncated'>[];
-        return {
-          kind: 'xlsx', path, sheets: sheets.map((s) => {
-            // Everything is cut to the rows and columns shown.
-            const shown = Math.min(s.rows.length, SHEET_ROWS);
-            const inside = (r: number, c: number) => r < shown && c < SHEET_COLS;
-            return {
-              ...s,
-              rows: s.rows.slice(0, SHEET_ROWS).map((r) => r.slice(0, SHEET_COLS)),
-              truncated: s.rows.length > SHEET_ROWS || s.rows.some((r) => r.length > SHEET_COLS),
-              merges: s.merges.filter(([r, c]) => inside(r, c)).map(([r, c, r2, c2]) => [r, c, Math.min(r2, shown - 1), Math.min(c2, SHEET_COLS - 1)]),
-              widths: s.widths.slice(0, SHEET_COLS),
-              hiddenRows: s.hiddenRows.filter((r) => r < shown),
-              hiddenCols: s.hiddenCols.filter((c) => c < SHEET_COLS),
-              align: Object.fromEntries(Object.entries(s.align).filter(([key]) => inside(...(key.split(':').map(Number) as [number, number])))),
-            };
-          }),
-        };
-      } catch {
-        return { kind: 'binary', path, size, openable: true, reason: `Could not read this ${what}.` };
-      }
+      const kind = OFFICE_TYPES[ext];
+      const shape = (r: OfficeParsed): FileContent => (r.kind === 'docx' ? { kind: 'docx', path, html: r.html } : { kind: 'xlsx', path, sheets: r.sheets as Sheet[] });
+      const failed = (): FileContent => ({ kind: 'binary', path, size, openable: true, reason: `Could not read this ${what}.` });
+      // With a parse client (the desktop app) the parse runs on a worker thread and the answer is a Promise;
+      // without one (tests, other hosts) it runs inline, as before.
+      if (deps.parse) return deps.parse.parse(kind, data).then(shape).catch(failed);
+      try { return shape(parseOffice(kind, data)); } catch { return failed(); }
     }
     if (ext === '.pdf') {
       if (size > OFFICE_LIMIT) return { kind: 'binary', path, size, openable: true, reason: 'PDF too large to preview.' };
-      return { kind: 'pdf', path, data: readFileSync(file).toString('base64') };
+      return served({ kind: 'pdf', path, size, mtime: stat.mtimeMs }, file);
     }
     if (IMAGE_TYPES[ext]) {
       if (size > IMAGE_LIMIT) return { kind: 'binary', path, size, openable: true, reason: 'Image too large to preview.' };
-      return { kind: 'image', path, dataUrl: `data:${IMAGE_TYPES[ext]};base64,${readFileSync(file).toString('base64')}` };
+      return served({ kind: 'image', path, size, mtime: stat.mtimeMs }, file);
     }
     const isText = ext === '.md' || ext === '.json' || TEXT_TYPES.has(ext);
     if (!isText) return { kind: 'binary', path, size, openable: isOpenable(file) };
@@ -773,6 +778,7 @@ export function createService(root: string, deps: Deps) {
       if (typeof value !== 'string' || !value.trim()) throw new ServiceError('Give the project a name.');
       const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       writeFileSync(file, `${JSON.stringify({ ...data, name: value.trim() }, null, 2)}\n`);
+      projectsScan = null; // the list the app reloads next must show the new name, not the scan kept for PROJECTS_TTL_MS
       return projectSummary(project, root);
     },
     setProjectDescription: (project: string, value: unknown) => {
@@ -780,6 +786,7 @@ export function createService(root: string, deps: Deps) {
       if (typeof value !== 'string' || value.length > 2000) throw new ServiceError('Description must be text of at most 2000 characters.');
       const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
       writeFileSync(file, `${JSON.stringify({ ...data, description: value.trim() }, null, 2)}\n`);
+      projectsScan = null; // see setProjectName
       return projectSummary(project, root);
     },
 
@@ -809,7 +816,7 @@ export function createService(root: string, deps: Deps) {
       if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].clipboard || !TOOLS[tool].command) throw new ServiceError('Choose an IDE (VS Code or Cursor).');
       const folder = projectRepository(project, root);
       if (!folder || !existsSync(folder)) throw new ServiceError('This project has no linked folder.');
-      if (!(deps.detectTools ?? detectTools)()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
+      if (!toolsNow()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
       await failingAsync(() => runCmd(TOOLS[tool].command!, [folder], 15_000));
       return true;
     },
@@ -855,13 +862,13 @@ export function createService(root: string, deps: Deps) {
     contextChoice: (project: string) => { projectDir(project); return contextChoice(project, root); },
     // The magnifier: projects and text files of the active workspace, by text and/or tags.
     search: (query: unknown, tags: unknown) => searchWorkspace(root, String(query ?? ''), Array.isArray(tags) ? tags.map(String).slice(0, 20) : []),
-    searchExpanded: (query: unknown, tags: unknown, project?: unknown) => searchWorkspaceExpanded(root, String(query ?? ''), Array.isArray(tags) ? tags.map(String).slice(0, 20) : [], typeof project === 'string' && listProjects(root).includes(project) ? project : undefined),
+    searchExpanded: (query: unknown, tags: unknown, project?: unknown) => searchWorkspaceExpanded(root, String(query ?? ''), Array.isArray(tags) ? tags.map(String).slice(0, 20) : [], isProject(project, root) ? project : undefined),
 
     skills: () => listSkills(root),
 
     // Every activity, or the ones a project sees (by tags); favorites first in the app.
     activities: (project?: unknown) => {
-      const id = typeof project === 'string' && listProjects(root).includes(project) ? project : undefined;
+      const id = isProject(project, root) ? project : undefined;
       const stars = favorites(root);
       return { activities: listActivities(root, id).filter(isPickable).map((a) => activityInfo(a, id, stars)), languages: LANGUAGES };
     },
@@ -915,8 +922,8 @@ export function createService(root: string, deps: Deps) {
       return setFavorite(a.id, on === true, root);
     },
 
-    integrations: () => {
-      const available = (deps.detectTools ?? detectTools)();
+    integrations: async () => {
+      const available = await toolsFound();
       return (Object.keys(TOOLS) as ToolKey[]).map((k) => ({
         id: k, label: TOOLS[k].label, hint: TOOLS[k].hint ?? '', command: TOOLS[k].command ?? '',
         kind: TOOLS[k].chat ? 'chat' : TOOLS[k].print ? 'print' : TOOLS[k].clipboard ? 'editor' : 'terminal',
@@ -928,8 +935,9 @@ export function createService(root: string, deps: Deps) {
     // Settings › My AIs: the PATH read again, then where each terminal tool and editor is, its version
     // and, in the editors that take it, the Moki extension's version ('' = unknown or not installed).
     aiTools: async () => {
-      deps.fixPath?.();
-      const available = (deps.detectTools ?? detectTools)();
+      await deps.fixPath?.();
+      toolsSeen = null;
+      const available = await toolsFound();
       const keys = (Object.keys(TOOLS) as ToolKey[]).filter((k) => TOOLS[k].command);
       return Promise.all(keys.map(async (k) => {
         const found = available[k];
@@ -945,11 +953,12 @@ export function createService(root: string, deps: Deps) {
     // linked folder (or Moki's folder), where the extension finds the project.
     installMokiExtension: async (tool: unknown, project?: unknown) => {
       if (typeof tool !== 'string' || !isTool(tool) || !TOOLS[tool].mokiExtension) throw new ServiceError('This tool does not take the Moki extension.');
-      if (!(deps.detectTools ?? detectTools)()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
+      if (!toolsNow()[tool]) throw new ServiceError(`${TOOLS[tool].label} is not installed on this computer.`);
       const linked = typeof project === 'string' && project ? (projectDir(project), projectRepository(project, root)) : null;
       const folder = linked && existsSync(linked) ? linked : root;
       const vsix = await failingAsync(() => mokiVsix(root, appVersion(), tmpdir(), doFetch));
       await failingAsync(() => installExtension(tool, vsix, runCmd));
+      toolsSeen = null;
       await runCmd(TOOLS[tool].command!, [folder], 15_000);
       return { version: await extensionVersion(tool, runCmd), folder };
     },
@@ -1156,7 +1165,7 @@ export function createService(root: string, deps: Deps) {
       if (check.errors.length) throw new ServiceError(`This operation cannot start: ${check.errors.map(formatMessage).join(' ')}`);
       if (!check.order.length) throw new ServiceError('This operation has no steps.');
       const r = (raw ?? {}) as { tools?: unknown; answers?: unknown; context?: unknown };
-      const installed = (deps.detectTools ?? detectTools)();
+      const installed = toolsNow();
       const tools: Record<string, string> = {};
       for (const sid of check.order) {
         const tool = String((r.tools as Record<string, unknown> | undefined)?.[sid] ?? '');
@@ -1245,7 +1254,7 @@ export function createService(root: string, deps: Deps) {
       const tool = typeof ai === 'string' ? ai : '';
       if (tool) {
         if (!(AGENT_AIS as readonly string[]).includes(tool)) throw new ServiceError('Choose an AI tool for every step.');
-        if (!(deps.detectTools ?? detectTools)()[tool as ToolKey]) throw new ServiceError(`${TOOLS[tool as ToolKey].label} is not installed on this computer.`);
+        if (!toolsNow()[tool as ToolKey]) throw new ServiceError(`${TOOLS[tool as ToolKey].label} is not installed on this computer.`);
       }
       return failing(() => retry(runDir(project, runId), tool));
     },
@@ -1326,7 +1335,7 @@ export function createService(root: string, deps: Deps) {
 
     // MCP servers configured where the AI tools start (a project's linked folder, or the framework root), for the agent forms.
     knownMcps: (project?: unknown) => {
-      const id = typeof project === 'string' && listProjects(root).includes(project) ? project : null;
+      const id = isProject(project, root) ? project : null;
       const managed = (id ? enabledServers(id, root) : listServers(root)).map((s) => s.id);
       return [...new Set([...managed, ...mcpServers(id).map((n) => n.name)])].sort((a, b) => a.localeCompare(b));
     },
@@ -1376,7 +1385,7 @@ export function createService(root: string, deps: Deps) {
       return { saved, replaced, problems };
     },
     // Servers configured in the AI tools' own files (for "Import into Moki").
-    foundMcpServers: (project?: unknown) => foundServers(typeof project === 'string' && listProjects(root).includes(project) ? project : null),
+    foundMcpServers: (project?: unknown) => foundServers(isProject(project, root) ? project : null),
     // The project's servers in a tool's format, copied to paste where Moki does not put them.
     copyMcpConfig: (project: string, tool: unknown) => {
       projectDir(project);
@@ -2002,7 +2011,7 @@ export function createService(root: string, deps: Deps) {
     },
 
     launch: (req: LaunchRequest) => {
-      const project = typeof req?.project === 'string' && listProjects(root).includes(req.project) ? req.project : null;
+      const project = isProject(req?.project, root) ? req.project : null;
       if (!project) throw new ServiceError('Unknown project.');
       const activity = String(req.activity ?? '');
       const trackingId = req.trackingId;

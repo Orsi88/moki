@@ -42,3 +42,9 @@ export const OPEN_WITH_TYPES: Record<string, string> = {
   '.pdf': 'application/pdf',
 };
 export const openWithType = (file: string): string | undefined => OPEN_WITH_TYPES[extname(file).toLowerCase()];
+
+// What the app previews, and how large: the one rule readFile (desktop/service.ts) and the moki-file:// protocol
+// (desktop/file-protocol.ts) both follow. A PDF is held to OFFICE_LIMIT.
+export const OFFICE_LIMIT = 30 * 1024 * 1024;
+export const IMAGE_LIMIT = 10 * 1024 * 1024;
+export const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };

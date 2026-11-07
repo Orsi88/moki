@@ -6,7 +6,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { spawnSync } from 'node:child_process';
-import { callService, createService, ServiceError, type FileContent, type TreeNode } from '../desktop/service.ts';
+import { callService, createService, ServiceError, servedFile, type FileContent, type TreeNode } from '../desktop/service.ts';
 import { PathError, resolveInside, isEditable, isOpenable } from '../desktop/fs-guard.ts';
 import { launchInTerminal, pluginArgs, scriptFor, windowsStartArgs, type LaunchResult } from '../desktop/launcher.ts';
 import type { TermSpec } from '../desktop/terminals.ts';
@@ -22,7 +22,7 @@ import { formatNumber } from '../scripts/lib/numfmt.mjs';
 import { zip } from '../scripts/lib/zip.mjs';
 import { buildXlsx } from '../scripts/xlsx.mjs';
 import { ROOT } from '../scripts/lib/repo.mjs';
-import { CRAFT_APPS, craftAssetEndings, createProject, installPlan, linuxPackageFamily, pickCraftAssets, slugify, TOOLS, windowsSafePrompt, type ToolKey } from '../scripts/lib/core.ts';
+import { CRAFT_APPS, craftAssetEndings, createProject, installPlan, isProject, linuxPackageFamily, pickCraftAssets, slugify, TOOLS, windowsSafePrompt, type ToolKey } from '../scripts/lib/core.ts';
 
 // Fixture: a framework root with a few skills, the project template and one project.
 const root = mkdtempSync(join(tmpdir(), 'qa-desktop-'));
@@ -123,11 +123,11 @@ test('tree lists the project, hides dot files and annotates activities', () => {
   assert.throws(() => service.tree('../..'), /Unknown project/);
 });
 
-test('readFile renders each kind of file', () => {
+test('readFile renders each kind of file', async () => {
   const md = service.readFile('acme', `runs/${RUN}/outputs/report.md`) as Extract<FileContent, { kind: 'markdown' }>;
   assert.equal(md.kind, 'markdown');
   assert.match(md.html, /<h1>Report<\/h1>/);
-  assert.equal(service.readFile('acme', 'project.json').kind, 'json');
+  assert.equal((await service.readFile('acme', 'project.json')).kind, 'json');
   const docx = service.readFile('acme', 'inbox/us-2.docx') as Extract<FileContent, { kind: 'docx' }>;
   assert.match(docx.html, /US-1 Renovação/);
   const xlsx = service.readFile('acme', 'inbox/cases.xlsx') as Extract<FileContent, { kind: 'xlsx' }>;
@@ -136,7 +136,23 @@ test('readFile renders each kind of file', () => {
       widths: [64, 140, 63, 64, 64, 64, 64, 64], hiddenRows: [1], hiddenCols: [2], align: { '0:0': { h: 'center', v: 'middle', wrap: true } }, rows: [['Id'], [], ['', 'Renova&ção\r', { n: '42' }, 'TRUE', '00123', { n: '24/10/2026' }, { n: formatNumber(0.875, '0.00%') }, '=SUM(C3:C3)']] }, // the app uses the system locale
     { name: 'Empty', hidden: true, drawing: false, merges: [], truncated: false, widths: [], hiddenRows: [], hiddenCols: [], align: {}, rows: [] },
   ]);
-  assert.deepEqual(service.readFile('acme', 'inbox/report.pdf'), { kind: 'pdf', path: 'inbox/report.pdf', data: Buffer.from('%PDF-1.4').toString('base64') });
+  // PDF and image carry no bytes: the main process adds the moki-file:// URL the UI loads them from (desktop/file-protocol.ts).
+  const pdf = service.readFile('acme', 'inbox/report.pdf') as Extract<FileContent, { kind: 'pdf' }>;
+  assert.deepEqual({ ...pdf }, { kind: 'pdf', path: 'inbox/report.pdf', size: Buffer.byteLength('%PDF-1.4'), mtime: pdf.mtime });
+  assert.equal(servedFile(pdf), realpathSync(join(root, 'workspace', 'projects', 'acme', 'inbox', 'report.pdf')));
+  assert.equal(servedFile({ kind: 'pdf' }), undefined, 'only what readFile returned names a file');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==', 'base64');
+  const pixel = join(root, 'workspace', 'projects', 'acme', 'inbox', 'pixel.png');
+  writeFileSync(pixel, png);
+  try {
+    const img = service.readFile('acme', 'inbox/pixel.png') as Extract<FileContent, { kind: 'image' }>;
+    assert.equal(img.kind, 'image');
+    assert.equal(img.size, png.length);
+    // The tree reports what the app compares to know whether an open PDF/image changed.
+    const node = service.tree('acme').find((n) => n.name === 'inbox')?.children?.find((n) => n.name === 'pixel.png');
+    assert.equal(node?.size, png.length);
+    assert.equal(node?.mtime, img.mtime);
+  } finally { rmSync(pixel, { force: true }); }
   assert.deepEqual(service.readFile('acme', 'inbox/page.html'), { kind: 'html', path: 'inbox/page.html', text: '<h1>Page</h1>' });
   const exe = service.readFile('acme', 'inbox/tool.exe') as Extract<FileContent, { kind: 'binary' }>;
   assert.equal(exe.kind, 'binary');
@@ -330,7 +346,7 @@ test('delete sends a file to the trash, empties a fixed folder and keeps project
   await assert.rejects(() => service.deleteEntry('acme', '../..'), ServiceError);
 });
 
-test('new files and folders: Markdown, text, empty spreadsheet and Word files, safe names, never inside activities', () => {
+test('new files and folders: Markdown, text, empty spreadsheet and Word files, safe names, never inside activities', async () => {
   const project = join(root, 'workspace', 'projects', 'acme');
   assert.equal(service.createEntry('acme', 'inbox', 'cenarios login', 'file'), 'inbox/cenarios login.md');
   assert.equal(readFileSync(join(project, 'inbox', 'cenarios login.md'), 'utf8'), '');
@@ -341,11 +357,11 @@ test('new files and folders: Markdown, text, empty spreadsheet and Word files, s
   assert.throws(() => service.createEntry('acme', 'inbox', 'cenarios login.md', 'file'), /already exists/);
   // Spreadsheets and Word documents are created empty and valid: the app reads them back.
   assert.equal(service.createEntry('acme', 'inbox', 'planilha.xlsx', 'file'), 'inbox/planilha.xlsx');
-  const sheet = service.readFile('acme', 'inbox/planilha.xlsx');
+  const sheet = await service.readFile('acme', 'inbox/planilha.xlsx');
   assert.equal(sheet.kind, 'xlsx');
   if (sheet.kind === 'xlsx') assert.deepEqual(sheet.sheets.map((x) => [x.name, x.rows.length]), [['Sheet1', 0]]);
   assert.equal(service.createEntry('acme', 'inbox', 'relatorio.docx', 'file'), 'inbox/relatorio.docx');
-  assert.equal(service.readFile('acme', 'inbox/relatorio.docx').kind, 'docx');
+  assert.equal((await service.readFile('acme', 'inbox/relatorio.docx')).kind, 'docx');
   rmSync(join(project, 'inbox', 'planilha.xlsx')); rmSync(join(project, 'inbox', 'relatorio.docx'));
   assert.throws(() => service.createEntry('acme', 'inbox', 'imagem.png', 'file'), /Only Markdown/);
   for (const bad of ['', '../fora', 'a/b', 'a\\b', '.oculto', 'nome.', 'con', 'x:y', 'a*b']) {
@@ -556,9 +572,11 @@ test('project name and description updates preserve all other project settings',
   assert.equal(renamed.id, 'acme');
   assert.equal(renamed.name, 'New title');
   assert.equal(renamed.description, before.description);
+  assert.equal((await service.projects()).find((p) => p.id === 'acme')!.name, 'New title'); // the list is not kept stale by the scan cache
   const described = service.setProjectDescription('acme', 'First line\nSecond line');
   assert.equal(described.name, 'New title');
   assert.equal(described.description, 'First line\nSecond line');
+  assert.equal((await service.projects()).find((p) => p.id === 'acme')!.description, 'First line\nSecond line');
   const after = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
   assert.deepEqual({ ...after, name: data.name, description: data.description }, data);
   service.setProjectName('acme', before.name);
@@ -1330,7 +1348,7 @@ test('open a folder: the name is yours, the folder shows live in the tree as @fo
     assert.deepEqual(top.children?.map((n) => n.path), ['@folder/docs']);
     assert.deepEqual(top.children?.[0].children?.map((n) => n.path), ['@folder/docs/us-1.md']);
     // Its files are read, edited and created in place; nothing outside it is reachable.
-    assert.equal(svc.readFile('loja-virtual', '@folder/docs/us-1.md').kind, 'markdown');
+    assert.equal((await svc.readFile('loja-virtual', '@folder/docs/us-1.md')).kind, 'markdown');
     svc.writeFile('loja-virtual', '@folder/docs/us-1.md', '# US-1 v2');
     assert.equal(readFileSync(join(folder, 'docs', 'us-1.md'), 'utf8'), '# US-1 v2');
     assert.equal(svc.createEntry('loja-virtual', '@folder/docs', 'us-2', 'file'), '@folder/docs/us-2.md');
@@ -2473,7 +2491,7 @@ test('craft apps: the files for each system, recommended first, and exact names 
     assert.deepEqual(list.find((s) => s.id === 'codex'), { id: 'codex', available: false, path: '', version: '', extension: '' });
     assert.deepEqual(list.find((s) => s.id === 'vscode'), { id: 'vscode', available: true, path: '/bin/code', version: '1.99.0', extension: '' });
     assert.ok(runs.every(([command]) => command === 'claude' || command === 'code'));
-    const info = svc.integrations().find((t) => t.id === 'vscode');
+    const info = (await svc.integrations()).find((t) => t.id === 'vscode');
     assert.equal(info?.download, 'https://code.visualstudio.com/Download');
     assert.equal(info?.mokiExtension, 'supported');
   });
@@ -2517,3 +2535,41 @@ test('craft apps: the files for each system, recommended first, and exact names 
     } finally { rmSync(join(root, 'release'), { recursive: true, force: true }); }
   });
 }
+
+// A project id from the UI is checked with one stat (isProject), not by listing every project.
+test('project ids: only a plain folder name with a project.json is a project', () => {
+  mkdirSync(join(root, 'workspace', 'projects', 'no-json'), { recursive: true }); // a folder is not a project without project.json
+  for (const id of ['', '.', '..', '../acme', 'acme/..', '../../acme', 'a/b', 'a\\b', 'acme/', '/acme', 'acme\0', 'nope', 'no-json', 'ACME-missing', 42, null, undefined, {}, ['acme']]) {
+    assert.equal(isProject(id, root), false, JSON.stringify(id));
+    assert.throws(() => service.tree(id as string), /Unknown project/, JSON.stringify(id));
+  }
+  assert.equal(isProject('acme', root), true);
+  assert.ok(service.tree('acme').length > 0);
+  const other = mkdtempSync(join(tmpdir(), 'qa-other-'));
+  try { assert.equal(isProject('acme', other), false, 'another workspace does not know it'); } finally { rmSync(other, { recursive: true, force: true }); }
+});
+
+// Finding the AI tools: no detectTools fake, so the real PATH lookup runs, kept 30 s by the service.
+test('my AIs: tools are found through PATH, kept while it is the same, and aiTools looks again', async () => {
+  const bin = mkdtempSync(join(tmpdir(), 'qa-tools-'));
+  const savedPath = process.env.PATH;
+  const exe = join(bin, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+  writeFileSync(exe, '#!/bin/sh\nexit 0\n');
+  chmodSync(exe, 0o755);
+  process.env.PATH = bin;
+  try {
+    const svc = createService(root, { ...noLaunch, runCommand: async () => '1.0.0\n' });
+    const claude = async () => (await svc.integrations()).find((t) => t.id === 'claude')?.available;
+    assert.equal(await claude(), true);
+    assert.equal((await svc.integrations()).find((t) => t.id === 'codex')?.available, false);
+    rmSync(exe);
+    assert.equal(await claude(), true, 'kept: the folder is not scanned again within 30 s');
+    assert.equal((await svc.aiTools()).find((t) => t.id === 'claude')?.available, false, 'aiTools forgets and looks again');
+    assert.equal(await claude(), false);
+    writeFileSync(exe, '#!/bin/sh\nexit 0\n');
+    chmodSync(exe, 0o755);
+    assert.equal(await claude(), false, 'still kept');
+    process.env.PATH = `${bin}${process.platform === 'win32' ? ';' : ':'}${tmpdir()}`; // a new PATH is a new lookup
+    assert.equal(await claude(), true);
+  } finally { process.env.PATH = savedPath; rmSync(bin, { recursive: true, force: true }); }
+});

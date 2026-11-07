@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { TOOLS, copyToClipboard, which, type ToolKey } from '../scripts/lib/core.ts';
 import type { TermSpec } from './terminals.ts';
-import { fixToolPath } from './tool-path.ts';
+import { fixToolPathSync, pathPending } from './tool-path.ts';
 
 export interface LaunchResult { opened: boolean; message: string; copied?: boolean; terminal?: { id: string; title: string } }
 
@@ -54,7 +54,7 @@ export function detached(cmd: string, args: string[], options: { shell?: boolean
 // one line of developer instructions (one line: launcher scripts drop line breaks).
 // `plugins` are the ones the project turned on (project.json plugins: caveman, superpowers).
 export function pluginArgs(tool: ToolKey, root: string, plugins: string[] = []): string[] {
-  const node = tool === 'codex' || Boolean(which('node')); // the Claude hooks run on Node
+  const node = tool === 'codex' || Boolean(whichFixed('node')); // the Claude hooks run on Node
   const rtk = Boolean(which('rtk'));
   const caveman = node && plugins.includes('caveman');
   const superpowers = plugins.includes('superpowers'); // its hook runs on bash and skips itself without it
@@ -68,6 +68,13 @@ export function pluginArgs(tool: ToolKey, root: string, plugins: string[] = []):
   return ['-c', `developer_instructions=${lines.join(' ')}`];
 }
 
+// The command's path. Launching is synchronous, so it cannot wait for the PATH read that runs after the app starts
+// (desktop/tool-path.ts): on a miss while that read is running, or when `retry` (a missing tool that can be installed,
+// maybe installed since), it reads the PATH once here, blocking, as the app did before.
+function whichFixed(command: string, retry = false): string | null {
+  return which(command) ?? (retry || pathPending() ? (fixToolPathSync(), which(command)) : null);
+}
+
 const LINUX_TERMINALS: [string, string[]][] = [
   ['x-terminal-emulator', ['-e']], ['gnome-terminal', ['--']], ['konsole', ['-e']], ['xfce4-terminal', ['-x']], ['xterm', ['-e']],
 ];
@@ -77,7 +84,7 @@ export const launchTool: Launcher = (tool, prompt, root, plugins = [], extra = [
   if (!t.command || !t.args) throw new Error(`${t.label} is not started from the app.`);
   const hint = t.install ? ` Install it: ${t.install.docs}` : '';
   // Windows: a terminal tool with an install option goes through run-tool, which offers to install it.
-  if (!which(t.command) && !(process.platform === 'win32' && !t.clipboard && t.install)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).${hint}` };
+  if (!whichFixed(t.command) && !(process.platform === 'win32' && !t.clipboard && t.install)) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).${hint}` };
 
   if (t.clipboard) {
     const copied = copyToClipboard(prompt);
@@ -135,7 +142,7 @@ export function launchInTerminal(tool: ToolKey, prompt: string, root: string, pr
   const t = TOOLS[tool];
   if (!t.command || !t.args || t.clipboard) throw new Error(`${t.label} does not run in a terminal.`);
   // A missing tool that can be installed starts run-tool in the tab, which asks the user first.
-  const found = which(t.command) ?? (t.install ? (fixToolPath(), which(t.command)) : null);
+  const found = whichFixed(t.command, Boolean(t.install));
   if (!found && !t.install) return { opened: false, message: `${t.label} is not installed on this computer (command "${t.command}" not found).` };
   const args = [...pluginArgs(tool, root, plugins), ...extra, ...(prompt ? t.args(cleanPrompt(prompt)) : [])];
   const win = process.platform === 'win32';

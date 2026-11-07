@@ -1,13 +1,10 @@
 // A note with a Mermaid fence and an Excalidraw fence draws both in the reading view.
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { createRequire } from 'node:module';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from '../../scripts/lib/repo.mjs';
-
-const require = createRequire(import.meta.url);
-const electronPath = require('electron') as string;
+import { launchMoki } from './launch.ts';
 
 const NOTE = `\`\`\`mermaid
 flowchart LR
@@ -42,14 +39,7 @@ test.beforeAll(async () => {
   writeFileSync(join(project, 'notes', 'diagram.md'), NOTE);
   writeFileSync(join(project, 'inbox', 'plain.md'), 'Olá\n');
 
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
-  env.QA_ROOT = root;
-  env.QA_USER_DATA = userData;
-  env.QA_OPEN_PROJECT = 'acme';
-  delete env.QA_SCREENSHOT;
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ executablePath: electronPath, cwd: ROOT, args: [ROOT], env, timeout: 60_000 });
+  app = await launchMoki({ QA_ROOT: root, QA_USER_DATA: userData, QA_OPEN_PROJECT: 'acme' });
   page = await app.firstWindow();
   page.on('pageerror', (err) => console.error('pageerror', err.message));
   await page.evaluate(() => {
@@ -72,7 +62,7 @@ test('a note draws the Mermaid chart and the Excalidraw scene', async () => {
   await page.locator('.tree-row[title="notes"]').click();
   await page.locator('.tree-row[title="notes/diagram.md"]').click();
   const note = page.locator('.note-dialog');
-  await note.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
+  // A note opens straight in its formatted editor: the diagrams are drawn there.
   const pictures = note.locator('.diagram-picture');
   await expect(pictures).toHaveCount(2);
   await expect(pictures.first().locator('svg')).toBeVisible();
@@ -91,7 +81,7 @@ test('typing / in a Markdown file lists commands, including the diagrams', async
   await page.locator('.tree-row[title="inbox"]').click();
   await page.locator('.tree-row[title="inbox/plain.md"]').click();
   await page.getByRole('button', { name: 'Editar (Ctrl+E)' }).click();
-  const visual = page.getByRole('textbox', { name: 'Editor visual de Markdown' });
+  const visual = page.locator('.tiptap-body');
   await visual.click();
   await page.keyboard.press('Control+End');
   await page.keyboard.press('Enter');
@@ -102,11 +92,16 @@ test('typing / in a Markdown file lists commands, including the diagrams', async
   await expect(commands.getByRole('option', { name: 'Desenho' })).toBeVisible();
   await commands.getByRole('option', { name: 'Diagrama' }).click();
   await expect(visual.locator('svg')).toBeVisible();
-  const after = visual.locator('.diagram + p');
+  const after = visual.locator('.node-diagramFence + p'); // the React node view wraps the .diagram card in its own element
   await after.click();
   await page.keyboard.type('depois');
   await expect(after).toContainText('depois');
   await page.keyboard.press('Enter');
   await page.keyboard.type('linha');
-  await expect(visual.locator('.diagram ~ p').nth(1)).toContainText('linha');
+  await expect(visual.locator('.node-diagramFence ~ p').nth(1)).toContainText('linha');
+
+  // Saved, the file keeps the fence as Markdown; an unsaved tab would also keep the window from closing (beforeunload).
+  await page.locator('.doc-bar').getByRole('button', { name: 'Salvar' }).click();
+  const saved = join(root, 'workspace', 'projects', 'acme', 'inbox', 'plain.md');
+  await expect.poll(() => readFileSync(saved, 'utf8')).toMatch(/```mermaid\n[\s\S]+\n```[\s\S]*depois[\s\S]*linha/);
 });

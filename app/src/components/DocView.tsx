@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
 import { api, type FileContent, type OpenWithApps } from '../api';
 import { t } from '../i18n';
 import { IconChat, IconChevron, IconCode, IconEdit, IconExternal, IconEye, IconMore, IconRefresh, IconTag } from './Icons';
@@ -9,7 +9,7 @@ import { MarkdownBody } from './MarkdownBody';
 import { MarkdownComments } from './MarkdownComments';
 import { readComments } from '../md-comments';
 import { recall, remember } from '../prefs';
-import { TipTapEditor } from './TipTapEditor';
+import { LazyTipTap, warmTipTap } from './LazyTipTap';
 import { DiagramSourceEditor } from './DiagramSourceEditor';
 
 interface Props {
@@ -114,15 +114,14 @@ function SheetView({ sheets }: { sheets: Sheet[] }) {
   );
 }
 
-// Chromium's own PDF viewer (pages, zoom, search, print), in a frame with no access to the app.
-function PdfView({ data, title }: { data: string; title: string }) {
-  const [url, setUrl] = useState('');
-  useEffect(() => {
-    const next = URL.createObjectURL(new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: 'application/pdf' }));
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [data]);
-  return url ? <iframe className="pdf-view" src={url} title={title} /> : null;
+// Chromium's own PDF viewer (pages, zoom, search, print), in a frame with no access to the app, from the file's URL.
+function PdfView({ url, title }: { url: string; title: string }) {
+  return <iframe className="pdf-view" src={url} title={title} />;
+}
+
+// An image from its moki-file:// URL: the file is read by the page, never copied into it.
+function ImageView({ url, alt }: { url: string; alt: string }) {
+  return <div className="image-view"><img src={url} alt={alt} /></div>;
 }
 
 // The page rendered by Chromium in a sandboxed frame: no scripts, forms or navigation, its own origin.
@@ -167,7 +166,12 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
   // The comment column of a .md file, opened or closed from the bar (remembered), as for a PDF.
   const [commentsOff, setCommentsOffState] = useState(() => recall('qa-md-comments') === 'closed');
   const setCommentsOff = (off: boolean) => { setCommentsOffState(off); remember('qa-md-comments', off ? 'closed' : 'open'); };
-  const commentCount = content.kind === 'markdown' && onCommit ? readComments(draft).comments.length : 0;
+  // Only the reading view shows the count: not read (a regex over the whole text) on every change while editing.
+  const canComment = Boolean(onCommit);
+  const commentCount = useMemo(() => (content.kind === 'markdown' && canComment && mode === 'preview' ? readComments(draft).comments.length : 0), [content.kind, canComment, mode, draft]);
+  const renewPdf = useCallback(() => (project
+    ? api.readFile(project, content.path).then((c) => { if (c.kind !== 'pdf') throw new Error(content.path); return c.url; })
+    : Promise.reject(new Error(content.path))), [project, content.path]);
   const kept = openWith?.kept ?? null;
   const ext = content.path.slice(content.path.lastIndexOf('.')).toLowerCase();
   const openTitle = kept ? t('Open with {tool}', { tool: kept.name }) : t('Open with the default program');
@@ -207,7 +211,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
           {content.kind === 'markdown' && (
             <div className="view-toggle" role="group" aria-label={t('Markdown view')}>
               <button type="button" className={mode === 'preview' ? 'on' : ''} aria-pressed={mode === 'preview'} onClick={() => onMode('preview')} title={t('Reading view (Ctrl+E)')} aria-label={t('Reading view (Ctrl+E)')}><IconEye size={16} /></button>
-              <button type="button" className={mode === 'edit' ? 'on' : ''} aria-pressed={mode === 'edit'} onClick={() => onMode('edit')} title={t('Edit (Ctrl+E)')} aria-label={t('Edit (Ctrl+E)')}><IconEdit size={15} /></button>
+              <button type="button" className={mode === 'edit' ? 'on' : ''} aria-pressed={mode === 'edit'} onPointerEnter={warmTipTap} onFocus={warmTipTap} onClick={() => onMode('edit')} title={t('Edit (Ctrl+E)')} aria-label={t('Edit (Ctrl+E)')}><IconEdit size={15} /></button>
             </div>
           )}
           {content.kind === 'markdown' && mode === 'edit' && <button type="button" className={`icon-btn${sourceMode ? ' on' : ''}`}
@@ -240,7 +244,7 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
         )}
         {content.kind === 'markdown' && mode === 'edit' && (content.editable
           ? sourceMode ? <MarkdownEditor value={draft} onChange={onDraft} />
-            : <TipTapEditor key={content.path} text={draft} path={content.path} onChange={onDraft} />
+            : <LazyTipTap key={content.path} text={draft} path={content.path} onChange={onDraft} />
           : <pre className="plain">{content.text}</pre>)}
         {content.kind === 'text' && (content.editable
           ? <textarea className="editor" spellCheck value={draft} onChange={(e) => onDraft(e.target.value)} />
@@ -254,10 +258,10 @@ export function DocView({ content, project, mode, draft, dirty, saving, onDraft,
         )}
         {content.kind === 'xlsx' && <SheetView key={content.path} sheets={content.sheets} />}
         {content.kind === 'pdf' && (project && onPdfSaved
-          ? <PdfDoc key={content.path} project={project} path={content.path} data={content.data} native={<PdfView data={content.data} title={content.path} />} onSaved={onPdfSaved} />
-          : <PdfView data={content.data} title={content.path} />)}
+          ? <PdfDoc key={content.path} project={project} path={content.path} url={content.url} renew={renewPdf} native={<PdfView url={content.url} title={content.path} />} onSaved={onPdfSaved} />
+          : <PdfView url={content.url} title={content.path} />)}
         {content.kind === 'html' && <HtmlView text={content.text} title={content.path} />}
-        {content.kind === 'image' && <div className="image-view"><img src={content.dataUrl} alt={content.path} /></div>}
+        {content.kind === 'image' && <ImageView url={content.url} alt={content.path} />}
         {content.kind === 'binary' && (
           <div className="binary-view">
             <FileIcon name={content.path} size={40} />

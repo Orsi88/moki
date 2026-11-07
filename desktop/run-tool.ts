@@ -9,7 +9,7 @@ import { openSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { TOOLS, installPlan, isTool, which, type ToolKey } from '../scripts/lib/core.ts';
-import { fixToolPath } from './tool-path.ts';
+import { fixToolPathSync } from './tool-path.ts';
 
 interface LaunchFile { command: string; args: string[]; cwd: string; title: string; tool?: string }
 
@@ -61,7 +61,7 @@ function offerInstall(req: LaunchFile, tool: ToolKey): void {
     if (!/^\s*y(es)?\s*$/i.test(String(d))) { waitForKey('Not installed. Close this tab, or open another AI from the + menu.'); return; }
     const r = spawnSync(plan.file, plan.args, { stdio: consoleStdio() });
     if (r.status !== 0) { waitForKey(`The installer failed (exit ${r.status ?? r.error?.message ?? 'unknown'}). Try the instructions above.`); return; }
-    fixToolPath();
+    fixToolPathSync();
     const path = which(req.command);
     if (path) start(req, path);
     else waitForKey(`Installed, but "${req.command}" is not on this app's PATH yet. Restart Moki and open it again.`);

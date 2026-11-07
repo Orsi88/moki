@@ -8,14 +8,16 @@ import { readFile } from 'node:fs/promises';
 import { freemem, homedir, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { memoryKbByPid, type ReadSmaps } from './proc-memory.ts';
 
 const run = promisify(execFile);
 const C_LOCALE = { ...process.env, LC_ALL: 'C', LANG: 'C' };
 
 export interface PlanWindow { label: string; percent: number; resetsAt: number | null }
 export interface PlanUsage { tool: 'claude' | 'codex'; label: string; windows: PlanWindow[]; error?: string }
-export interface ProjectMemory { project: string; bytes: number; sessions: { id: string; bytes: number }[] } // a session is one terminal tab
-export interface MemoryUsage { total: number; used: number; app: number; projects: ProjectMemory[] }
+// bytes is the figure of the status bar: PSS on Linux, RSS (working set) elsewhere (kind); rssBytes is always the RSS.
+export interface ProjectMemory { project: string; bytes: number; rssBytes: number; sessions: { id: string; bytes: number; rssBytes: number }[] } // a session is one terminal tab
+export interface MemoryUsage { total: number; used: number; app: number; appRss: number; kind: 'pss' | 'rss'; projects: ProjectMemory[] }
 
 // '5h', '7d', '30d' from a window length in seconds.
 export const windowLabel = (seconds: number): string => (seconds % 86400 === 0 ? `${seconds / 86400}d` : `${Math.round(seconds / 3600)}h`);
@@ -108,23 +110,26 @@ export function parseProcesses(out: string): Map<number, { ppid: number; kb: num
   return rows;
 }
 
-// Memory of a process and everything it started (the shell, the AI tool, its helpers).
-export function treeBytes(rows: Map<number, { ppid: number; kb: number }>, root: number): number {
+// A process and everything it started (the shell, the AI tool, its helpers), once each; only the ones in rows.
+export function treePids(rows: Map<number, { ppid: number; kb: number }>, root: number): number[] {
   const children = new Map<number, number[]>();
   for (const [pid, { ppid }] of rows) children.set(ppid, [...(children.get(ppid) ?? []), pid]);
-  let kb = 0;
   const seen = new Set<number>();
   const queue = [root];
   for (let pid = queue.pop(); pid !== undefined; pid = queue.pop()) {
     if (seen.has(pid)) continue;
     seen.add(pid);
-    kb += rows.get(pid)?.kb ?? 0;
     queue.push(...(children.get(pid) ?? []));
   }
-  return kb * 1024;
+  return [...seen].filter((pid) => rows.has(pid));
 }
 
-async function processes(): Promise<string> {
+// RSS of that tree.
+export function treeBytes(rows: Map<number, { ppid: number; kb: number }>, root: number): number {
+  return treePids(rows, root).reduce((kb, pid) => kb + (rows.get(pid)?.kb ?? 0), 0) * 1024;
+}
+
+async function readProcesses(): Promise<string> {
   try {
     if (process.platform !== 'win32') return (await run('ps', ['-A', '-o', 'pid=,ppid=,rss='], { env: C_LOCALE, timeout: 5000, maxBuffer: 10 << 20 })).stdout;
     return (await run('powershell.exe', ['-NoProfile', '-Command',
@@ -132,6 +137,17 @@ async function processes(): Promise<string> {
     { timeout: 10_000, maxBuffer: 10 << 20, windowsHide: true })).stdout;
   } catch { return ''; }
 }
+
+// Keeps the answer of load() for ttl ms (the status bar can ask more than once in a few seconds).
+export function ttlCache<T>(load: () => Promise<T>, ttl: number, now: () => number = Date.now): () => Promise<T> {
+  let last: { at: number; value: Promise<T> } | null = null;
+  return () => {
+    if (!last || now() - last.at >= ttl) last = { at: now(), value: load() };
+    return last.value;
+  };
+}
+
+const processes = ttlCache(readProcesses, 2500);
 
 // Memory the system can still give out: free memory alone hides the reclaimable cache on Linux and macOS.
 async function available(): Promise<number> {
@@ -146,20 +162,39 @@ async function available(): Promise<number> {
   return freemem();
 }
 
-// appBytes: Electron's own processes (app.getAppMetrics), which the terminals are not part of.
-export async function memoryUsage(terminals: { id: string; pid: number; project: string }[], appBytes: number): Promise<MemoryUsage> {
-  const [out, free] = await Promise.all([terminals.length ? processes() : Promise.resolve(''), available()]);
+export interface AppProcess { pid: number; kb: number } // one Electron process: its pid and working set (RSS) in kB
+export interface MemoryOptions { platform?: NodeJS.Platform; readSmaps?: ReadSmaps; ps?: () => Promise<string> } // injectable for tests
+
+// app: Electron's own processes (app.getAppMetrics), which the terminals are not part of; a plain number is their
+// RSS in bytes when the pids are not known. On Linux the memory of those processes and of every terminal tree is
+// PSS (see proc-memory.ts) so the bar does not mix measures; macOS and Windows keep the RSS / working set as before.
+export async function memoryUsage(terminals: { id: string; pid: number; project: string }[], app: number | AppProcess[], opts: MemoryOptions = {}): Promise<MemoryUsage> {
+  const kind = (opts.platform ?? process.platform) === 'linux' ? 'pss' : 'rss';
+  const [out, free] = await Promise.all([terminals.length ? (opts.ps ?? processes)() : Promise.resolve(''), available()]);
   const rows = parseProcesses(out);
+  const trees = terminals.map((t) => ({ ...t, pids: treePids(rows, t.pid) }));
+  const appProcs = typeof app === 'number' ? [] : app;
+  const appRss = typeof app === 'number' ? app : appProcs.reduce((sum, p) => sum + p.kb * 1024, 0);
+  let kbOf = new Map<number, number>(); // pid -> kB of the bar's measure (PSS), only when it is not the RSS
+  if (kind === 'pss') {
+    const all = new Map<number, number>(appProcs.map((p) => [p.pid, p.kb]));
+    for (const { pids } of trees) for (const pid of pids) all.set(pid, rows.get(pid)?.kb ?? 0);
+    kbOf = await memoryKbByPid([...all].map(([pid, kb]) => ({ pid, kb })), opts.readSmaps);
+  }
+  const measure = (pids: number[], rss: number) => (kind === 'pss' ? pids.reduce((kb, pid) => kb + (kbOf.get(pid) ?? 0), 0) * 1024 : rss);
   const byProject = new Map<string, ProjectMemory>();
-  for (const { id, pid, project } of terminals) {
-    const p = byProject.get(project) ?? { project, bytes: 0, sessions: [] };
-    const bytes = treeBytes(rows, pid);
+  for (const { id, pid, project, pids } of trees) {
+    const p = byProject.get(project) ?? { project, bytes: 0, rssBytes: 0, sessions: [] };
+    const rssBytes = treeBytes(rows, pid);
+    const bytes = measure(pids, rssBytes);
     p.bytes += bytes;
-    p.sessions.push({ id, bytes });
+    p.rssBytes += rssBytes;
+    p.sessions.push({ id, bytes, rssBytes });
     byProject.set(project, p);
   }
   const projects = [...byProject.values()].sort((a, b) => b.bytes - a.bytes);
   for (const p of projects) p.sessions.sort((a, b) => b.bytes - a.bytes);
   const total = totalmem();
-  return { total, used: Math.max(0, total - free), app: appBytes, projects };
+  const appBytes = kind === 'pss' && appProcs.length ? measure(appProcs.map((p) => p.pid), appRss) : appRss;
+  return { total, used: Math.max(0, total - free), app: appBytes, appRss, kind, projects };
 }

@@ -29,17 +29,29 @@ import { CraftDownloads } from '../components/CraftDownloads';
 import { FileIcon } from '../icons';
 import { Ribbon } from '../components/Ribbon';
 import { Settings, type SettingsTab } from './Settings';
+import { flushEdits } from '../debounce';
+import { needsReread, stampOf, type Stamp } from '../tab-refresh';
+import { throttle } from '../throttle';
 import { parseActivityLaunches, type ActivityLaunch, type ActivityLaunchPhase } from '../activity-launches';
 
 interface Props { workspaceId: string; project: ProjectSummary; tools: ToolInfo[]; onHome: () => void; settings: SettingsTab | null; onSettings: (tab: SettingsTab | null) => void; onProjectChanged: () => void; launchOnOpen?: boolean; startSetup?: boolean; startNotice?: string; pendingTerminal?: TerminalRef | null; onPendingTerminal?: () => void; pendingPath?: string | null; onPendingPath?: () => void; search?: boolean; onSearch?: () => void; onFound?: (project: string, path?: string) => void; onToolsChanged: () => void }
 
-interface Tab { path: string; content: FileContent; draft: string; mode: 'preview' | 'edit'; saving: boolean }
+// seen: the tree's size/mtime of the file before the tab read it (see tab-refresh.ts).
+interface Tab { path: string; content: FileContent; draft: string; mode: 'preview' | 'edit'; saving: boolean; seen?: Stamp }
 interface TermTab extends TerminalRef { running: boolean }
 
 // The picture above the project name when nothing is open.
 const THINKING_CAT = `./${encodeURIComponent('Thoughtful Pixel Cat at Work.png')}`;
 
 const textOf = (c: FileContent): string => (c.kind === 'markdown' || c.kind === 'text' ? c.text : '');
+const findFile = (nodes: TreeNode[], path: string): TreeNode | null => {
+  for (const n of nodes) {
+    if (n.path === path) return n.type === 'file' ? n : null;
+    const found = n.children && path.startsWith(`${n.path}/`) ? findFile(n.children, path) : null;
+    if (found) return found;
+  }
+  return null;
+};
 const isDirty = (t: Tab): boolean => (t.content.kind === 'markdown' || t.content.kind === 'text') && t.content.editable && t.draft !== t.content.text;
 const sidebarWidthWithinBounds = (width: number) => Math.max(180, Math.min(720, Math.round(width)));
 
@@ -151,9 +163,12 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   const [catalog, setCatalog] = useState<Tag[]>([]);
   const [fileTags, setFileTags] = useState<Record<string, string[]>>({});
   const [noteTitles, setNoteTitles] = useState<Record<string, string>>({});
-  const loadTree = useCallback(() => {
-    api.tree(project.id).then(setTree).catch((e: Error) => setError(e.message));
+  // Resolves to the tree just loaded (null when it failed): the change handler compares the open tabs against it.
+  const treeRef = useRef<TreeNode[]>([]);
+  const loadTree = useCallback((): Promise<TreeNode[] | null> => {
+    const loaded = api.tree(project.id).then((nodes) => { treeRef.current = nodes; setTree(nodes); return nodes; }, (e: Error) => { setError(e.message); return null; });
     api.fileTags(project.id).then(setFileTags).catch(() => setFileTags({}));
+    return loaded;
   }, [project.id]);
   useEffect(() => { api.tags().then(setCatalog).catch(() => setCatalog([])); }, []);
   const tagProject = (ids: string[]) => { api.setProjectTags(project.id, ids).then(onProjectChanged).catch((e: Error) => setError(e.message)); };
@@ -170,21 +185,29 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   useEffect(() => {
     loadTree();
     void api.watch(project.id);
+    const summary = throttle(onProjectChanged, 5000);
     const off = api.onChanged((changed) => {
       if (changed !== project.id) return;
+      flushEdits(); // a text typed a moment ago counts as an edit: the tab is dirty and is not read over
       setOpsTick((n) => n + 1);
       advanceRef.current(); // a step may have just delivered its work
-      loadTree();
+      const fresh = loadTree();
       setRefreshKey((k) => k + 1);
-      onProjectChanged();
+      summary(); // the project summary re-reads every project: at most once per 5 s while the files keep changing
       for (const t of tabsRef.current) {
         if (isDirty(t)) continue;
-        api.readFile(project.id, t.path)
-          .then((content) => setTabs((all) => all.map((x) => (x.path === t.path && !isDirty(x) ? { ...x, content, draft: textOf(content) } : x))))
-          .catch(() => { /* file removed: keep the tab as it was */ });
+        // Read a tab again only when its file changed (size or mtime in the fresh tree, stamped before the read).
+        void fresh.then((nodes) => {
+          const node = nodes && findFile(nodes, t.path);
+          if (!needsReread(stampOf(t.content, t.seen), node)) return;
+          const treeStamp = node ? { size: node.size, mtime: node.mtime } : undefined;
+          api.readFile(project.id, t.path)
+            .then((content) => setTabs((all) => all.map((x) => (x.path === t.path && !isDirty(x) ? { ...x, content, draft: textOf(content), seen: stampOf(content, treeStamp) } : x))))
+            .catch(() => { /* file removed: keep the tab as it was */ });
+        });
       }
     });
-    return () => { off(); void api.watch(null); };
+    return () => { off(); summary.cancel(); void api.watch(null); };
   }, [project.id, loadTree, onProjectChanged]);
 
   const openPath = useCallback((path: string, mode: Tab['mode'] = 'preview') => {
@@ -195,21 +218,28 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
     setGraphFocus(false);
     setActiveTerm(null);
     if (tabsRef.current.some((t) => t.path === path)) { touchRecentFile(project.id, path); setActive(path); return; }
+    const node = findFile(treeRef.current, path); // taken before the read: it can only be older than the content
+    const treeStamp = node ? { size: node.size, mtime: node.mtime } : undefined;
     api.readFile(project.id, path).then((content) => {
       touchRecentFile(project.id, path);
-      setTabs((all) => [...all, { path, content, draft: textOf(content), mode: content.kind === 'markdown' ? mode : 'preview', saving: false }]);
+      setTabs((all) => [...all, { path, content, draft: textOf(content), mode: content.kind === 'markdown' ? mode : 'preview', saving: false, seen: stampOf(content, treeStamp) }]);
       setActive(path);
       // Reveal the file in the tree.
       setExpanded((s) => { const n = new Set(s); path.split('/').slice(0, -1).reduce((acc, seg) => { const p = acc ? `${acc}/${seg}` : seg; n.add(p); return p; }, ''); return n; });
     }).catch((e: Error) => setError(e.message));
   }, [project.id]);
 
-  const update = (path: string, patch: Partial<Tab>) => setTabs((all) => all.map((t) => (t.path === path ? { ...t, ...patch } : t)));
+  // tabsRef follows at once: a visual editor's pending text is flushed (flushEdits) right before save/close read it.
+  const update = (path: string, patch: Partial<Tab>) => {
+    tabsRef.current = tabsRef.current.map((t) => (t.path === path ? { ...t, ...patch } : t));
+    setTabs((all) => all.map((t) => (t.path === path ? { ...t, ...patch } : t)));
+  };
   const reloadFile = (path: string) => {
+    flushEdits();
     const current = tabsRef.current.find((item) => item.path === path);
     const name = path.split('/').pop() ?? path;
     if (current && isDirty(current) && !window.confirm(t('Reload {name}? Your unsaved edits in this file are dropped.', { name }))) return;
-    api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content), saving: false })).catch((e: Error) => setError(e.message));
+    api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content), saving: false, seen: stampOf(content, current?.seen) })).catch((e: Error) => setError(e.message));
   };
 
   // "Open with": the program kept for a file type (by extension) is a preference of this computer; the system's default never changes.
@@ -233,6 +263,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   };
 
   const save = useCallback((path: string) => {
+    flushEdits();
     const tab = tabsRef.current.find((t) => t.path === path);
     if (!tab || !isDirty(tab)) return;
     update(path, { saving: true });
@@ -250,6 +281,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   }, [project.id]);
 
   const close = useCallback((path: string) => {
+    flushEdits();
     const tab = tabsRef.current.find((t) => t.path === path);
     if (tab && isDirty(tab) && !window.confirm(t('Discard unsaved changes in {file}?', { file: path.split('/').pop() ?? path }))) return;
     setTabs((all) => {
@@ -351,6 +383,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
     setDropping(false);
     const from = e.dataTransfer.getData('application/x-moki-move');
     if (from) {
+      flushEdits(); // the tab is renamed below: its pending text must reach it under the old path
       api.moveEntry(project.id, from, folder).then((path) => {
         loadTree();
         setExpanded((s) => new Set(s).add(folder));
@@ -441,7 +474,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   };
 
   // Leaving the workspace keeps its terminals running (they come back with it); only unsaved changes ask first.
-  const canLeave = () => !(tabsRef.current.some(isDirty) && !window.confirm(t('There are unsaved changes. Leave anyway?')));
+  const canLeave = () => { flushEdits(); return !(tabsRef.current.some(isDirty) && !window.confirm(t('There are unsaved changes. Leave anyway?'))); };
 
   const goHome = () => { if (canLeave()) onHome(); };
   const hideThis = () => {
@@ -469,7 +502,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
   }, [active, activeTerm, graphFocus, note, save, close]);
 
   useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => { if (tabsRef.current.some(isDirty)) e.preventDefault(); };
+    const warn = (e: BeforeUnloadEvent) => { flushEdits(); if (tabsRef.current.some(isDirty)) e.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
@@ -665,7 +698,7 @@ export function Workspace({ workspaceId, project, tools, onHome, settings, onSet
             onLink={onLink}
             onPdfSaved={(path) => {
               if (path !== tab.path) { openPath(path); return; }
-              api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content) })).catch((e: Error) => setError(e.message));
+              api.readFile(project.id, path).then((content) => update(path, { content, draft: textOf(content), seen: stampOf(content, tab.seen) })).catch((e: Error) => setError(e.message));
             }}
             openWith={{
               kept: kept[extOf(tab.path)] ?? null,

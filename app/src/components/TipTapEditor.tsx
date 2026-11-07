@@ -1,7 +1,7 @@
 // Formatted Markdown: TipTap reads and writes the same .md file. Images, lists and
 // typing belong to the editor. The reading view and the source editor stay as they are.
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
@@ -15,10 +15,13 @@ import { EXCALIDRAW_STARTER, MERMAID_STARTER } from '../diagram-source';
 import { t } from '../i18n';
 import { encodeCommentMarks, readComments, restoreComments, type MdComment } from '../md-comments';
 import { MdCommentMark } from '../md-comment-mark';
+import { preserveSource, splitSource } from '../md-preserve';
+import { createDebouncer, onFlushEdits } from '../debounce';
 import { DiagramFence } from './DiagramFence';
 import { MokiCodeBlock } from './CodeBlockCard';
 
 const IMAGE_MAX = 1200;
+const TYPING_PAUSE = 150; // ms: the markdown is serialized and sent to the owner once typing pauses (a note can hold ~50 images as text)
 
 interface Props { text: string; path: string; onChange: (text: string) => void; bar?: boolean }
 
@@ -293,16 +296,39 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
   // The comment list is not part of the editor document. Marks stay in the text;
   // this puts the list back on every change, and drops a comment whose words were deleted.
   const comments = useRef<MdComment[]>(readComments(text).comments);
-  const restore = (markdown: string) => {
-    const next = restoreComments(markdown, comments.current);
-    comments.current = readComments(next).comments;
-    return next;
+  // The file as it was opened and what the editor drew from it (`before`): an edit rewrites only its own stretch of the file,
+  // so Windows line endings and the spacing the editor would normalize stay (md-preserve.ts).
+  const kept = useRef({ core: '', tail: '', newline: '\n', before: '' }); // set when the editor is created
+  const drawn = (current: Editor) => current.getMarkdown().replace(/\s+$/, '');
+  const fileText = (current: Editor) => {
+    const k = kept.current;
+    const after = drawn(current);
+    k.core = preserveSource(k.before, after, k.core, k.newline) ?? after.replace(/\n/g, k.newline);
+    k.before = after;
+    if (comments.current.some((c) => !k.core.includes(`<!--c:${c.id}-->`))) { // commented words were deleted: their comment goes too
+      const full = restoreComments(k.core, comments.current);
+      comments.current = readComments(full).comments;
+      k.tail = full.slice(k.core.length);
+    }
+    return k.core + k.tail;
   };
   const editorRef = useRef<Editor | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const seen = useRef(text);
   const slashRef = useRef<SlashMenu | null>(null);
   const [slash, setSlash] = useState<SlashMenu | null>(null);
+  // Serializing the whole document is the costly part of typing: done once the typing pauses, or at once by `flush`.
+  const send = () => {
+    const current = editorRef.current;
+    if (!current || current.isDestroyed) return;
+    const next = fileText(current);
+    if (next === seen.current) return;
+    seen.current = next;
+    change.current(next);
+  };
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const [typing] = useState(() => createDebouncer(() => { sendRef.current(); }, TYPING_PAUSE));
   const syncRef = useRef<(current: Editor) => void>(() => {});
   syncRef.current = (current) => {
     const found = slashAt(current);
@@ -404,18 +430,20 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
         return false;
       },
     },
-    onCreate: ({ editor: current }) => { seen.current = restore(current.getMarkdown()); },
+    onCreate: ({ editor: current }) => { kept.current = { ...splitSource(text, readComments(text).body), before: drawn(current) }; seen.current = text; },
     onSelectionUpdate: ({ editor: current }) => { syncRef.current(current); },
+    onBlur: () => { typing.flush(); },
     onUpdate: ({ editor: current, transaction }) => {
       syncRef.current(current);
-      if (!transaction.docChanged) return;
-      const next = restore(current.getMarkdown());
-      if (next === seen.current) return;
-      seen.current = next;
-      change.current(next);
+      if (transaction.docChanged) typing.call();
     },
   }, [path]);
   editorRef.current = editor;
+  // The pending text goes to the owner before it reads it (save, close a tab: flushEdits), on blur, when the path changes and on unmount.
+  useLayoutEffect(() => {
+    const off = onFlushEdits(() => typing.flush());
+    return () => { off(); typing.flush(); };
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
   useImperativeHandle(ref, () => ({
     addImages: (files) => { if (editorRef.current) void insertImages(editorRef.current, files.filter((f) => f.type.startsWith('image/'))); },
     codeBlock: () => { editorRef.current?.chain().focus().toggleCodeBlock().run(); },
@@ -426,9 +454,11 @@ export const TipTapEditor = forwardRef<TipTapHandle, Props>(function TipTapEdito
   useEffect(() => {
     if (!editor || text === seen.current) return;
     const read = readComments(text);
+    typing.cancel(); // the document is replaced: a text typed before it is not sent over it
     comments.current = read.comments;
     seen.current = text;
     editor.commands.setContent(encodeCommentMarks(read.body), { contentType: 'markdown', emitUpdate: false });
+    kept.current = { ...splitSource(text, readComments(text).body), before: drawn(editor) };
   }, [editor, text]);
 
   if (!editor) return null;

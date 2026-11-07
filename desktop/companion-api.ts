@@ -128,7 +128,7 @@ export function createCompanionApi(root: string, service: Service, host: Compani
       return service.operationPlan(project, id);
     },
     // The AI tools a step can run in: the terminal ones the agents may name, and whether each is installed.
-    aiTools: () => service.integrations().filter((t) => (AGENT_AIS as readonly string[]).includes(t.id)),
+    aiTools: async () => (await service.integrations()).filter((t) => (AGENT_AIS as readonly string[]).includes(t.id)),
     startOperation: (id, request) => act((p) => { const r = service.startOperation(p, id, request); recordUse('operations', String(id), root); return r; }),
     // Stars (shared with the app) and the most used, for the lists that show only those until you search.
     favorites: () => allFavorites(root),

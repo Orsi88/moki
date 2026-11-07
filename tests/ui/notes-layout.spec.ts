@@ -1,14 +1,11 @@
 // A loose note's formatted view is editable, its title sits beside the project
 // destination, and each start-screen section scrolls on its own.
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { createRequire } from 'node:module';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from '../../scripts/lib/repo.mjs';
-
-const require = createRequire(import.meta.url);
-const electronPath = require('electron') as string;
+import { launchMoki } from './launch.ts';
 
 let app: ElectronApplication;
 let page: Page;
@@ -34,14 +31,7 @@ test.beforeAll(async () => {
   cpSync(join(ROOT, 'activities'), join(root, 'activities'), { recursive: true });
   cpSync(join(ROOT, 'templates'), join(root, 'templates'), { recursive: true });
   for (let i = 1; i <= 14; i++) addProject(`p${i}`, `Projeto ${i}`);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
-  env.QA_ROOT = root;
-  env.QA_USER_DATA = userData;
-  env.QA_OPEN_PROJECT = 'p1';
-  delete env.QA_SCREENSHOT;
-  delete env.ELECTRON_RUN_AS_NODE;
-  app = await electron.launch({ executablePath: electronPath, cwd: ROOT, args: [ROOT], env, timeout: 60_000 });
+  app = await launchMoki({ QA_ROOT: root, QA_USER_DATA: userData, QA_OPEN_PROJECT: 'p1' });
   page = await app.firstWindow();
   page.on('pageerror', (err) => console.error('pageerror', err.message));
   await page.evaluate(() => {
@@ -109,8 +99,8 @@ test('a formatted note can be edited, with the title beside the project destinat
   expect(titleBox && destinationBox && Math.abs(titleBox.y - destinationBox.y)).toBeLessThan(8);
   expect(destinationBox && titleBox && destinationBox.x).toBeGreaterThan(titleBox.x + titleBox.width - 4);
 
-  await note.getByRole('button', { name: 'Modo de leitura (Ctrl+E)' }).click();
-  const visual = note.getByRole('textbox', { name: 'Editor visual de Markdown' });
+  // The note already opens in its formatted editor.
+  const visual = note.locator('.tiptap-body');
   await expect(visual).toBeVisible();
   await visual.click();
   await page.keyboard.type('editavel');

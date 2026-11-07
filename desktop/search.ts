@@ -4,14 +4,13 @@
 // not block the main process. The expanded search (its own window) also reads
 // Word, PDF and spreadsheets, and every file name.
 
-import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+import { open, readdir, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { IO_LIMIT, fileTags, listProjects, listProjectsAsync, mapLimit, projectSummary, projectSummaryAsync, projectsDir, type ProjectSummary } from '../scripts/lib/core.ts';
 import { workspaceDir } from '../scripts/lib/repo.mjs';
 import { docxToMarkdown } from '../scripts/lib/docx.ts';
 import { xlsxSheets } from '../scripts/xlsx.mjs';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 export interface FileHit { project: string; projectName: string; path: string; snippet: string; line: number; tags: string[] }
 export interface SearchResult { projects: ProjectSummary[]; files: FileHit[]; truncated: boolean }
@@ -22,47 +21,72 @@ const FILE_LIMIT = 1_000_000; // bytes read per file
 const HIT_LIMIT = 200;
 const PROJECTS_AT_ONCE = 8;
 const READ_BATCH = 16; // files read at once inside a project
+const SLICE_MS = 8; // continuous work before the event loop gets a turn
 
-// Every file, for the expanded search. The rail search uses walkText, which stays text files only.
-function walkAll(base: string, rel = '', all = false): string[] {
-  const dir = join(base, rel);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).sort().flatMap((name) => {
-    const path = rel ? `${rel}/${name}` : name;
-    const full = join(base, path);
-    let st;
-    try { st = lstatSync(full); } catch { return []; }
-    if (st.isSymbolicLink()) return [];
-    if (st.isDirectory()) return SKIP.has(name) || (name.startsWith('.') && name !== '.extracted') ? [] : walkAll(base, path, all);
-    return st.isFile() && (all || (TEXT.has(extname(name).toLowerCase()) && st.size <= FILE_LIMIT)) ? [path] : [];
-  });
+const skipped = (name: string) => SKIP.has(name) || (name.startsWith('.') && name !== '.extracted');
+
+// Gives the event loop a turn (terminals, IPC, windows) after `sliceMs` of continuous work.
+export function yielder(sliceMs = SLICE_MS): () => Promise<void> {
+  let from = performance.now();
+  return async () => {
+    if (performance.now() - from < sliceMs) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    from = performance.now();
+  };
+}
+
+// The first FILE_LIMIT bytes of a file, or null when it is larger: no stat, and a huge file is never loaded whole.
+async function readLimited(full: string): Promise<Buffer | null> {
+  const handle = await open(full, 'r');
+  try {
+    const { size } = await handle.stat(); // the buffer fits the file: 20k small files must not take 1 MB each
+    if (size > FILE_LIMIT) return null;
+    const buffer = Buffer.allocUnsafe(size + 1); // one more byte: a file that grew meanwhile is seen as too large
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return bytesRead > FILE_LIMIT ? null : buffer.subarray(0, bytesRead);
+  } finally { await handle.close(); }
+}
+
+function readLimitedSync(full: string): Buffer | null {
+  const fd = openSync(full, 'r');
+  try {
+    const { size } = fstatSync(fd);
+    if (size > FILE_LIMIT) return null;
+    const buffer = Buffer.allocUnsafe(size + 1);
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+    return bytesRead > FILE_LIMIT ? null : buffer.subarray(0, bytesRead);
+  } finally { closeSync(fd); }
 }
 
 // Text files of a folder tree, relative paths in name order (folders and files interleaved).
-// A size is read (stat) only for files with a text extension.
-async function walkText(base: string, rel = ''): Promise<string[]> {
+// A size is read (stat) only for symbolic links (the file size limit of a regular file is applied when it is read). `all` (the expanded search): every
+// regular file whatever its type or size, and symbolic links are not followed.
+async function walkText(base: string, rel = '', all = false): Promise<string[]> {
   const entries = await readdir(join(base, rel), { withFileTypes: true }).catch(() => []);
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const nested = await mapLimit(entries, IO_LIMIT, async (e): Promise<string[]> => {
     const path = rel ? `${rel}/${e.name}` : e.name;
+    if (all) return e.isDirectory() ? (skipped(e.name) ? [] : walkText(base, path, true)) : e.isFile() ? [path] : [];
     let dir = e.isDirectory();
     let size = 0;
-    if (e.isSymbolicLink() || (!dir && TEXT.has(extname(e.name).toLowerCase()))) {
+    if (e.isSymbolicLink()) {
       try { const st = await stat(join(base, path)); dir = st.isDirectory(); size = st.size; } catch { return []; }
-    } else if (!dir) return [];
-    if (dir) return SKIP.has(e.name) || (e.name.startsWith('.') && e.name !== '.extracted') ? [] : walkText(base, path);
+    } else if (!dir && !TEXT.has(extname(e.name).toLowerCase())) return [];
+    if (dir) return skipped(e.name) ? [] : walkText(base, path);
     return TEXT.has(extname(e.name).toLowerCase()) && size <= FILE_LIMIT ? [path] : [];
   });
   return nested.flat();
 }
 
 async function fileText(full: string, extension: string): Promise<string> {
-  if (lstatSync(full).size > FILE_LIMIT) return '';
-  if (TEXT.has(extension)) return readFileSync(full, 'utf8');
-  if (extension === '.docx') return docxToMarkdown(readFileSync(full));
-  if (extension === '.xlsx') return xlsxSheets(readFileSync(full)).map((sheet: { name: string; rows: unknown[][] }) => `${sheet.name}\n${sheet.rows.map((row) => row.join(' ')).join('\n')}`).join('\n');
+  const data = readLimitedSync(full);
+  if (!data) return '';
+  if (TEXT.has(extension)) return data.toString('utf8');
+  if (extension === '.docx') return docxToMarkdown(Buffer.from(data));
+  if (extension === '.xlsx') return xlsxSheets(Buffer.from(data)).map((sheet: { name: string; rows: unknown[][] }) => `${sheet.name}\n${sheet.rows.map((row) => row.join(' ')).join('\n')}`).join('\n');
   if (extension === '.pdf') {
-    const task = getDocument({ data: new Uint8Array(readFileSync(full)), useSystemFonts: false, verbosity: 0 });
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs'); // loaded on first PDF only
+    const task = getDocument({ data: new Uint8Array(data), useSystemFonts: false, verbosity: 0 });
     const doc = await task.promise;
     try {
       const pages: string[] = [];
@@ -95,7 +119,9 @@ export async function searchWorkspaceExpanded(root: string, query: string, tags:
     if (onlyProjects) continue;
     const marks = fileTags(id, root);
     const dir = join(projectsDir(root), id);
-    for (const path of walkAll(dir, '', true)) {
+    const turn = yielder();
+    for (const path of await walkText(dir, '', true)) {
+      await turn();
       if (workspaceDir(root) !== initialWorkspace) return { projects: [], files: [], truncated: false };
       if (path.split('/').includes('.extracted')) continue;
       if (result.files.length >= HIT_LIMIT) { result.truncated = true; return result; }
@@ -150,17 +176,20 @@ export async function searchWorkspace(root: string, query: string, tags: string[
     const dir = join(projectsDir(root), id);
     const paths = await walkText(dir);
     const hits: Hit[] = [];
+    const turn = yielder();
     for (let from = 0; from < paths.length && hits.length < HIT_LIMIT && !full(index); from += READ_BATCH) {
+      await turn();
       const batch = await Promise.all(paths.slice(from, from + READ_BATCH).map(async (path, i): Promise<Hit | null> => {
         const own = marks[path] ?? [];
         // With tags: the files tagged with them, or every file of a project tagged with them.
         if (tags.length && !hasTags(own) && !projectTagged) return null;
         if (!q) {
           if (!hasTags(own)) return null; // tags only: the files tagged themselves, not a whole project
+          try { if ((await stat(join(dir, ...path.split('/')))).size > FILE_LIMIT) return null; } catch { return null; }
           return { at: from + i, hit: { project: id, projectName: p.name, path, tags: own, ...snippet('', '') } };
         }
         let text = '';
-        try { text = await readFile(join(dir, ...path.split('/')), 'utf8'); } catch { return null; }
+        try { const data = await readLimited(join(dir, ...path.split('/'))); if (!data) return null; text = data.toString('utf8'); } catch { return null; }
         if (!path.toLowerCase().includes(q) && !text.toLowerCase().includes(q)) return null;
         return { at: from + i, hit: { project: id, projectName: p.name, path, tags: own, ...snippet(text, q) } };
       }));
